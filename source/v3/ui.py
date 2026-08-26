@@ -1,12 +1,24 @@
 # Speaking Timer-Clock v3 - LCD UI state model
 
 STATE_CLOCK = 0
+STATE_QUICK_TIMER = 1
 STATE_TIMER_EDIT_H = 10
 STATE_TIMER_EDIT_M = 11
 STATE_TIMER_EDIT_S = 12
 STATE_TIMER_RUNNING = 13
+STATE_TIMER_FINISHED = 14
 STATE_SETTINGS = 20
 STATE_SETTINGS_LANGUAGE = 21
+STATE_SETTINGS_TIME_H = 22
+STATE_SETTINGS_TIME_M = 23
+STATE_SETTINGS_TIME_S = 24
+STATE_SETTINGS_DATE_D = 25
+STATE_SETTINGS_DATE_M = 26
+STATE_SETTINGS_DATE_Y = 27
+STATE_SETTINGS_QUIET_ENABLED = 28
+STATE_SETTINGS_QUIET_START = 29
+STATE_SETTINGS_QUIET_END = 30
+STATE_SETTINGS_RTC_CORR = 31
 
 MONTH_NAMES = {
     1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "Mai", 6: "Jun",
@@ -28,15 +40,30 @@ class ClockUI:
         self.lcd = lcd
         self.state = STATE_CLOCK
         self._last_lines = (None, None)
+        self._cursor = None
 
     def set_state(self, state):
         self.state = state
         self._last_lines = (None, None)
+        self.cursor_off()
 
-    def _write(self, line1, line2):
+    def cursor_off(self):
+        if self._cursor is not None:
+            self.lcd.hide_cursor()
+            self._cursor = None
+
+    def cursor_at(self, x, y=1, blink=True):
+        wanted = (x, y, bool(blink))
+        if self._cursor != wanted:
+            if blink:
+                self.lcd.blink_cursor_on()
+            else:
+                self.lcd.show_cursor()
+            self._cursor = wanted
+        self.lcd.move_to(x, y)
+
+    def _write(self, line1, line2, cursor=None):
         lines = (fit(line1), fit(line2))
-        if lines == self._last_lines:
-            return
         if lines[0] != self._last_lines[0]:
             self.lcd.move_to(0, 0)
             self.lcd.putstr(lines[0])
@@ -44,42 +71,84 @@ class ClockUI:
             self.lcd.move_to(0, 1)
             self.lcd.putstr(lines[1])
         self._last_lines = lines
+        if cursor is None:
+            self.cursor_off()
+        else:
+            self.cursor_at(cursor[0], cursor[1], cursor[2])
 
-    def show_clock(self, now, language, sound_enabled=True, clock_mode="voice"):
-        sound = "S" if sound_enabled else "M"
+    def show_clock(self, now, sound_enabled=True, clock_mode="voice", quiet=False):
         mode = "MO" if clock_mode == "voice" else "ST"
-
-        # Normal clock screen: time first, compact operating status at right.
+        status = "M" if not sound_enabled else ("N" if quiet else "S")
         line1 = "%02d:%02d:%02d %s %s" % (
-            now["hour"], now["minute"], now["second"], mode, sound
+            now["hour"], now["minute"], now["second"], mode, status
         )
-
-        # Keep the weekday visible on the normal screen. The selected language
-        # is a setting and does not need to consume permanent LCD space.
         line2 = "%02d-%s-%04d %s" % (
             now["day"], MONTH_NAMES.get(now["month"], "???"),
             now["year"], DAY_NAMES.get(now["weekday"], "??")
         )
         self._write(line1, line2)
 
-    def show_timer_edit(self, hours, minutes, seconds, field):
-        labels = {"h": "HOUR", "m": "MIN", "s": "SEC"}
+    def show_quick_timer(self, now, hours, minutes, seconds):
+        mode = "MO" if now.get("clock_mode", "voice") == "voice" else "ST"
         self._write(
-            "SET TIMER %-4s" % labels.get(field, ""),
+            "%02d:%02d:%02d %s" % (now["hour"], now["minute"], now["second"], mode),
+            "TIMER %02d:%02d:%02d" % (hours, minutes, seconds),
+        )
+
+    def show_timer_edit(self, hours, minutes, seconds, field):
+        cursor_x = {"h": 0, "m": 3, "s": 6}.get(field, 0)
+        self._write(
+            "SET TIMER",
             "%02d:%02d:%02d" % (hours, minutes, seconds),
+            (cursor_x, 1, True),
         )
 
     def show_timer_running(self, hours, minutes, seconds):
-        # While countdown is active it owns the screen continuously. Do not
-        # alternate with the clock - the remaining time is the primary data.
-        self._write(
-            "TIMER RUNNING",
-            "%02d:%02d:%02d" % (hours, minutes, seconds),
-        )
+        self._write("TIMER RUNNING", "%02d:%02d:%02d" % (hours, minutes, seconds))
+
+    def show_timer_finished(self):
+        self._write("TIMER FINISHED", "00:00:00")
+
+    def show_volume(self, volume):
+        self._write("VOLUME", "%02d / 30" % volume)
+
+    def show_sound(self, enabled):
+        self._write("SOUND", "ON" if enabled else "OFF")
+
+    def show_clock_mode(self, clock_mode):
+        self._write("CLOCK MODE", "VOICE" if clock_mode == "voice" else "CHIMES")
+
+    def show_settings(self, index, total, label):
+        self._write("SETTINGS %d/%d" % (index + 1, total), "> " + label)
 
     def show_language(self, language):
         value = "RUSSIAN" if language == "ru" else "DEUTSCH"
-        self._write("LANGUAGE", "> " + value)
+        self._write("LANGUAGE", value, (0, 1, True))
 
-    def show_settings(self):
-        self._write("SETTINGS", "> Language")
+    def show_set_time(self, hour, minute, second, field):
+        cursor_x = {"h": 0, "m": 3, "s": 6}.get(field, 0)
+        self._write(
+            "SET TIME",
+            "%02d:%02d:%02d" % (hour, minute, second),
+            (cursor_x, 1, True),
+        )
+
+    def show_set_date(self, day, month, year, field):
+        cursor_x = {"d": 0, "m": 3, "y": 6}.get(field, 0)
+        self._write(
+            "SET DATE",
+            "%02d-%02d-%04d" % (day, month, year),
+            (cursor_x, 1, True),
+        )
+
+    def show_quiet_enabled(self, enabled):
+        self._write("QUIET MODE", "ON" if enabled else "OFF", (0, 1, True))
+
+    def show_quiet_time(self, start, hour):
+        self._write("QUIET FROM" if start else "QUIET TO", "%02d:00" % hour, (0, 1, True))
+
+    def show_rtc_correction(self, value):
+        self._write("RTC CORRECTION", "%+d sec/day" % value, (0, 1, True))
+
+    def show_message(self, line1, line2=""):
+        self._write(line1, line2)
