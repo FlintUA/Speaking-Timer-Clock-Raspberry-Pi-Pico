@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.1.0
+# Version: 3.2.0
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.2.0"
 
 import time
 from machine import Pin, I2C
@@ -46,6 +46,11 @@ from ui import (
     STATE_SETTINGS_QUIET_START,
     STATE_SETTINGS_QUIET_END,
     STATE_SETTINGS_RTC_CORR,
+    STATE_ALARM_LIST,
+    STATE_ALARM_ENABLED,
+    STATE_ALARM_HOUR,
+    STATE_ALARM_MINUTE,
+    STATE_ALARM_RINGING,
 )
 
 I2C_ADDR = 0x3F
@@ -53,6 +58,7 @@ QUICK_TIMER_TIMEOUT_MS = 2500
 TIMER_FINISHED_TIMEOUT_MS = 7000
 OVERLAY_TIMEOUT_MS = 1600
 SETTINGS_TIMEOUT_MS = 20000
+ALARM_SCREEN_TIMEOUT_MS = 30000
 TIMER_MAX_MINUTES = 240
 
 lcd = I2cLcd(
@@ -84,6 +90,15 @@ edit_quiet_enabled = config["quiet_enabled"]
 edit_quiet_start = config["quiet_start"]
 edit_quiet_end = config["quiet_end"]
 edit_rtc_corr = config["rtc_correction_sec_per_day"]
+
+alarm_index = 0
+edit_alarm_enabled = False
+edit_alarm_hour = 7
+edit_alarm_minute = 0
+active_alarm_index = None
+alarm_screen_until_ms = 0
+alarm_minute_key = None
+alarm_fired_indices = []
 
 settings_items = (
     "Language",
@@ -157,7 +172,6 @@ def days_in_month(year, month):
 
 
 def weekday_for_date(year, month, day):
-    # Sakamoto algorithm converted to Monday=1 ... Sunday=7.
     offsets = (0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4)
     y = year - (1 if month < 3 else 0)
     sunday_zero = (
@@ -233,6 +247,74 @@ def set_quick_timer_delta(direction):
     )
 
 
+def current_alarm():
+    return config["alarms"][alarm_index]
+
+
+def load_alarm_editor():
+    global edit_alarm_enabled, edit_alarm_hour, edit_alarm_minute
+    alarm = current_alarm()
+    edit_alarm_enabled = alarm["enabled"]
+    edit_alarm_hour = alarm["hour"]
+    edit_alarm_minute = alarm["minute"]
+
+
+def open_alarm_list():
+    global alarm_index
+    clear_overlay()
+    if alarm_index < 0 or alarm_index > 4:
+        alarm_index = 0
+    ui.set_state(STATE_ALARM_LIST)
+    mark_input()
+
+
+def save_alarm_editor():
+    alarm = config["alarms"][alarm_index]
+    alarm["enabled"] = bool(edit_alarm_enabled)
+    alarm["hour"] = int(edit_alarm_hour) % 24
+    alarm["minute"] = int(edit_alarm_minute) % 60
+    save_config(config)
+    print(
+        "Alarm %d saved:" % (alarm_index + 1),
+        "ON" if alarm["enabled"] else "OFF",
+        "%02d:%02d" % (alarm["hour"], alarm["minute"]),
+    )
+
+
+def alarm_return_state():
+    if timer.running:
+        return STATE_TIMER_RUNNING
+    return STATE_CLOCK
+
+
+def stop_active_alarm():
+    global active_alarm_index, alarm_screen_until_ms
+    if active_alarm_index is None:
+        return False
+    print("Alarm %d stopped" % (active_alarm_index + 1))
+    audio.clear(pause=True)
+    active_alarm_index = None
+    alarm_screen_until_ms = 0
+    ui.set_state(alarm_return_state())
+    mark_input()
+    return True
+
+
+def trigger_alarm(index):
+    global active_alarm_index, alarm_screen_until_ms
+    active_alarm_index = index
+    alarm_screen_until_ms = time.ticks_add(
+        time.ticks_ms(), ALARM_SCREEN_TIMEOUT_MS
+    )
+    clear_overlay()
+    ui.set_state(STATE_ALARM_RINGING)
+    print("Alarm %d ringing" % (index + 1))
+    if sound_enabled:
+        # Service tracks 001..005 are Alarm 1..5 in both RU and DE folders.
+        audio.clear(pause=True)
+        speech.phrase(index + 1)
+
+
 def on_volume(event):
     global volume
     if event == Rotary.ROT_CW and volume < 30:
@@ -252,7 +334,8 @@ def on_timer(event):
     global edit_time_h, edit_time_m, edit_time_s
     global edit_date_d, edit_date_m, edit_date_y
     global edit_quiet_enabled, edit_quiet_start, edit_quiet_end, edit_rtc_corr
-    global settings_index
+    global settings_index, alarm_index
+    global edit_alarm_enabled, edit_alarm_hour, edit_alarm_minute
 
     direction = 1 if event == Rotary.ROT_CW else -1
     mark_input()
@@ -268,9 +351,7 @@ def on_timer(event):
     elif ui.state == STATE_TIMER_EDIT_S:
         edit_s = _wrap(edit_s, 0, 59, direction)
     elif ui.state == STATE_SETTINGS:
-        settings_index = _wrap(
-            settings_index, 0, len(settings_items) - 1, direction
-        )
+        settings_index = _wrap(settings_index, 0, len(settings_items) - 1, direction)
     elif ui.state == STATE_SETTINGS_LANGUAGE:
         config["language"] = "de" if config["language"] == "ru" else "ru"
         speech.set_language(config["language"])
@@ -281,19 +362,13 @@ def on_timer(event):
     elif ui.state == STATE_SETTINGS_TIME_S:
         edit_time_s = _wrap(edit_time_s, 0, 59, direction)
     elif ui.state == STATE_SETTINGS_DATE_D:
-        edit_date_d = _wrap(
-            edit_date_d, 1, days_in_month(edit_date_y, edit_date_m), direction
-        )
+        edit_date_d = _wrap(edit_date_d, 1, days_in_month(edit_date_y, edit_date_m), direction)
     elif ui.state == STATE_SETTINGS_DATE_M:
         edit_date_m = _wrap(edit_date_m, 1, 12, direction)
-        edit_date_d = min(
-            edit_date_d, days_in_month(edit_date_y, edit_date_m)
-        )
+        edit_date_d = min(edit_date_d, days_in_month(edit_date_y, edit_date_m))
     elif ui.state == STATE_SETTINGS_DATE_Y:
         edit_date_y = _wrap(edit_date_y, 2023, 2099, direction)
-        edit_date_d = min(
-            edit_date_d, days_in_month(edit_date_y, edit_date_m)
-        )
+        edit_date_d = min(edit_date_d, days_in_month(edit_date_y, edit_date_m))
     elif ui.state == STATE_SETTINGS_QUIET_ENABLED:
         edit_quiet_enabled = not edit_quiet_enabled
     elif ui.state == STATE_SETTINGS_QUIET_START:
@@ -302,6 +377,14 @@ def on_timer(event):
         edit_quiet_end = _wrap(edit_quiet_end, 0, 23, direction)
     elif ui.state == STATE_SETTINGS_RTC_CORR:
         edit_rtc_corr = _wrap(edit_rtc_corr, -30, 30, direction)
+    elif ui.state == STATE_ALARM_LIST:
+        alarm_index = _wrap(alarm_index, 0, 4, direction)
+    elif ui.state == STATE_ALARM_ENABLED:
+        edit_alarm_enabled = not edit_alarm_enabled
+    elif ui.state == STATE_ALARM_HOUR:
+        edit_alarm_hour = _wrap(edit_alarm_hour, 0, 23, direction)
+    elif ui.state == STATE_ALARM_MINUTE:
+        edit_alarm_minute = _wrap(edit_alarm_minute, 0, 59, direction)
 
 
 rotary_volume.add_handler(on_volume)
@@ -310,6 +393,8 @@ rotary_timer.add_handler(on_timer)
 
 def toggle_sound():
     global sound_enabled
+    if stop_active_alarm():
+        return
     sound_enabled = not sound_enabled
     if not sound_enabled:
         audio.clear(pause=True)
@@ -339,10 +424,7 @@ def save_time_to_rtc():
         now["year"], now["month"], now["day"],
         edit_time_h, edit_time_m, edit_time_s,
     )
-    print(
-        "RTC time set:",
-        "%02d:%02d:%02d" % (edit_time_h, edit_time_m, edit_time_s),
-    )
+    print("RTC time set:", "%02d:%02d:%02d" % (edit_time_h, edit_time_m, edit_time_s))
 
 
 def save_date_to_rtc():
@@ -351,10 +433,7 @@ def save_date_to_rtc():
         edit_date_y, edit_date_m, edit_date_d,
         now["hour"], now["minute"], now["second"],
     )
-    print(
-        "RTC date set:",
-        "%02d-%02d-%04d" % (edit_date_d, edit_date_m, edit_date_y),
-    )
+    print("RTC date set:", "%02d-%02d-%04d" % (edit_date_d, edit_date_m, edit_date_y))
 
 
 def enter_selected_setting():
@@ -385,11 +464,13 @@ def enter_selected_setting():
         edit_rtc_corr = config["rtc_correction_sec_per_day"]
         ui.set_state(STATE_SETTINGS_RTC_CORR)
     else:
-        show_overlay("message", ("ALARMS", "COMING SOON"))
+        open_alarm_list()
 
 
 def timer_button():
-    if timer.running:
+    if stop_active_alarm():
+        return
+    if timer.running and ui.state == STATE_TIMER_RUNNING:
         cancel_timer()
         return
 
@@ -440,6 +521,17 @@ def timer_button():
         save_config(config)
         ui.set_state(STATE_SETTINGS)
         show_overlay("message", ("RTC CORR", "SAVED"))
+    elif ui.state == STATE_ALARM_LIST:
+        load_alarm_editor()
+        ui.set_state(STATE_ALARM_ENABLED)
+    elif ui.state == STATE_ALARM_ENABLED:
+        ui.set_state(STATE_ALARM_HOUR)
+    elif ui.state == STATE_ALARM_HOUR:
+        ui.set_state(STATE_ALARM_MINUTE)
+    elif ui.state == STATE_ALARM_MINUTE:
+        save_alarm_editor()
+        ui.set_state(STATE_ALARM_LIST)
+        show_overlay("message", ("ALARM %d" % (alarm_index + 1), "SAVED"))
     elif ui.state == STATE_TIMER_FINISHED:
         ui.set_state(STATE_CLOCK)
 
@@ -448,36 +540,45 @@ def timer_button():
 
 def timer_mode_button():
     global edit_h, edit_m, edit_s
+    if stop_active_alarm():
+        return
     if timer.running:
         return
     clear_overlay()
     if ui.state in (STATE_CLOCK, STATE_QUICK_TIMER):
         edit_h, edit_m, edit_s = timer.get_hms()
         ui.set_state(STATE_TIMER_EDIT_H)
-    elif ui.state in (
-        STATE_TIMER_EDIT_H, STATE_TIMER_EDIT_M, STATE_TIMER_EDIT_S
-    ):
+    elif ui.state in (STATE_TIMER_EDIT_H, STATE_TIMER_EDIT_M, STATE_TIMER_EDIT_S):
         ui.set_state(STATE_CLOCK)
     mark_input()
 
 
 def alarm_button():
-    show_overlay("message", ("ALARMS", "COMING SOON"))
-    print("Alarm menu: not implemented yet")
+    if stop_active_alarm():
+        return
+    if timer.running:
+        return
+    if ui.state in (STATE_ALARM_LIST, STATE_ALARM_ENABLED, STATE_ALARM_HOUR, STATE_ALARM_MINUTE):
+        ui.set_state(STATE_CLOCK)
+    else:
+        open_alarm_list()
+    mark_input()
 
 
 def mode_button():
+    if stop_active_alarm():
+        return
     if timer.running:
         return
-    config["clock_mode"] = (
-        "chime" if config["clock_mode"] == "voice" else "voice"
-    )
+    config["clock_mode"] = "chime" if config["clock_mode"] == "voice" else "voice"
     save_config(config)
     show_overlay("mode", config["clock_mode"])
     print("Clock mode:", config["clock_mode"])
 
 
 def minus_button():
+    if stop_active_alarm():
+        return
     clear_overlay()
     if timer.running:
         return
@@ -493,17 +594,18 @@ def minus_button():
         STATE_SETTINGS_RTC_CORR,
     ):
         ui.set_state(STATE_SETTINGS)
-    elif ui.state in (
-        STATE_TIMER_EDIT_H,
-        STATE_TIMER_EDIT_M,
-        STATE_TIMER_EDIT_S,
-        STATE_QUICK_TIMER,
-    ):
+    elif ui.state in (STATE_ALARM_ENABLED, STATE_ALARM_HOUR, STATE_ALARM_MINUTE):
+        ui.set_state(STATE_ALARM_LIST)
+    elif ui.state == STATE_ALARM_LIST:
+        ui.set_state(STATE_CLOCK)
+    elif ui.state in (STATE_TIMER_EDIT_H, STATE_TIMER_EDIT_M, STATE_TIMER_EDIT_S, STATE_QUICK_TIMER):
         ui.set_state(STATE_CLOCK)
     mark_input()
 
 
 def settings_button():
+    if stop_active_alarm():
+        return
     if timer.running:
         return
     clear_overlay()
@@ -559,10 +661,9 @@ def service_timer():
 
     timer.service()
     if timer.consume_finished():
-        ui.set_state(STATE_TIMER_FINISHED)
-        timer_finished_until_ms = time.ticks_add(
-            time.ticks_ms(), TIMER_FINISHED_TIMEOUT_MS
-        )
+        timer_finished_until_ms = time.ticks_add(time.ticks_ms(), TIMER_FINISHED_TIMEOUT_MS)
+        if active_alarm_index is None:
+            ui.set_state(STATE_TIMER_FINISHED)
         print("Timer finished")
         if sound_enabled:
             speech.phrase(PHRASE_TIMER_FINISHED)
@@ -570,10 +671,47 @@ def service_timer():
 
 
 def service_ui_timeout():
+    if ui.state == STATE_ALARM_RINGING:
+        return
     if ui.state >= STATE_SETTINGS:
         if time.ticks_diff(time.ticks_ms(), last_input_ms) >= SETTINGS_TIMEOUT_MS:
             clear_overlay()
             ui.set_state(STATE_CLOCK)
+
+
+def service_alarms(now):
+    global alarm_minute_key, alarm_fired_indices
+    global active_alarm_index, alarm_screen_until_ms
+
+    minute_key = (
+        now["year"], now["month"], now["day"],
+        now["hour"], now["minute"],
+    )
+    if minute_key != alarm_minute_key:
+        alarm_minute_key = minute_key
+        alarm_fired_indices = []
+
+    if active_alarm_index is not None:
+        if (
+            alarm_screen_until_ms
+            and time.ticks_diff(alarm_screen_until_ms, time.ticks_ms()) <= 0
+        ):
+            audio.clear(pause=True)
+            active_alarm_index = None
+            alarm_screen_until_ms = 0
+            ui.set_state(alarm_return_state())
+        return
+
+    for index, alarm in enumerate(config["alarms"]):
+        if index in alarm_fired_indices:
+            continue
+        if not alarm["enabled"]:
+            continue
+        if alarm["hour"] != now["hour"] or alarm["minute"] != now["minute"]:
+            continue
+        alarm_fired_indices.append(index)
+        trigger_alarm(index)
+        return
 
 
 def service_clock_auto(now):
@@ -585,10 +723,7 @@ def service_clock_auto(now):
     if now["minute"] == 30 and not config["half_hour_enabled"]:
         return
 
-    key = (
-        now["year"], now["month"], now["day"],
-        now["hour"], now["minute"],
-    )
+    key = (now["year"], now["month"], now["day"], now["hour"], now["minute"])
     if key == last_auto_key:
         return
 
@@ -611,8 +746,6 @@ def service_rtc_correction(now):
     correction = int(config["rtc_correction_sec_per_day"])
     if correction == 0:
         return
-
-    # Apply one small correction per day at 03:05.
     if now["hour"] != 3 or now["minute"] != 5 or now["second"] > 10:
         return
 
@@ -637,10 +770,7 @@ def service_rtc_correction(now):
         minute -= 60
         hour += 1
 
-    write_rtc(
-        now["year"], now["month"], now["day"],
-        hour, minute, second,
-    )
+    write_rtc(now["year"], now["month"], now["day"], hour, minute, second)
     last_rtc_correction_key = key
     print("RTC correction applied:", correction, "sec")
 
@@ -655,11 +785,12 @@ def service_display(now):
         STATE_SETTINGS_QUIET_START,
         STATE_SETTINGS_QUIET_END,
         STATE_SETTINGS_RTC_CORR,
+        STATE_ALARM_ENABLED, STATE_ALARM_HOUR, STATE_ALARM_MINUTE,
     )
 
     if (
         overlay_active()
-        and ui.state != STATE_TIMER_RUNNING
+        and ui.state not in (STATE_TIMER_RUNNING, STATE_ALARM_RINGING)
         and ui.state not in edit_states
     ):
         if overlay_kind == "volume":
@@ -675,12 +806,7 @@ def service_display(now):
         clear_overlay()
 
     if ui.state == STATE_CLOCK:
-        ui.show_clock(
-            now,
-            sound_enabled,
-            config["clock_mode"],
-            quiet_now(now),
-        )
+        ui.show_clock(now, sound_enabled, config["clock_mode"], quiet_now(now))
     elif ui.state == STATE_QUICK_TIMER:
         h, m, s = timer.get_hms()
         quick_now = dict(now)
@@ -698,11 +824,7 @@ def service_display(now):
     elif ui.state == STATE_TIMER_EDIT_S:
         ui.show_timer_edit(edit_h, edit_m, edit_s, "s")
     elif ui.state == STATE_SETTINGS:
-        ui.show_settings(
-            settings_index,
-            len(settings_items),
-            settings_items[settings_index],
-        )
+        ui.show_settings(settings_index, len(settings_items), settings_items[settings_index])
     elif ui.state == STATE_SETTINGS_LANGUAGE:
         ui.show_language(config["language"])
     elif ui.state == STATE_SETTINGS_TIME_H:
@@ -725,6 +847,18 @@ def service_display(now):
         ui.show_quiet_time(False, edit_quiet_end)
     elif ui.state == STATE_SETTINGS_RTC_CORR:
         ui.show_rtc_correction(edit_rtc_corr)
+    elif ui.state == STATE_ALARM_LIST:
+        alarm = current_alarm()
+        ui.show_alarm_list(alarm_index, alarm["enabled"], alarm["hour"], alarm["minute"])
+    elif ui.state == STATE_ALARM_ENABLED:
+        ui.show_alarm_enabled(alarm_index, edit_alarm_enabled)
+    elif ui.state == STATE_ALARM_HOUR:
+        ui.show_alarm_time(alarm_index, edit_alarm_hour, edit_alarm_minute, "h")
+    elif ui.state == STATE_ALARM_MINUTE:
+        ui.show_alarm_time(alarm_index, edit_alarm_hour, edit_alarm_minute, "m")
+    elif ui.state == STATE_ALARM_RINGING:
+        alarm = config["alarms"][active_alarm_index]
+        ui.show_alarm_ringing(active_alarm_index, alarm["hour"], alarm["minute"])
 
 
 print("Speaking Timer-Clock v%s starting" % APP_VERSION)
@@ -735,12 +869,14 @@ print(
     "Quiet:", config["quiet_enabled"],
     config["quiet_start"], "-", config["quiet_end"],
     "RTC correction:", config["rtc_correction_sec_per_day"],
+    "Alarms:", sum(1 for alarm in config["alarms"] if alarm["enabled"]),
 )
 
 while True:
     now = rtc_now()
     service_timer()
     service_ui_timeout()
+    service_alarms(now)
     service_clock_auto(now)
     service_rtc_correction(now)
     audio.service()
