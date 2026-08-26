@@ -7,6 +7,14 @@ import os
 CONFIG_PATH = "/config.json"
 CONFIG_TMP_PATH = "/config.tmp"
 
+DEFAULT_ALARMS = (
+    (False, 7, 0),
+    (False, 8, 0),
+    (False, 9, 0),
+    (False, 10, 0),
+    (False, 11, 0),
+)
+
 DEFAULTS = {
     "language": "ru",
     "volume": 10,
@@ -17,11 +25,50 @@ DEFAULTS = {
     "clock_mode": "voice",
     "half_hour_enabled": True,
     "rtc_correction_sec_per_day": 0,
+    "alarms": [],
 }
+
+
+def _default_alarms():
+    result = []
+    for enabled, hour, minute in DEFAULT_ALARMS:
+        result.append({
+            "enabled": enabled,
+            "hour": hour,
+            "minute": minute,
+        })
+    return result
+
+
+def _validated_alarms(value):
+    result = []
+    source = value if isinstance(value, list) else []
+    defaults = _default_alarms()
+
+    for index in range(5):
+        default = defaults[index]
+        item = source[index] if index < len(source) else default
+        if not isinstance(item, dict):
+            item = default
+        try:
+            hour = int(item.get("hour", default["hour"])) % 24
+        except (TypeError, ValueError):
+            hour = default["hour"]
+        try:
+            minute = int(item.get("minute", default["minute"])) % 60
+        except (TypeError, ValueError):
+            minute = default["minute"]
+        result.append({
+            "enabled": bool(item.get("enabled", default["enabled"])),
+            "hour": hour,
+            "minute": minute,
+        })
+    return result
 
 
 def _validated(data):
     cfg = dict(DEFAULTS)
+    cfg["alarms"] = _default_alarms()
     if isinstance(data, dict):
         cfg.update(data)
 
@@ -45,6 +92,7 @@ def _validated(data):
     cfg["rtc_correction_sec_per_day"] = max(
         -30, min(30, int(cfg["rtc_correction_sec_per_day"]))
     )
+    cfg["alarms"] = _validated_alarms(cfg.get("alarms"))
     return cfg
 
 
@@ -53,7 +101,7 @@ def load_config():
         with open(CONFIG_PATH, "r") as f:
             return _validated(json.load(f))
     except (OSError, ValueError):
-        return dict(DEFAULTS)
+        return _validated({})
 
 
 def save_config(config):
