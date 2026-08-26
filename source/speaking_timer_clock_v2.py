@@ -36,6 +36,44 @@ MUSIC_TRACK_COUNT = 45
 # Fixed daily alarms, HHMM.
 FIXED_ALARMS = [1149, 1235, 1400, 1600, 1700]
 
+# Confirmed legacy DFPlayer microSD folder mapping.
+FOLDER_RU_HOURS = 1
+FOLDER_RU_MINUTES = 2
+FOLDER_RU_DAYS = 3
+FOLDER_RU_MONTHS = 4
+FOLDER_RU_YEARS = 5
+FOLDER_RU_WEEKDAYS = 6
+FOLDER_RU_PHRASES = 7
+FOLDER_MUSIC = 8
+FOLDER_RU_NUMBERS_0_30 = 9
+FOLDER_RESERVED_10 = 10
+FOLDER_DE_HOURS = 11
+FOLDER_DE_MINUTES = 12
+FOLDER_DE_DAYS = 13
+FOLDER_DE_MONTHS = 14
+FOLDER_DE_YEARS = 15
+FOLDER_DE_WEEKDAYS = 16
+FOLDER_DE_PHRASES = 17
+FOLDER_CHIMES = 18
+FOLDER_SILENCE = 19
+FOLDER_RESERVED_20 = 20
+FOLDER_RESERVED_21 = 21
+
+# Confirmed phrase file numbers in folders 07 (RU) and 17 (DE).
+PHRASE_ALARM_1 = 1
+PHRASE_ALARM_2 = 2
+PHRASE_ALARM_3 = 3
+PHRASE_ALARM_4 = 4
+PHRASE_ALARM_5 = 5
+PHRASE_TIMER_SETUP = 6
+PHRASE_TIMER_SET = 9
+PHRASE_TIMER_FINISHED = 11
+PHRASE_TIMER_SIGNAL_SHORT = 12
+PHRASE_TIMER_SIGNAL_LONG = 13
+PHRASE_TIMER_CANCELLED = 14
+
+SUPPORTED_SPOKEN_YEARS = tuple(range(2023, 2030))
+
 MONTH_NAMES = {
     1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "Mai", 6: "Jun",
     7: "Jul", 8: "Aug", 9: "Sep", 10: "Okt", 11: "Nov", 12: "Dez",
@@ -56,9 +94,8 @@ ds = DS1302(Pin(2), Pin(5), Pin(4))
 i2c = I2C(0, sda=Pin(0), scl=Pin(1), freq=400000)
 lcd = I2cLcd(i2c, I2C_ADDR, I2C_NUM_ROWS, I2C_NUM_COLS)
 
-# The encoder push buttons are intentionally NOT passed to Rotary.
-# They are handled separately by picozero.Button to avoid two IRQ handlers
-# competing for the same GPIO.
+# Encoder push buttons are intentionally handled separately by picozero.Button.
+# Rotary owns only the two phase pins, avoiding competing IRQ handlers.
 rotary_volume = Rotary(14, 15)
 rotary_timer = Rotary(11, 10)
 
@@ -85,7 +122,6 @@ last_alarm_key = None
 # ----------------------------- helpers -----------------------------
 
 def rtc_now():
-    """Return DS1302 datetime as a dict."""
     value = ds.date_time()
     return {
         "year": value[0],
@@ -110,13 +146,6 @@ def audio_allowed(now=None):
     if now is None:
         now = rtc_now()
     return not in_quiet_hours(now["hour"])
-
-
-def safe_play(folder, track, force=False):
-    if force or audio_allowed():
-        player.playTrack(folder, track)
-        return True
-    return False
 
 
 def current_hhmm(now):
@@ -148,11 +177,27 @@ def stop_music():
 
 def shuffle_playlist():
     global playlist_index
-    # Fisher-Yates, kept MicroPython-friendly.
     for i in range(len(playlist) - 1, 0, -1):
         j = random.randint(0, i)
         playlist[i], playlist[j] = playlist[j], playlist[i]
     playlist_index = 0
+
+
+def play_phrase(folder, phrase_number, wait_after=0.0):
+    if not sound_enabled:
+        return False
+    player.playTrack(folder, phrase_number)
+    if wait_after > 0:
+        time.sleep(wait_after)
+    return True
+
+
+def play_bilingual_phrase(phrase_number, wait_between=0.8):
+    if not sound_enabled:
+        return
+    player.playTrack(FOLDER_RU_PHRASES, phrase_number)
+    time.sleep(wait_between)
+    player.playTrack(FOLDER_DE_PHRASES, phrase_number)
 
 
 # ----------------------------- speech -----------------------------
@@ -162,9 +207,9 @@ def speak_time_ru(now=None):
         now = rtc_now()
     if not audio_allowed(now):
         return
-    player.playTrack(1, now["hour"])
+    player.playTrack(FOLDER_RU_HOURS, now["hour"])
     time.sleep(0.7)
-    player.playTrack(2, now["minute"])
+    player.playTrack(FOLDER_RU_MINUTES, now["minute"])
     time.sleep(1.0)
 
 
@@ -173,9 +218,9 @@ def speak_time_de(now=None):
         now = rtc_now()
     if not audio_allowed(now):
         return
-    player.playTrack(11, now["hour"])
+    player.playTrack(FOLDER_DE_HOURS, now["hour"])
     time.sleep(0.7)
-    player.playTrack(12, now["minute"])
+    player.playTrack(FOLDER_DE_MINUTES, now["minute"])
     time.sleep(1.0)
 
 
@@ -184,11 +229,11 @@ def speak_date_ru(now=None):
         now = rtc_now()
     if not audio_allowed(now):
         return
-    player.playTrack(6, now["weekday"])
+    player.playTrack(FOLDER_RU_WEEKDAYS, now["weekday"])
     time.sleep(1.0)
-    player.playTrack(3, now["day"])
+    player.playTrack(FOLDER_RU_DAYS, now["day"])
     time.sleep(1.0)
-    player.playTrack(4, now["month"])
+    player.playTrack(FOLDER_RU_MONTHS, now["month"])
     time.sleep(1.0)
 
 
@@ -197,20 +242,44 @@ def speak_date_de(now=None):
         now = rtc_now()
     if not audio_allowed(now):
         return
-    player.playTrack(16, now["weekday"])
+    player.playTrack(FOLDER_DE_WEEKDAYS, now["weekday"])
     time.sleep(1.0)
-    player.playTrack(13, now["day"])
+    player.playTrack(FOLDER_DE_DAYS, now["day"])
     time.sleep(1.6)
-    player.playTrack(14, now["month"])
+    player.playTrack(FOLDER_DE_MONTHS, now["month"])
     time.sleep(1.0)
+
+
+def speak_year_ru(now=None):
+    if now is None:
+        now = rtc_now()
+    year = now["year"]
+    if not audio_allowed(now) or year not in SUPPORTED_SPOKEN_YEARS:
+        return False
+    player.playTrack(FOLDER_RU_YEARS, year % 10)
+    time.sleep(1.0)
+    return True
+
+
+def speak_year_de(now=None):
+    if now is None:
+        now = rtc_now()
+    year = now["year"]
+    if not audio_allowed(now) or year not in SUPPORTED_SPOKEN_YEARS:
+        return False
+    player.playTrack(FOLDER_DE_YEARS, year % 10)
+    time.sleep(1.0)
+    return True
 
 
 def speak_full_datetime():
     now = rtc_now()
     speak_time_ru(now)
     speak_date_ru(now)
+    speak_year_ru(now)
     speak_time_de(now)
     speak_date_de(now)
+    speak_year_de(now)
 
 
 # ----------------------------- controls -----------------------------
@@ -245,18 +314,9 @@ def on_timer_rotary(event):
 
 def toggle_sound():
     global sound_enabled
-    # Announce the state before disabling audio, and after enabling it.
-    if sound_enabled:
-        player.playTrack(7, 8)
-        time.sleep(0.8)
-        player.playTrack(17, 8)
-        sound_enabled = False
+    sound_enabled = not sound_enabled
+    if not sound_enabled:
         stop_music()
-    else:
-        sound_enabled = True
-        player.playTrack(7, 9)
-        time.sleep(0.8)
-        player.playTrack(17, 9)
     print("Sound enabled:", sound_enabled)
 
 
@@ -268,7 +328,7 @@ def toggle_timer():
         timer_deadline_ms = None
         print("Timer cancelled")
         if sound_enabled:
-            player.playTrack(7, 14)
+            play_bilingual_phrase(PHRASE_TIMER_CANCELLED)
         return
 
     duration_ms = selected_timer_minutes * 60 * 1000
@@ -276,16 +336,10 @@ def toggle_timer():
     timer_running = True
     print("Timer started for", selected_timer_minutes, "minutes")
 
-    if sound_enabled and audio_allowed():
-        player.playTrack(7, 7)
-        time.sleep(0.7)
-        player.playTrack(2, selected_timer_minutes)
-        time.sleep(0.6)
-        player.playTrack(17, 7)
-        time.sleep(1.0)
-        player.playTrack(12, selected_timer_minutes)
-        time.sleep(0.6)
-        player.playTrack(17, 15)
+    # The exact spoken representation of 31-240 minutes is not available in
+    # the confirmed legacy folders, so v2 confirms the action without guessing.
+    if audio_allowed():
+        play_bilingual_phrase(PHRASE_TIMER_SET)
 
 
 def toggle_music():
@@ -307,19 +361,23 @@ def button_clock_demo():
     now = rtc_now()
     speak_time_de(now)
     speak_date_de(now)
-    player.playTrack(18, 0)
+    speak_year_de(now)
+
+    # Folder 18: 000 = no strike/prelude, 001..012 = strike count.
+    player.playTrack(FOLDER_CHIMES, 0)
     time.sleep(17)
 
     strike_hour = now["hour"] % 12
     if strike_hour == 0:
         strike_hour = 12
-    player.playTrack(18, strike_hour)
+    player.playTrack(FOLDER_CHIMES, strike_hour)
 
 
 def button_ru_datetime():
     now = rtc_now()
     speak_time_ru(now)
     speak_date_ru(now)
+    speak_year_ru(now)
 
 
 def button_full_datetime():
@@ -366,14 +424,13 @@ def service_music():
         music_playing = True
         return
 
-    # Module is idle. Start the next track.
     music_playing = False
     if playlist_index >= len(playlist):
         shuffle_playlist()
 
     track = playlist[playlist_index]
     playlist_index += 1
-    player.playTrack(8, track)
+    player.playTrack(FOLDER_MUSIC, track)
     music_playing = True
     print("Music track:", track)
 
@@ -389,9 +446,12 @@ def service_timer():
         timer_deadline_ms = None
         print("Timer finished")
         if sound_enabled:
-            player.playTrack(7, 11)
+            player.playTrack(FOLDER_RU_PHRASES, PHRASE_TIMER_FINISHED)
             time.sleep(0.7)
-            player.playTrack(7, 13)
+            player.playTrack(FOLDER_DE_PHRASES, PHRASE_TIMER_FINISHED)
+            time.sleep(0.7)
+            # Long signal is used as the final timer alarm.
+            player.playTrack(FOLDER_RU_PHRASES, PHRASE_TIMER_SIGNAL_LONG)
 
 
 def service_announcements(now):
@@ -410,8 +470,6 @@ def service_announcements(now):
     if key == last_announcement_key:
         return
 
-    # Hour and half-hour announcement. The key prevents repeating during
-    # the whole matching minute, regardless of loop speed.
     speak_time_ru(now)
     speak_time_de(now)
     last_announcement_key = key
@@ -432,11 +490,11 @@ def service_fixed_alarms(now):
     print("Fixed alarm:", alarm_number, hhmm)
 
     if audio_allowed(now):
-        player.playTrack(7, alarm_number)
+        player.playTrack(FOLDER_RU_PHRASES, alarm_number)
         time.sleep(1.5)
         speak_time_ru(now)
         time.sleep(0.7)
-        player.playTrack(17, alarm_number)
+        player.playTrack(FOLDER_DE_PHRASES, alarm_number)
         time.sleep(1.5)
         speak_time_de(now)
 
@@ -503,6 +561,5 @@ while True:
     service_music()
     update_display(now)
 
-    # Short loop delay. Timer accuracy does not depend on this delay because
-    # it uses ticks_ms(), and the clock display uses DS1302 seconds.
+    # Timer accuracy does not depend on this delay because ticks_ms() is used.
     time.sleep_ms(50)
