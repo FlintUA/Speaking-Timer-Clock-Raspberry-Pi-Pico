@@ -19,6 +19,11 @@ STATE_SETTINGS_QUIET_ENABLED = 28
 STATE_SETTINGS_QUIET_START = 29
 STATE_SETTINGS_QUIET_END = 30
 STATE_SETTINGS_RTC_CORR = 31
+STATE_ALARM_LIST = 40
+STATE_ALARM_ENABLED = 41
+STATE_ALARM_HOUR = 42
+STATE_ALARM_MINUTE = 43
+STATE_ALARM_RINGING = 44
 
 MONTH_NAMES = {
     1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "Mai", 6: "Jun",
@@ -149,6 +154,34 @@ class ClockUI:
 
     def show_rtc_correction(self, value):
         self._write("RTC CORRECTION", "%+d sec/day" % value, (0, 1, True))
+
+    def show_alarm_list(self, index, enabled, hour, minute):
+        state = "ON" if enabled else "OFF"
+        self._write(
+            "ALARM %d %s" % (index + 1, state),
+            "%02d:%02d DAILY" % (hour, minute),
+        )
+
+    def show_alarm_enabled(self, index, enabled):
+        self._write(
+            "ALARM %d ENABLE" % (index + 1),
+            "ON" if enabled else "OFF",
+            (0, 1, True),
+        )
+
+    def show_alarm_time(self, index, hour, minute, field):
+        cursor_x = 0 if field == "h" else 3
+        self._write(
+            "SET ALARM %d" % (index + 1),
+            "%02d:%02d" % (hour, minute),
+            (cursor_x, 1, True),
+        )
+
+    def show_alarm_ringing(self, index, hour, minute):
+        self._write(
+            "ALARM %d RINGING" % (index + 1),
+            "%02d:%02d STOP=KEY" % (hour, minute),
+        )
 
     def show_message(self, line1, line2=""):
         self._write(line1, line2)
