@@ -44,6 +44,52 @@ For automatic startup, copy or rename `source/speaking_timer_clock_v2.py` to `/m
 | Button 5 | GP27 |
 | Button 1 | GP28 |
 
+## Confirmed DFPlayer microSD layout
+
+The numbered folders are the working hardware format and remain the v2 audio source. The newer named folders (`tts`, `music`, `chimes`, etc.) are not required by v2.
+
+| Folder | Purpose |
+| --- | --- |
+| `01` | Russian hours |
+| `02` | Russian minutes, `000` = exactly/on the hour |
+| `03` | Russian day/date number |
+| `04` | Russian month |
+| `05` | Russian year: `003` = 2023 through `009` = 2029 |
+| `06` | Russian weekday |
+| `07` | Russian service phrases |
+| `08` | Music player tracks `001-045` |
+| `09` | Russian service numbers `0-30` |
+| `10` | Reserved/empty |
+| `11` | German hours, `000` = midnight |
+| `12` | German minutes, `000` = exactly/on the hour |
+| `13` | German day/date number |
+| `14` | German month |
+| `15` | German year: `003` = 2023 through `009` = 2029 |
+| `16` | German weekday |
+| `17` | German service phrases |
+| `18` | Clock strikes: `000` no strike/prelude, `001-012` strike count |
+| `19` | Silent technical files `001`, `002`, retained as reserve |
+| `20` | Reserved/empty |
+| `21` | Reserved/empty |
+
+Confirmed service phrase numbers in both `07` and `17`:
+
+| File | Meaning |
+| ---: | --- |
+| `001` | Alarm 1 triggered |
+| `002` | Alarm 2 triggered |
+| `003` | Alarm 3 triggered |
+| `004` | Alarm 4 triggered |
+| `005` | Alarm 5 triggered |
+| `006` | Timer setup |
+| `009` | Timer set |
+| `011` | Timer triggered |
+| `012` | Short timer signal |
+| `013` | Longer timer signal |
+| `014` | Timer cancelled |
+
+The birthday melody exists as file `000` in the newer phrase set, but birthday/date-time event support is intentionally not implemented in the current bring-up phase.
+
 ## 1. Check MicroPython
 
 Use a current stable MicroPython build for Raspberry Pi Pico (RP2040). Open the REPL and confirm:
@@ -85,17 +131,9 @@ The list must contain changing seconds. Example format:
 [2026, 8, 26, 3, 15, 30, 12]
 ```
 
-If the time must be set, run once with the correct values:
-
-```python
-ds.date_time([2026, 8, 26, 3, 15, 30, 0])
-```
-
-Then comment/remove the setter again.
+If the time must be set, run once with the correct values and then remove/comment the setter again.
 
 ## 4. Check DFPlayer independently
-
-The microSD structure in the repository uses numbered folders and numbered files such as `01/000.mp3`, `01/001.mp3`, etc.
 
 ```python
 from picodfplayer import DFPlayer
@@ -107,15 +145,18 @@ sleep(1)
 p.playTrack(1, 12)
 ```
 
-If there is no sound, check:
+Expected: Russian hour file 12 from folder `01`.
 
-- common ground between Pico and DFPlayer;
-- TX/RX direction;
-- DFPlayer supply voltage/current;
-- microSD FAT filesystem;
-- exact folder/file numbering;
-- speaker/amplifier connection;
-- BUSY output level on GP18.
+Additional useful checks:
+
+```python
+p.playTrack(7, 9)    # RU: timer set
+p.playTrack(17, 9)   # DE: timer set
+p.playTrack(18, 3)   # three clock strikes
+p.playTrack(8, 1)    # first music track
+```
+
+If there is no sound, check common ground, TX/RX direction, DFPlayer supply, FAT microSD, numbering, speaker/amplifier connection and BUSY on GP18.
 
 ## 5. Check encoders
 
@@ -134,8 +175,6 @@ r.add_handler(changed)
 
 Rotate slowly in both directions. Expected event codes are `1` and `2`.
 
-If direction is reversed, swap the two encoder phase pins in the constructor.
-
 ## 6. Run v2 manually
 
 Do not rename it to `main.py` yet. Run `speaking_timer_clock_v2.py` from Thonny and watch the console.
@@ -153,31 +192,38 @@ Then verify in this order:
 3. Volume encoder changes values 0-30.
 4. Timer encoder changes 1-240 minutes.
 5. Timer button starts/cancels the timer.
-6. A 1-minute timer fires close to 60 seconds, not on an arbitrary minute boundary.
-7. Sound button changes the sound state.
-8. Fixed alarms trigger once per matching date/time.
-9. Hour/half-hour announcements do not repeat continuously for the whole minute.
-10. Night interval 22:00-07:00 suppresses automatic audio.
+6. Starting a timer plays phrase `009` from RU/DE service folders.
+7. Cancelling a timer plays phrase `014` from RU/DE folders.
+8. A 1-minute timer fires close to 60 seconds and uses `011` plus the longer signal `013`.
+9. Sound button changes the sound state without relying on unconfirmed phrase IDs.
+10. Fixed alarms trigger once per matching date/time using phrases `001-005`.
+11. Hour/half-hour announcements do not repeat continuously for the whole minute.
+12. Night interval 22:00-07:00 suppresses automatic audio.
+13. Date/time button speaks year only for 2023-2029; unsupported years are skipped rather than mapped to a wrong file.
+14. Music button plays tracks from folder `08`, files `001-045`.
 
 ## Important v2 changes
 
-- Removed the missing `machine` namespace usage from the application code.
-- Timer now uses `time.ticks_ms()` and therefore has second-level timing instead of comparing only RTC hours/minutes.
-- Maximum timer value is 240 minutes, matching the README.
-- Timer naturally works across hour and midnight boundaries.
-- Daily alarm comparison uses `hour * 100 + minute`, avoiding the old string-concatenation error.
+- Uses the confirmed numbered DFPlayer folders `01-21`; named TTS directories are not required.
+- Replaces raw audio magic numbers with named folder/phrase constants.
+- Does not guess meanings for unconfirmed service phrase files.
+- Spoken years are explicitly limited to available files 2023-2029.
+- Timer uses `time.ticks_ms()` for second-level timing.
+- Maximum timer value is 240 minutes.
+- Timer works across hour and midnight boundaries.
+- Daily alarm comparison uses `hour * 100 + minute`.
 - Repeated hour/alarm triggering is blocked using date/time keys.
 - Encoder switch IRQ ownership conflict is removed.
-- Original implementation is preserved for comparison.
+- Original implementation remains preserved for comparison.
 
 ## Known uncertainties requiring hardware verification
 
-1. The exact semantic mapping of every voice file in folders `07` and `17` is not documented well enough to guarantee that every spoken status phrase matches the action.
-2. Mechanical encoder direction/debounce can vary with the installed modules.
-3. Some DFPlayer Mini clones need more startup delay or behave differently with folder command `0x0F`.
-4. The LCD backpack may use `0x27` instead of `0x3F` on another unit.
-5. Long audio sequences are blocking in the current DFPlayer library (`COMMAND_LATENCY = 500 ms`). The clock/timer timebase remains correct, but UI responsiveness during speech can be improved later with a non-blocking audio queue.
+1. Mechanical encoder direction/debounce can vary with the installed modules.
+2. Some DFPlayer Mini clones need more startup delay or behave differently with folder command `0x0F`.
+3. The LCD backpack may use `0x27` instead of `0x3F` on another unit.
+4. Long audio sequences are blocking in the current DFPlayer library (`COMMAND_LATENCY = 500 ms`). The clock/timer timebase remains correct, but UI responsiveness during speech can later be improved with an audio queue.
+5. Timer durations above the available spoken-number range are currently confirmed by the generic `timer set` phrase instead of an incorrect spoken duration.
 
 ## Next engineering step after first hardware run
 
-Record the first exception or incorrect behavior from the REPL exactly as printed. Fix only that layer, rerun, and continue until all ten checks above pass. After that, rename the v2 application to `main.py` and update the main README.
+Record the first exception or incorrect behavior from the REPL exactly as printed. Fix only that layer, rerun, and continue until the checks above pass. After that, rename the v2 application to `main.py` and update the main README.
