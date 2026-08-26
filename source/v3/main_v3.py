@@ -1,4 +1,4 @@
-# Speaking Timer-Clock v3 - first modular hardware build
+# Speaking Timer-Clock v3 - modular hardware build
 # MicroPython / Raspberry Pi Pico
 
 import time
@@ -15,6 +15,7 @@ from audio import (
     DFPlayerTransport,
     AudioQueue,
     Speech,
+    FOLDER_CHIMES,
     PHRASE_TIMER_FINISHED,
     PHRASE_TIMER_SIGNAL_LONG,
     PHRASE_TIMER_CANCELLED,
@@ -61,7 +62,7 @@ volume = config["volume"]
 audio.set_volume(volume)
 
 edit_h, edit_m, edit_s = timer.get_hms()
-last_announce_key = None
+last_auto_key = None
 
 
 def rtc_now():
@@ -168,26 +169,49 @@ def timer_button():
             ui.set_state(STATE_TIMER_EDIT_S)
         else:
             timer.set_duration(edit_h, edit_m, edit_s)
-            timer.start()
-            ui.set_state(STATE_TIMER_RUNNING)
-            print("Timer started exact:", "%02d:%02d:%02d" % (edit_h, edit_m, edit_s))
+            if timer.duration_seconds > 0:
+                timer.start()
+                ui.set_state(STATE_TIMER_RUNNING)
+                print("Timer started exact:", "%02d:%02d:%02d" % (edit_h, edit_m, edit_s))
         return
 
-    # Normal quick-start: current duration, adjusted by rotary in minutes.
     timer.start()
     ui.set_state(STATE_TIMER_RUNNING)
     print("Timer started quick:", timer.get_hms())
 
 
-def exact_timer_button():
+def timer_mode_button():
+    """Physical Timer 1/2 button: enter exact HH:MM:SS setup for the one timer."""
     global edit_h, edit_m, edit_s
     if timer.running:
         return
-    edit_h, edit_m, edit_s = timer.get_hms()
-    ui.set_state(STATE_TIMER_EDIT_H)
+    if ui.state == STATE_CLOCK:
+        edit_h, edit_m, edit_s = timer.get_hms()
+        ui.set_state(STATE_TIMER_EDIT_H)
+    else:
+        ui.set_state(STATE_CLOCK)
+
+
+def alarm_button():
+    # Alarm editor is the next v3 stage. Keep the physical button reserved.
+    print("Alarm menu: not implemented yet")
+
+
+def mode_button():
+    """Physical ST/MO button: exclusive strike/voice clock mode."""
+    config["clock_mode"] = "chime" if config["clock_mode"] == "voice" else "voice"
+    save_config(config)
+    print("Clock mode:", config["clock_mode"])
+
+
+def minus_button():
+    # Physical '-' button acts as Back while menu work is being built.
+    if ui.state != STATE_CLOCK:
+        ui.set_state(STATE_CLOCK)
 
 
 def settings_button():
+    # Physical Setup/+ button.
     if timer.running:
         return
     if ui.state == STATE_CLOCK:
@@ -203,31 +227,34 @@ def settings_button():
         ui.set_state(STATE_CLOCK)
 
 
-def say_time_button():
-    if not sound_enabled:
-        return
-    now = rtc_now()
-    speech.say_time(now["hour"], now["minute"])
-
-
+# Physical front-panel mapping:
+# GP20 - VOLUME encoder push / ON-OFF
+# GP19 - TIMER encoder push / start-stop-confirm
+# GP28 - Timer 1/2
+# GP21 - Alarm
+# GP22 - ST/MO
+# GP26 - Preset/Search '-'
+# GP27 - Preset/Setup '+'
 btn_volume = Button(20)
 btn_volume.when_pressed = toggle_sound
 
 btn_timer = Button(19)
 btn_timer.when_pressed = timer_button
 
-btn_say_time = Button(21)
-btn_say_time.when_pressed = say_time_button
+btn_timer_mode = Button(28)
+btn_timer_mode.when_pressed = timer_mode_button
 
-btn_settings = Button(22)
-btn_settings.when_pressed = settings_button
+btn_alarm = Button(21)
+btn_alarm.when_pressed = alarm_button
 
-btn_exact_timer = Button(26)
-btn_exact_timer.when_pressed = exact_timer_button
+btn_st_mo = Button(22)
+btn_st_mo.when_pressed = mode_button
 
-# GP27 and GP28 are deliberately reserved in the first v3 hardware build.
-btn_reserved_5 = Button(27)
-btn_reserved_1 = Button(28)
+btn_minus = Button(26)
+btn_minus.when_pressed = minus_button
+
+btn_setup_plus = Button(27)
+btn_setup_plus.when_pressed = settings_button
 
 
 # ----------------------------- automatic services -----------------------------
@@ -237,35 +264,55 @@ def service_timer():
     if timer.consume_finished():
         ui.set_state(STATE_CLOCK)
         print("Timer finished")
+        # Timers are intentional user alarms and are NOT suppressed by quiet mode.
         if sound_enabled:
             speech.phrase(PHRASE_TIMER_FINISHED)
             speech.phrase(PHRASE_TIMER_SIGNAL_LONG)
 
 
-def service_clock_voice(now):
-    global last_announce_key
+def service_clock_auto(now):
+    """Automatic clock output: voice OR chime, never both.
+
+    Quiet mode suppresses all automatic voice/chime events. It does not suppress
+    countdown timers or, later, explicit alarm-clock events.
+    """
+    global last_auto_key
 
     if not sound_enabled or quiet_now(now):
         return
 
-    should_speak = (
-        (now["minute"] == 0 and config["hourly_voice"])
-        or (now["minute"] == 30 and config["half_hour_voice"])
-    )
-    if not should_speak:
+    if now["minute"] not in (0, 30):
+        return
+    if now["minute"] == 30 and not config["half_hour_enabled"]:
         return
 
     key = (now["year"], now["month"], now["day"], now["hour"], now["minute"])
-    if key == last_announce_key:
+    if key == last_auto_key:
         return
 
-    speech.say_time(now["hour"], now["minute"])
-    last_announce_key = key
+    if config["clock_mode"] == "voice":
+        speech.say_time(now["hour"], now["minute"])
+    else:
+        if now["minute"] == 0:
+            strikes = now["hour"] % 12
+            if strikes == 0:
+                strikes = 12
+            audio.enqueue(FOLDER_CHIMES, strikes)
+        else:
+            # Half-hour convention: one strike.
+            audio.enqueue(FOLDER_CHIMES, 1)
+
+    last_auto_key = key
 
 
 def service_display(now):
     if ui.state == STATE_CLOCK:
-        ui.show_clock(now, config["language"], sound_enabled)
+        ui.show_clock(
+            now,
+            config["language"],
+            sound_enabled,
+            config["clock_mode"],
+        )
     elif ui.state == STATE_TIMER_RUNNING:
         h, m, s = timer.remaining_hms()
         ui.show_timer_running(h, m, s)
@@ -282,12 +329,17 @@ def service_display(now):
 
 
 print("Speaking Timer-Clock v3 starting")
-print("Language:", config["language"], "Volume:", volume)
+print(
+    "Language:", config["language"],
+    "Volume:", volume,
+    "Clock mode:", config["clock_mode"],
+    "Quiet:", config["quiet_enabled"], config["quiet_start"], "-", config["quiet_end"],
+)
 
 while True:
     now = rtc_now()
     service_timer()
-    service_clock_voice(now)
+    service_clock_auto(now)
     audio.service()
     service_display(now)
     time.sleep_ms(20)
