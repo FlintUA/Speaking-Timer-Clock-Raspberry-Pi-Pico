@@ -45,15 +45,16 @@ class ClockUI:
             self.lcd.putstr(lines[1])
         self._last_lines = lines
 
-    def show_clock(self, now, language, sound_enabled=True):
+    def show_clock(self, now, language, sound_enabled=True, clock_mode="voice"):
         lang = language.upper()
         sound = "S" if sound_enabled else "M"
+        mode = "MO" if clock_mode == "voice" else "ST"
         line1 = "%02d:%02d:%02d %s %s" % (
-            now["hour"], now["minute"], now["second"], lang, sound
+            now["hour"], now["minute"], now["second"], mode, sound
         )
         line2 = "%02d-%s-%04d %s" % (
             now["day"], MONTH_NAMES.get(now["month"], "???"),
-            now["year"], DAY_NAMES.get(now["weekday"], "??")
+            now["year"], lang
         )
         self._write(line1, line2)
 
