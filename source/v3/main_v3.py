@@ -1,5 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
+# Version: 3.1.0
 # MicroPython / Raspberry Pi Pico
+
+APP_VERSION = "3.1.0"
 
 import time
 from machine import Pin, I2C
@@ -47,6 +50,7 @@ from ui import (
 
 I2C_ADDR = 0x3F
 QUICK_TIMER_TIMEOUT_MS = 2500
+TIMER_FINISHED_TIMEOUT_MS = 5000
 OVERLAY_TIMEOUT_MS = 1600
 SETTINGS_TIMEOUT_MS = 20000
 TIMER_MAX_MINUTES = 240
@@ -92,6 +96,7 @@ settings_items = (
 settings_index = 0
 last_input_ms = time.ticks_ms()
 quick_until_ms = 0
+timer_finished_until_ms = 0
 overlay_until_ms = 0
 overlay_kind = None
 overlay_value = None
@@ -536,15 +541,28 @@ btn_setup_plus.when_pressed = settings_button
 
 
 def service_timer():
+    global timer_finished_until_ms
+
     if (
         ui.state == STATE_QUICK_TIMER
         and time.ticks_diff(quick_until_ms, time.ticks_ms()) <= 0
     ):
         ui.set_state(STATE_CLOCK)
 
+    if (
+        ui.state == STATE_TIMER_FINISHED
+        and timer_finished_until_ms
+        and time.ticks_diff(timer_finished_until_ms, time.ticks_ms()) <= 0
+    ):
+        timer_finished_until_ms = 0
+        ui.set_state(STATE_CLOCK)
+
     timer.service()
     if timer.consume_finished():
         ui.set_state(STATE_TIMER_FINISHED)
+        timer_finished_until_ms = time.ticks_add(
+            time.ticks_ms(), TIMER_FINISHED_TIMEOUT_MS
+        )
         print("Timer finished")
         if sound_enabled:
             speech.phrase(PHRASE_TIMER_FINISHED)
@@ -709,7 +727,7 @@ def service_display(now):
         ui.show_rtc_correction(edit_rtc_corr)
 
 
-print("Speaking Timer-Clock v3 starting")
+print("Speaking Timer-Clock v%s starting" % APP_VERSION)
 print(
     "Language:", config["language"],
     "Volume:", volume,
