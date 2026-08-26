@@ -46,15 +46,19 @@ class ClockUI:
         self._last_lines = lines
 
     def show_clock(self, now, language, sound_enabled=True, clock_mode="voice"):
-        lang = language.upper()
         sound = "S" if sound_enabled else "M"
         mode = "MO" if clock_mode == "voice" else "ST"
+
+        # Normal clock screen: time first, compact operating status at right.
         line1 = "%02d:%02d:%02d %s %s" % (
             now["hour"], now["minute"], now["second"], mode, sound
         )
+
+        # Keep the weekday visible on the normal screen. The selected language
+        # is a setting and does not need to consume permanent LCD space.
         line2 = "%02d-%s-%04d %s" % (
             now["day"], MONTH_NAMES.get(now["month"], "???"),
-            now["year"], lang
+            now["year"], DAY_NAMES.get(now["weekday"], "??")
         )
         self._write(line1, line2)
 
@@ -66,7 +70,12 @@ class ClockUI:
         )
 
     def show_timer_running(self, hours, minutes, seconds):
-        self._write("TIMER RUNNING", "%02d:%02d:%02d" % (hours, minutes, seconds))
+        # While countdown is active it owns the screen continuously. Do not
+        # alternate with the clock - the remaining time is the primary data.
+        self._write(
+            "TIMER RUNNING",
+            "%02d:%02d:%02d" % (hours, minutes, seconds),
+        )
 
     def show_language(self, language):
         value = "RUSSIAN" if language == "ru" else "DEUTSCH"
