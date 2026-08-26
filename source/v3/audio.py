@@ -71,11 +71,7 @@ class DFPlayerTransport:
 
 
 class AudioQueue:
-    """Queue tracks without blocking the application loop.
-
-    Queue entries are (folder, track). The next item starts after DFPlayer BUSY
-    has returned idle and a short guard interval has elapsed.
-    """
+    """Queue tracks without blocking the application loop."""
 
     def __init__(self, transport):
         self.transport = transport
@@ -106,7 +102,6 @@ class AudioQueue:
         return not self._queue and not self._track_started
 
     def service(self):
-        # Apply volume outside encoder callbacks and without sleep().
         if self._volume_pending is not None and self.transport.command_ready():
             value = self._volume_pending
             self._volume_pending = None
@@ -119,8 +114,6 @@ class AudioQueue:
                 return
 
             elapsed = time.ticks_diff(time.ticks_ms(), self._start_ms)
-            # Allow BUSY some time to assert. Once BUSY has been seen, idle means
-            # playback completed. The timeout also tolerates clones with weak BUSY.
             if self._seen_busy or elapsed >= 2500:
                 self._track_started = False
                 self._seen_busy = False
@@ -135,7 +128,6 @@ class AudioQueue:
             self._start_ms = time.ticks_ms()
 
 
-# Confirmed physical folder mapping on the existing DFPlayer microSD.
 LANGUAGE_FOLDERS = {
     "ru": {
         "hours": 1,
@@ -160,6 +152,8 @@ LANGUAGE_FOLDERS = {
 
 FOLDER_MUSIC = 8
 FOLDER_CHIMES = 18
+FOLDER_SILENCE = 19
+SILENCE_HALF_HOUR_TRACK = 1
 
 PHRASE_TIMER_SETUP = 6
 PHRASE_TIMER_SET = 9
