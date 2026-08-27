@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.3.1
+# Version: 3.4.0
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.3.1"
+APP_VERSION = "3.4.0"
 
 import time
 from machine import Pin, I2C
@@ -14,6 +14,7 @@ from rotary import Rotary
 
 from config import load_config, save_config
 from timer_engine import CountdownTimer
+from music_player import MusicPlayer
 from audio import (
     DFPlayerTransport,
     AudioQueue,
@@ -54,6 +55,7 @@ from ui import (
     STATE_ALARM_SOUND,
     STATE_ALARM_TRACK,
     STATE_ALARM_RINGING,
+    STATE_MUSIC_PLAYER,
 )
 
 I2C_ADDR = 0x3F
@@ -63,6 +65,7 @@ OVERLAY_TIMEOUT_MS = 1600
 SETTINGS_TIMEOUT_MS = 20000
 ALARM_SAFETY_TIMEOUT_MS = 15 * 60 * 1000
 ST_MO_LONG_PRESS_MS = 900
+ALARM_LONG_PRESS_MS = 900
 TIMER_MAX_MINUTES = 240
 
 lcd = I2cLcd(
@@ -80,6 +83,7 @@ rotary_timer = Rotary(11, 10)
 config = load_config()
 speech = Speech(audio, config["language"])
 timer = CountdownTimer()
+music = MusicPlayer(audio, FOLDER_MUSIC, 45, 7)
 ui = ClockUI(lcd)
 
 sound_enabled = True
@@ -107,6 +111,7 @@ alarm_minute_key = None
 alarm_fired_indices = []
 alarm_preview_active = False
 st_mo_pressed_ms = 0
+alarm_pressed_ms = 0
 
 settings_items = (
     "Language",
@@ -346,6 +351,8 @@ def stop_active_alarm():
 def trigger_alarm(index):
     global active_alarm_index, alarm_safety_until_ms
     alarm = config["alarms"][index]
+    if music.active:
+        music.stop()
     active_alarm_index = index
     alarm_safety_until_ms = time.ticks_add(
         time.ticks_ms(), ALARM_SAFETY_TIMEOUT_MS
@@ -365,6 +372,29 @@ def trigger_alarm(index):
             audio.enqueue(FOLDER_MUSIC, alarm["track"])
         else:
             speech.phrase(PHRASE_TIMER_SIGNAL_LONG)
+
+
+def enter_music_player():
+    if active_alarm_index is not None or timer.running:
+        return
+    stop_alarm_preview()
+    clear_overlay()
+    if not sound_enabled:
+        show_overlay("sound", False)
+        return
+    ui.set_state(STATE_MUSIC_PLAYER)
+    if not music.active:
+        music.start()
+    print("Music player opened:", music.mode, music.current_track)
+    mark_input()
+
+
+def exit_music_player():
+    if music.active:
+        music.stop()
+    ui.set_state(STATE_CLOCK)
+    print("Music player closed")
+    mark_input()
 
 
 def on_volume(event):
@@ -392,6 +422,14 @@ def on_timer(event):
 
     direction = 1 if event == Rotary.ROT_CW else -1
     mark_input()
+
+    if ui.state == STATE_MUSIC_PLAYER:
+        if direction > 0:
+            music.next()
+        else:
+            music.previous()
+        print("Music track:", music.current_track)
+        return
 
     if ui.state in (STATE_CLOCK, STATE_QUICK_TIMER):
         set_quick_timer_delta(direction)
@@ -456,6 +494,8 @@ def toggle_sound():
         return
     if stop_alarm_preview():
         return
+    if ui.state == STATE_MUSIC_PLAYER and music.active:
+        music.stop()
     sound_enabled = not sound_enabled
     if not sound_enabled:
         audio.clear(pause=True)
@@ -530,6 +570,14 @@ def enter_selected_setting():
 
 def timer_button():
     if stop_active_alarm():
+        return
+    if ui.state == STATE_MUSIC_PLAYER:
+        if not sound_enabled:
+            show_overlay("sound", False)
+            return
+        state = music.toggle_pause()
+        print("Music:", state, music.current_track)
+        mark_input()
         return
     if timer.running and ui.state == STATE_TIMER_RUNNING:
         cancel_timer()
@@ -613,6 +661,8 @@ def timer_mode_button():
     global edit_h, edit_m, edit_s
     if stop_active_alarm():
         return
+    if ui.state == STATE_MUSIC_PLAYER:
+        return
     if timer.running:
         return
     clear_overlay()
@@ -624,8 +674,13 @@ def timer_mode_button():
     mark_input()
 
 
-def alarm_button():
+def alarm_short_action():
     if stop_active_alarm():
+        return
+    if ui.state == STATE_MUSIC_PLAYER:
+        mode = music.cycle_mode()
+        print("Music mode:", mode)
+        mark_input()
         return
     if ui.state == STATE_ALARM_TRACK:
         preview_alarm_music()
@@ -641,6 +696,27 @@ def alarm_button():
         ui.set_state(STATE_CLOCK)
     else:
         open_alarm_list()
+    mark_input()
+
+
+def alarm_pressed():
+    global alarm_pressed_ms
+    alarm_pressed_ms = time.ticks_ms()
+
+
+def alarm_released():
+    global alarm_pressed_ms
+    if not alarm_pressed_ms:
+        return
+    held_ms = time.ticks_diff(time.ticks_ms(), alarm_pressed_ms)
+    alarm_pressed_ms = 0
+    if held_ms >= ALARM_LONG_PRESS_MS:
+        if ui.state == STATE_MUSIC_PLAYER:
+            exit_music_player()
+        else:
+            enter_music_player()
+    else:
+        alarm_short_action()
     mark_input()
 
 
@@ -692,6 +768,11 @@ def st_mo_released():
 def minus_button():
     if stop_active_alarm():
         return
+    if ui.state == STATE_MUSIC_PLAYER:
+        music.previous()
+        print("Music previous:", music.current_track)
+        mark_input()
+        return
     clear_overlay()
     if timer.running:
         return
@@ -723,6 +804,11 @@ def minus_button():
 def settings_button():
     if stop_active_alarm():
         return
+    if ui.state == STATE_MUSIC_PLAYER:
+        music.next()
+        print("Music next:", music.current_track)
+        mark_input()
+        return
     if timer.running:
         return
     clear_overlay()
@@ -737,12 +823,12 @@ def settings_button():
 
 # Physical front-panel mapping:
 # GP20 - VOLUME encoder push / ON-OFF
-# GP19 - TIMER encoder push / start-stop-confirm
+# GP19 - TIMER encoder push / start-stop-confirm; Music Play/Pause
 # GP28 - Timer 1/2 / exact HH:MM:SS setup
-# GP21 - Alarm / alarm music preview on track selection screen
+# GP21 - Alarm short / MEM-AMS long: Music Player; short in Music: play mode
 # GP22 - ST/MO short: mode switch, long: speak current time
-# GP26 - Preset/Search '-' / Back
-# GP27 - Preset/Setup '+' / Setup-enter
+# GP26 - Preset/Search '-' / Back; Music Previous
+# GP27 - Preset/Setup '+' / Setup-enter; Music Next
 btn_volume = Button(20)
 btn_volume.when_pressed = toggle_sound
 btn_timer = Button(19)
@@ -750,7 +836,8 @@ btn_timer.when_pressed = timer_button
 btn_timer_mode = Button(28)
 btn_timer_mode.when_pressed = timer_mode_button
 btn_alarm = Button(21)
-btn_alarm.when_pressed = alarm_button
+btn_alarm.when_pressed = alarm_pressed
+btn_alarm.when_released = alarm_released
 btn_st_mo = Button(22)
 btn_st_mo.when_pressed = st_mo_pressed
 btn_st_mo.when_released = st_mo_released
@@ -789,7 +876,7 @@ def service_timer():
 
 
 def service_ui_timeout():
-    if ui.state == STATE_ALARM_RINGING:
+    if ui.state in (STATE_ALARM_RINGING, STATE_MUSIC_PLAYER):
         return
     if ui.state >= STATE_SETTINGS:
         if time.ticks_diff(time.ticks_ms(), last_input_ms) >= SETTINGS_TIMEOUT_MS:
@@ -841,7 +928,12 @@ def service_alarms(now):
 
 def service_clock_auto(now):
     global last_auto_key
-    if not sound_enabled or quiet_now(now) or active_alarm_index is not None:
+    if (
+        not sound_enabled
+        or quiet_now(now)
+        or active_alarm_index is not None
+        or music.active
+    ):
         return
     if now["minute"] not in (0, 30):
         return
@@ -916,7 +1008,7 @@ def service_display(now):
 
     if (
         overlay_active()
-        and ui.state not in (STATE_TIMER_RUNNING, STATE_ALARM_RINGING)
+        and ui.state not in (STATE_TIMER_RUNNING, STATE_ALARM_RINGING, STATE_MUSIC_PLAYER)
         and ui.state not in edit_states
     ):
         if overlay_kind == "volume":
@@ -995,6 +1087,8 @@ def service_display(now):
             active_alarm_index, alarm["hour"], alarm["minute"],
             alarm["sound"], alarm["track"],
         )
+    elif ui.state == STATE_MUSIC_PLAYER:
+        ui.show_music_player(music.current_track, music.mode, music.paused)
 
 
 print("Speaking Timer-Clock v%s starting" % APP_VERSION)
@@ -1006,6 +1100,7 @@ print(
     config["quiet_start"], "-", config["quiet_end"],
     "RTC correction:", config["rtc_correction_sec_per_day"],
     "Alarms:", sum(1 for alarm in config["alarms"] if alarm["enabled"]),
+    "Music mode:", music.mode,
 )
 
 while True:
@@ -1017,5 +1112,7 @@ while True:
     service_rtc_correction(now)
     audio.service()
     service_alarm_preview()
+    if ui.state == STATE_MUSIC_PLAYER and active_alarm_index is None:
+        music.service()
     service_display(now)
     time.sleep_ms(20)
