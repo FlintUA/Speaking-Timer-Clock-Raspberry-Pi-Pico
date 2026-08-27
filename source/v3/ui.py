@@ -26,6 +26,7 @@ STATE_ALARM_MINUTE = 43
 STATE_ALARM_SOUND = 44
 STATE_ALARM_TRACK = 45
 STATE_ALARM_RINGING = 46
+STATE_MUSIC_PLAYER = 50
 
 MONTH_NAMES = {
     1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "Mai", 6: "Jun",
@@ -178,6 +179,18 @@ class ClockUI:
         self._write(
             "ALARM %d RINGING" % (index + 1),
             "%s STOP=KEY" % detail,
+        )
+
+    def show_music_player(self, track, mode, paused=False):
+        mode_name = {
+            "normal": "NORM",
+            "shuffle": "SHUF",
+            "repeat": "REP1",
+        }.get(mode, "SHUF")
+        state = "PAUSE" if paused else "PLAY"
+        self._write(
+            "MUSIC %s" % mode_name,
+            "%s %02d/45" % (state, track),
         )
 
     def show_message(self, line1, line2=""):
