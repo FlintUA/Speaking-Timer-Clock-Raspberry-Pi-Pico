@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.4.1
+# Version: 3.4.2
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.4.1"
+APP_VERSION = "3.4.2"
 
 import time
 from machine import Pin, I2C
@@ -947,16 +947,17 @@ def service_clock_auto(now):
     if key == last_auto_key:
         return
 
-    if config["clock_mode"] == "voice":
+    # Half-hour signal is common to both MO and ST modes.
+    # It always uses the classic double-beep service track 07/015.
+    if now["minute"] == 30:
+        audio.enqueue(FOLDER_SILENCE, SILENCE_HALF_HOUR_TRACK)
+    elif config["clock_mode"] == "voice":
         speech.say_time(now["hour"], now["minute"])
     else:
-        if now["minute"] == 0:
-            strikes = now["hour"] % 12
-            if strikes == 0:
-                strikes = 12
-            audio.enqueue(FOLDER_CHIMES, strikes)
-        else:
-            audio.enqueue(FOLDER_SILENCE, SILENCE_HALF_HOUR_TRACK)
+        strikes = now["hour"] % 12
+        if strikes == 0:
+            strikes = 12
+        audio.enqueue(FOLDER_CHIMES, strikes)
 
     last_auto_key = key
 
