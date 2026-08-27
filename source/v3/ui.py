@@ -23,7 +23,9 @@ STATE_ALARM_LIST = 40
 STATE_ALARM_ENABLED = 41
 STATE_ALARM_HOUR = 42
 STATE_ALARM_MINUTE = 43
-STATE_ALARM_RINGING = 44
+STATE_ALARM_SOUND = 44
+STATE_ALARM_TRACK = 45
+STATE_ALARM_RINGING = 46
 
 MONTH_NAMES = {
     1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "Mai", 6: "Jun",
@@ -84,14 +86,15 @@ class ClockUI:
     def show_clock(self, now, sound_enabled=True, clock_mode="voice", quiet=False):
         mode = "MO" if clock_mode == "voice" else "ST"
         status = "M" if not sound_enabled else ("N" if quiet else "S")
-        line1 = "%02d:%02d:%02d %s %s" % (
-            now["hour"], now["minute"], now["second"], mode, status
+        self._write(
+            "%02d:%02d:%02d %s %s" % (
+                now["hour"], now["minute"], now["second"], mode, status
+            ),
+            "%02d-%s-%04d %s" % (
+                now["day"], MONTH_NAMES.get(now["month"], "???"),
+                now["year"], DAY_NAMES.get(now["weekday"], "??")
+            ),
         )
-        line2 = "%02d-%s-%04d %s" % (
-            now["day"], MONTH_NAMES.get(now["month"], "???"),
-            now["year"], DAY_NAMES.get(now["weekday"], "??")
-        )
-        self._write(line1, line2)
 
     def show_quick_timer(self, now, hours, minutes, seconds):
         mode = "MO" if now.get("clock_mode", "voice") == "voice" else "ST"
@@ -102,11 +105,7 @@ class ClockUI:
 
     def show_timer_edit(self, hours, minutes, seconds, field):
         cursor_x = {"h": 0, "m": 3, "s": 6}.get(field, 0)
-        self._write(
-            "SET TIMER",
-            "%02d:%02d:%02d" % (hours, minutes, seconds),
-            (cursor_x, 1, True),
-        )
+        self._write("SET TIMER", "%02d:%02d:%02d" % (hours, minutes, seconds), (cursor_x, 1, True))
 
     def show_timer_running(self, hours, minutes, seconds):
         self._write("TIMER RUNNING", "%02d:%02d:%02d" % (hours, minutes, seconds))
@@ -127,24 +126,15 @@ class ClockUI:
         self._write("SETTINGS %d/%d" % (index + 1, total), "> " + label)
 
     def show_language(self, language):
-        value = "RUSSIAN" if language == "ru" else "DEUTSCH"
-        self._write("LANGUAGE", value, (0, 1, True))
+        self._write("LANGUAGE", "RUSSIAN" if language == "ru" else "DEUTSCH", (0, 1, True))
 
     def show_set_time(self, hour, minute, second, field):
         cursor_x = {"h": 0, "m": 3, "s": 6}.get(field, 0)
-        self._write(
-            "SET TIME",
-            "%02d:%02d:%02d" % (hour, minute, second),
-            (cursor_x, 1, True),
-        )
+        self._write("SET TIME", "%02d:%02d:%02d" % (hour, minute, second), (cursor_x, 1, True))
 
     def show_set_date(self, day, month, year, field):
         cursor_x = {"d": 0, "m": 3, "y": 6}.get(field, 0)
-        self._write(
-            "SET DATE",
-            "%02d-%02d-%04d" % (day, month, year),
-            (cursor_x, 1, True),
-        )
+        self._write("SET DATE", "%02d-%02d-%04d" % (day, month, year), (cursor_x, 1, True))
 
     def show_quiet_enabled(self, enabled):
         self._write("QUIET MODE", "ON" if enabled else "OFF", (0, 1, True))
@@ -155,32 +145,39 @@ class ClockUI:
     def show_rtc_correction(self, value):
         self._write("RTC CORRECTION", "%+d sec/day" % value, (0, 1, True))
 
-    def show_alarm_list(self, index, enabled, hour, minute):
+    def show_alarm_list(self, index, enabled, hour, minute, sound, track):
         state = "ON" if enabled else "OFF"
+        detail = "SIG" if sound == "signal" else "M%02d" % track
         self._write(
-            "ALARM %d %s" % (index + 1, state),
+            "ALARM %d %s %s" % (index + 1, state, detail),
             "%02d:%02d DAILY" % (hour, minute),
         )
 
     def show_alarm_enabled(self, index, enabled):
-        self._write(
-            "ALARM %d ENABLE" % (index + 1),
-            "ON" if enabled else "OFF",
-            (0, 1, True),
-        )
+        self._write("ALARM %d ENABLE" % (index + 1), "ON" if enabled else "OFF", (0, 1, True))
 
     def show_alarm_time(self, index, hour, minute, field):
         cursor_x = 0 if field == "h" else 3
+        self._write("SET ALARM %d" % (index + 1), "%02d:%02d" % (hour, minute), (cursor_x, 1, True))
+
+    def show_alarm_sound(self, index, sound):
         self._write(
-            "SET ALARM %d" % (index + 1),
-            "%02d:%02d" % (hour, minute),
-            (cursor_x, 1, True),
+            "ALARM %d SOUND" % (index + 1),
+            "SIGNAL" if sound == "signal" else "MUSIC",
+            (0, 1, True),
         )
 
-    def show_alarm_ringing(self, index, hour, minute):
+    def show_alarm_track(self, index, track, preview=False):
+        line2 = "TRACK %02d / 45" % track
+        if preview:
+            line2 = "PLAY %02d / 45" % track
+        self._write("ALARM %d MUSIC" % (index + 1), line2, (6, 1, True))
+
+    def show_alarm_ringing(self, index, hour, minute, sound, track):
+        detail = "SIGNAL" if sound == "signal" else "MUSIC %02d" % track
         self._write(
             "ALARM %d RINGING" % (index + 1),
-            "%02d:%02d STOP=KEY" % (hour, minute),
+            "%s STOP=KEY" % detail,
         )
 
     def show_message(self, line1, line2=""):
