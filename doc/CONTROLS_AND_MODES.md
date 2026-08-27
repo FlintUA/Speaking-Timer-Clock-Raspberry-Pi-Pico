@@ -2,7 +2,7 @@
 
 This document describes the current front-panel controls, operating modes, and user-facing behavior of the `develop/v3` firmware.
 
-Current documented firmware baseline: **v3.3.0**.
+Current documented firmware baseline: **v3.3.1**.
 
 > This file is intended to be maintained together with the firmware. When button behavior, menu structure, audio behavior, or operating modes change, this document should be updated in the same development cycle.
 
@@ -66,12 +66,19 @@ There is only **one countdown timer** in v3.
 
 ### Button GP22 - ST/MO
 
-Switches the automatic clock audio mode.
+The button now has two actions:
+
+- Short press - switches the automatic clock audio mode between `MO` and `ST`.
+- Long press, about 0.9 seconds or longer - speaks the current time once.
+
+Automatic modes:
 
 - `MO` - spoken time.
 - `ST` - clock strikes / chime mode.
 
 The two modes are mutually exclusive for automatic clock output.
+
+Manual long-press speech is a direct user request, so it is allowed even during quiet/night mode. Global `SOUND OFF` still prevents playback.
 
 ### Button GP26 - Minus / Back
 
@@ -233,6 +240,7 @@ Quiet mode does **not** suppress:
 
 - countdown timer completion
 - daily alarms
+- manual current-time speech requested by long-pressing `ST/MO`
 
 This distinction is intentional.
 
@@ -250,7 +258,7 @@ This feature is intended for compensating a systematic DS1302 drift.
 
 Long-term calibration should be tested over multiple days before relying on a correction value.
 
-## 11. ST / MO automatic clock modes
+## 11. ST / MO automatic and manual clock audio
 
 ### MO - spoken time
 
@@ -265,6 +273,26 @@ German folders:
 
 - 11 - hours
 - 12 - minutes
+
+### Manual current-time speech
+
+Hold the physical `ST/MO` button for about 0.9 seconds or longer.
+
+The current RTC hour and minute are spoken once using the currently selected language, regardless of whether the automatic mode is `MO` or `ST`.
+
+Typical temporary LCD overlay:
+
+```text
+SPEAK TIME
+21:37
+```
+
+Behavior:
+
+- Works during quiet/night mode because it is a manual request.
+- Respects global `SOUND OFF`; when muted, no speech is queued.
+- If an alarm is ringing, the button action first stops the active alarm instead of starting manual time speech.
+- If alarm music preview is playing, long-pressing `ST/MO` stops that preview before attempting manual speech.
 
 ### ST - strikes / chimes
 
@@ -408,7 +436,7 @@ The stop request clears the pending alarm queue and sends a DFPlayer pause comma
 
 Quiet mode does not block alarms.
 
-Existing v3.2.0 alarm configurations are backward-compatible. If an old alarm has no `sound` field, v3.3.0 automatically treats it as `SIGNAL`.
+Existing v3.2.0 alarm configurations are backward-compatible. If an old alarm has no `sound` field, v3.3.x automatically treats it as `SIGNAL`.
 
 ## 13. Global sound ON/OFF
 
@@ -452,7 +480,7 @@ The following areas are not yet considered complete:
 
 - standalone music player mode using folder 08
 - final half-hour ST sound
-- broader audio priority rules between alarm, timer, clock speech/chime, and future music player
+- broader audio priority rules between alarm, timer, clock speech/chime, manual time speech, and future music player
 - persistent/deferred volume saving strategy
 - long-term RTC correction validation
 - birthday function / birthday melody
@@ -465,7 +493,7 @@ The following areas are not yet considered complete:
 Current expected startup line:
 
 ```text
-Speaking Timer-Clock v3.3.0 starting
+Speaking Timer-Clock v3.3.1 starting
 ```
 
 For hardware testing, always verify this line in the REPL before diagnosing behavior.
@@ -494,4 +522,4 @@ For hardware testing, always verify this line in the REPL before diagnosing beha
 
 ---
 
-Last documented state: v3.3.0. Core clock/timer/date/time functions are hardware-tested. Alarm navigation and spoken alarm phrase were hardware-tested in v3.2.0; selectable signal/music behavior introduced in v3.3.0 requires the next hardware test cycle. This document should be updated whenever user-visible behavior changes.
+Last documented state: v3.3.1. Core clock/timer/date/time functions are hardware-tested. Alarm navigation and spoken alarm phrase were hardware-tested in v3.2.0; selectable signal/music behavior introduced in v3.3.0 and ST/MO long-press manual current-time speech introduced in v3.3.1 require hardware confirmation. This document should be updated whenever user-visible behavior changes.
