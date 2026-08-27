@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.2.0
+# Version: 3.3.0
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.2.0"
+APP_VERSION = "3.3.0"
 
 import time
 from machine import Pin, I2C
@@ -18,6 +18,7 @@ from audio import (
     DFPlayerTransport,
     AudioQueue,
     Speech,
+    FOLDER_MUSIC,
     FOLDER_CHIMES,
     FOLDER_SILENCE,
     SILENCE_HALF_HOUR_TRACK,
@@ -50,6 +51,8 @@ from ui import (
     STATE_ALARM_ENABLED,
     STATE_ALARM_HOUR,
     STATE_ALARM_MINUTE,
+    STATE_ALARM_SOUND,
+    STATE_ALARM_TRACK,
     STATE_ALARM_RINGING,
 )
 
@@ -58,7 +61,7 @@ QUICK_TIMER_TIMEOUT_MS = 2500
 TIMER_FINISHED_TIMEOUT_MS = 7000
 OVERLAY_TIMEOUT_MS = 1600
 SETTINGS_TIMEOUT_MS = 20000
-ALARM_SCREEN_TIMEOUT_MS = 30000
+ALARM_SAFETY_TIMEOUT_MS = 15 * 60 * 1000
 TIMER_MAX_MINUTES = 240
 
 lcd = I2cLcd(
@@ -95,10 +98,13 @@ alarm_index = 0
 edit_alarm_enabled = False
 edit_alarm_hour = 7
 edit_alarm_minute = 0
+edit_alarm_sound = "signal"
+edit_alarm_track = 1
 active_alarm_index = None
-alarm_screen_until_ms = 0
+alarm_safety_until_ms = 0
 alarm_minute_key = None
 alarm_fired_indices = []
+alarm_preview_active = False
 
 settings_items = (
     "Language",
@@ -253,14 +259,39 @@ def current_alarm():
 
 def load_alarm_editor():
     global edit_alarm_enabled, edit_alarm_hour, edit_alarm_minute
+    global edit_alarm_sound, edit_alarm_track
     alarm = current_alarm()
     edit_alarm_enabled = alarm["enabled"]
     edit_alarm_hour = alarm["hour"]
     edit_alarm_minute = alarm["minute"]
+    edit_alarm_sound = alarm.get("sound", "signal")
+    edit_alarm_track = alarm.get("track", 1)
+
+
+def stop_alarm_preview():
+    global alarm_preview_active
+    if not alarm_preview_active:
+        return False
+    audio.clear(pause=True)
+    alarm_preview_active = False
+    print("Alarm music preview stopped")
+    return True
+
+
+def preview_alarm_music():
+    global alarm_preview_active
+    if alarm_preview_active:
+        stop_alarm_preview()
+        return
+    audio.clear(pause=True)
+    audio.enqueue(FOLDER_MUSIC, edit_alarm_track)
+    alarm_preview_active = True
+    print("Alarm music preview: track", edit_alarm_track)
 
 
 def open_alarm_list():
     global alarm_index
+    stop_alarm_preview()
     clear_overlay()
     if alarm_index < 0 or alarm_index > 4:
         alarm_index = 0
@@ -273,11 +304,15 @@ def save_alarm_editor():
     alarm["enabled"] = bool(edit_alarm_enabled)
     alarm["hour"] = int(edit_alarm_hour) % 24
     alarm["minute"] = int(edit_alarm_minute) % 60
+    alarm["sound"] = edit_alarm_sound
+    alarm["track"] = max(1, min(45, int(edit_alarm_track)))
     save_config(config)
     print(
         "Alarm %d saved:" % (alarm_index + 1),
         "ON" if alarm["enabled"] else "OFF",
         "%02d:%02d" % (alarm["hour"], alarm["minute"]),
+        alarm["sound"],
+        alarm["track"],
     )
 
 
@@ -287,32 +322,49 @@ def alarm_return_state():
     return STATE_CLOCK
 
 
-def stop_active_alarm():
-    global active_alarm_index, alarm_screen_until_ms
+def finish_active_alarm(reason):
+    global active_alarm_index, alarm_safety_until_ms
     if active_alarm_index is None:
         return False
-    print("Alarm %d stopped" % (active_alarm_index + 1))
-    audio.clear(pause=True)
+    print("Alarm %d finished: %s" % (active_alarm_index + 1, reason))
     active_alarm_index = None
-    alarm_screen_until_ms = 0
+    alarm_safety_until_ms = 0
     ui.set_state(alarm_return_state())
     mark_input()
     return True
 
 
+def stop_active_alarm():
+    if active_alarm_index is None:
+        return False
+    audio.clear(pause=True)
+    return finish_active_alarm("stopped by user")
+
+
 def trigger_alarm(index):
-    global active_alarm_index, alarm_screen_until_ms
+    global active_alarm_index, alarm_safety_until_ms
+    alarm = config["alarms"][index]
     active_alarm_index = index
-    alarm_screen_until_ms = time.ticks_add(
-        time.ticks_ms(), ALARM_SCREEN_TIMEOUT_MS
+    alarm_safety_until_ms = time.ticks_add(
+        time.ticks_ms(), ALARM_SAFETY_TIMEOUT_MS
     )
+    stop_alarm_preview()
     clear_overlay()
     ui.set_state(STATE_ALARM_RINGING)
-    print("Alarm %d ringing" % (index + 1))
+    print(
+        "Alarm %d ringing: %s track %d" % (
+            index + 1, alarm["sound"], alarm["track"]
+        )
+    )
     if sound_enabled:
-        # Service tracks 001..005 are Alarm 1..5 in both RU and DE folders.
         audio.clear(pause=True)
+        # First play the language-specific Alarm 1..5 phrase.
         speech.phrase(index + 1)
+        # Then play exactly one selected signal or music track.
+        if alarm["sound"] == "music":
+            audio.enqueue(FOLDER_MUSIC, alarm["track"])
+        else:
+            speech.phrase(PHRASE_TIMER_SIGNAL_LONG)
 
 
 def on_volume(event):
@@ -336,6 +388,7 @@ def on_timer(event):
     global edit_quiet_enabled, edit_quiet_start, edit_quiet_end, edit_rtc_corr
     global settings_index, alarm_index
     global edit_alarm_enabled, edit_alarm_hour, edit_alarm_minute
+    global edit_alarm_sound, edit_alarm_track, alarm_preview_active
 
     direction = 1 if event == Rotary.ROT_CW else -1
     mark_input()
@@ -385,6 +438,12 @@ def on_timer(event):
         edit_alarm_hour = _wrap(edit_alarm_hour, 0, 23, direction)
     elif ui.state == STATE_ALARM_MINUTE:
         edit_alarm_minute = _wrap(edit_alarm_minute, 0, 59, direction)
+    elif ui.state == STATE_ALARM_SOUND:
+        edit_alarm_sound = "music" if edit_alarm_sound == "signal" else "signal"
+    elif ui.state == STATE_ALARM_TRACK:
+        if alarm_preview_active:
+            stop_alarm_preview()
+        edit_alarm_track = _wrap(edit_alarm_track, 1, 45, direction)
 
 
 rotary_volume.add_handler(on_volume)
@@ -394,6 +453,8 @@ rotary_timer.add_handler(on_timer)
 def toggle_sound():
     global sound_enabled
     if stop_active_alarm():
+        return
+    if stop_alarm_preview():
         return
     sound_enabled = not sound_enabled
     if not sound_enabled:
@@ -529,6 +590,16 @@ def timer_button():
     elif ui.state == STATE_ALARM_HOUR:
         ui.set_state(STATE_ALARM_MINUTE)
     elif ui.state == STATE_ALARM_MINUTE:
+        ui.set_state(STATE_ALARM_SOUND)
+    elif ui.state == STATE_ALARM_SOUND:
+        if edit_alarm_sound == "music":
+            ui.set_state(STATE_ALARM_TRACK)
+        else:
+            save_alarm_editor()
+            ui.set_state(STATE_ALARM_LIST)
+            show_overlay("message", ("ALARM %d" % (alarm_index + 1), "SAVED"))
+    elif ui.state == STATE_ALARM_TRACK:
+        stop_alarm_preview()
         save_alarm_editor()
         ui.set_state(STATE_ALARM_LIST)
         show_overlay("message", ("ALARM %d" % (alarm_index + 1), "SAVED"))
@@ -556,9 +627,17 @@ def timer_mode_button():
 def alarm_button():
     if stop_active_alarm():
         return
+    if ui.state == STATE_ALARM_TRACK:
+        preview_alarm_music()
+        mark_input()
+        return
     if timer.running:
         return
-    if ui.state in (STATE_ALARM_LIST, STATE_ALARM_ENABLED, STATE_ALARM_HOUR, STATE_ALARM_MINUTE):
+    if ui.state in (
+        STATE_ALARM_LIST, STATE_ALARM_ENABLED, STATE_ALARM_HOUR,
+        STATE_ALARM_MINUTE, STATE_ALARM_SOUND,
+    ):
+        stop_alarm_preview()
         ui.set_state(STATE_CLOCK)
     else:
         open_alarm_list()
@@ -594,7 +673,11 @@ def minus_button():
         STATE_SETTINGS_RTC_CORR,
     ):
         ui.set_state(STATE_SETTINGS)
-    elif ui.state in (STATE_ALARM_ENABLED, STATE_ALARM_HOUR, STATE_ALARM_MINUTE):
+    elif ui.state in (
+        STATE_ALARM_ENABLED, STATE_ALARM_HOUR, STATE_ALARM_MINUTE,
+        STATE_ALARM_SOUND, STATE_ALARM_TRACK,
+    ):
+        stop_alarm_preview()
         ui.set_state(STATE_ALARM_LIST)
     elif ui.state == STATE_ALARM_LIST:
         ui.set_state(STATE_CLOCK)
@@ -622,7 +705,7 @@ def settings_button():
 # GP20 - VOLUME encoder push / ON-OFF
 # GP19 - TIMER encoder push / start-stop-confirm
 # GP28 - Timer 1/2 / exact HH:MM:SS setup
-# GP21 - Alarm
+# GP21 - Alarm / alarm music preview on track selection screen
 # GP22 - ST/MO
 # GP26 - Preset/Search '-' / Back
 # GP27 - Preset/Setup '+' / Setup-enter
@@ -665,7 +748,7 @@ def service_timer():
         if active_alarm_index is None:
             ui.set_state(STATE_TIMER_FINISHED)
         print("Timer finished")
-        if sound_enabled:
+        if sound_enabled and active_alarm_index is None:
             speech.phrase(PHRASE_TIMER_FINISHED)
             speech.phrase(PHRASE_TIMER_SIGNAL_LONG)
 
@@ -675,13 +758,19 @@ def service_ui_timeout():
         return
     if ui.state >= STATE_SETTINGS:
         if time.ticks_diff(time.ticks_ms(), last_input_ms) >= SETTINGS_TIMEOUT_MS:
+            stop_alarm_preview()
             clear_overlay()
             ui.set_state(STATE_CLOCK)
 
 
+def service_alarm_preview():
+    global alarm_preview_active
+    if alarm_preview_active and audio.idle():
+        alarm_preview_active = False
+
+
 def service_alarms(now):
     global alarm_minute_key, alarm_fired_indices
-    global active_alarm_index, alarm_screen_until_ms
 
     minute_key = (
         now["year"], now["month"], now["day"],
@@ -692,14 +781,15 @@ def service_alarms(now):
         alarm_fired_indices = []
 
     if active_alarm_index is not None:
+        if audio.idle():
+            finish_active_alarm("audio completed")
+            return
         if (
-            alarm_screen_until_ms
-            and time.ticks_diff(alarm_screen_until_ms, time.ticks_ms()) <= 0
+            alarm_safety_until_ms
+            and time.ticks_diff(alarm_safety_until_ms, time.ticks_ms()) <= 0
         ):
             audio.clear(pause=True)
-            active_alarm_index = None
-            alarm_screen_until_ms = 0
-            ui.set_state(alarm_return_state())
+            finish_active_alarm("safety timeout")
         return
 
     for index, alarm in enumerate(config["alarms"]):
@@ -716,7 +806,7 @@ def service_alarms(now):
 
 def service_clock_auto(now):
     global last_auto_key
-    if not sound_enabled or quiet_now(now):
+    if not sound_enabled or quiet_now(now) or active_alarm_index is not None:
         return
     if now["minute"] not in (0, 30):
         return
@@ -786,6 +876,7 @@ def service_display(now):
         STATE_SETTINGS_QUIET_END,
         STATE_SETTINGS_RTC_CORR,
         STATE_ALARM_ENABLED, STATE_ALARM_HOUR, STATE_ALARM_MINUTE,
+        STATE_ALARM_SOUND, STATE_ALARM_TRACK,
     )
 
     if (
@@ -849,16 +940,26 @@ def service_display(now):
         ui.show_rtc_correction(edit_rtc_corr)
     elif ui.state == STATE_ALARM_LIST:
         alarm = current_alarm()
-        ui.show_alarm_list(alarm_index, alarm["enabled"], alarm["hour"], alarm["minute"])
+        ui.show_alarm_list(
+            alarm_index, alarm["enabled"], alarm["hour"], alarm["minute"],
+            alarm["sound"], alarm["track"],
+        )
     elif ui.state == STATE_ALARM_ENABLED:
         ui.show_alarm_enabled(alarm_index, edit_alarm_enabled)
     elif ui.state == STATE_ALARM_HOUR:
         ui.show_alarm_time(alarm_index, edit_alarm_hour, edit_alarm_minute, "h")
     elif ui.state == STATE_ALARM_MINUTE:
         ui.show_alarm_time(alarm_index, edit_alarm_hour, edit_alarm_minute, "m")
+    elif ui.state == STATE_ALARM_SOUND:
+        ui.show_alarm_sound(alarm_index, edit_alarm_sound)
+    elif ui.state == STATE_ALARM_TRACK:
+        ui.show_alarm_track(alarm_index, edit_alarm_track, alarm_preview_active)
     elif ui.state == STATE_ALARM_RINGING:
         alarm = config["alarms"][active_alarm_index]
-        ui.show_alarm_ringing(active_alarm_index, alarm["hour"], alarm["minute"])
+        ui.show_alarm_ringing(
+            active_alarm_index, alarm["hour"], alarm["minute"],
+            alarm["sound"], alarm["track"],
+        )
 
 
 print("Speaking Timer-Clock v%s starting" % APP_VERSION)
@@ -880,5 +981,6 @@ while True:
     service_clock_auto(now)
     service_rtc_correction(now)
     audio.service()
+    service_alarm_preview()
     service_display(now)
     time.sleep_ms(20)
