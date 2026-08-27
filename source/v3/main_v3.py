@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.4.0
+# Version: 3.4.1
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.4.0"
+APP_VERSION = "3.4.1"
 
 import time
 from machine import Pin, I2C
@@ -759,7 +759,10 @@ def st_mo_released():
     held_ms = time.ticks_diff(time.ticks_ms(), st_mo_pressed_ms)
     st_mo_pressed_ms = 0
     if held_ms >= ST_MO_LONG_PRESS_MS:
-        speak_current_time()
+        if ui.state == STATE_MUSIC_PLAYER:
+            exit_music_player()
+        else:
+            speak_current_time()
     else:
         mode_button()
     mark_input()
@@ -826,7 +829,7 @@ def settings_button():
 # GP19 - TIMER encoder push / start-stop-confirm; Music Play/Pause
 # GP28 - Timer 1/2 / exact HH:MM:SS setup
 # GP21 - Alarm short / MEM-AMS long: Music Player; short in Music: play mode
-# GP22 - ST/MO short: mode switch, long: speak current time
+# GP22 - ST/MO short: mode switch; long: speak time, or exit Music Player
 # GP26 - Preset/Search '-' / Back; Music Previous
 # GP27 - Preset/Setup '+' / Setup-enter; Music Next
 btn_volume = Button(20)
