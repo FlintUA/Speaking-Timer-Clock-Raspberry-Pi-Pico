@@ -163,8 +163,13 @@ LANGUAGE_FOLDERS = {
 
 FOLDER_MUSIC = 8
 FOLDER_CHIMES = 18
-FOLDER_SILENCE = 19
-SILENCE_HALF_HOUR_TRACK = 1
+
+# The half-hour sound is language-neutral. Track 015 is the same classic
+# double-beep in service folders 07 and 17. The current ST path historically
+# imports these two names, so keep them as compatibility aliases and point
+# them at the confirmed RU copy (07/015). The DE copy 17/015 remains mirrored.
+FOLDER_SILENCE = 7
+SILENCE_HALF_HOUR_TRACK = 15
 
 PHRASE_TIMER_SETUP = 6
 PHRASE_TIMER_SET = 9
@@ -172,6 +177,12 @@ PHRASE_TIMER_FINISHED = 11
 PHRASE_TIMER_SIGNAL_SHORT = 12
 PHRASE_TIMER_SIGNAL_LONG = 13
 PHRASE_TIMER_CANCELLED = 14
+PHRASE_HALF_HOUR_DOUBLE_BEEP = 15
+
+# German-only service phrase 17/016 = "Minuten".
+# Standard spoken clock output intentionally does not append it because
+# expressions such as "zwei Uhr dreißig" are natural and complete in German.
+PHRASE_DE_MINUTEN = 16
 
 
 class Speech:
