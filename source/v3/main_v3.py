@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.3.0
+# Version: 3.3.1
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.3.0"
+APP_VERSION = "3.3.1"
 
 import time
 from machine import Pin, I2C
@@ -62,6 +62,7 @@ TIMER_FINISHED_TIMEOUT_MS = 7000
 OVERLAY_TIMEOUT_MS = 1600
 SETTINGS_TIMEOUT_MS = 20000
 ALARM_SAFETY_TIMEOUT_MS = 15 * 60 * 1000
+ST_MO_LONG_PRESS_MS = 900
 TIMER_MAX_MINUTES = 240
 
 lcd = I2cLcd(
@@ -105,6 +106,7 @@ alarm_safety_until_ms = 0
 alarm_minute_key = None
 alarm_fired_indices = []
 alarm_preview_active = False
+st_mo_pressed_ms = 0
 
 settings_items = (
     "Language",
@@ -358,9 +360,7 @@ def trigger_alarm(index):
     )
     if sound_enabled:
         audio.clear(pause=True)
-        # First play the language-specific Alarm 1..5 phrase.
         speech.phrase(index + 1)
-        # Then play exactly one selected signal or music track.
         if alarm["sound"] == "music":
             audio.enqueue(FOLDER_MUSIC, alarm["track"])
         else:
@@ -655,6 +655,40 @@ def mode_button():
     print("Clock mode:", config["clock_mode"])
 
 
+def speak_current_time():
+    if stop_active_alarm():
+        return
+    if stop_alarm_preview():
+        return
+    if not sound_enabled:
+        show_overlay("sound", False)
+        print("Manual time speech skipped: sound off")
+        return
+    now = rtc_now()
+    audio.clear(pause=True)
+    speech.say_time(now["hour"], now["minute"])
+    show_overlay("message", ("SPEAK TIME", "%02d:%02d" % (now["hour"], now["minute"])))
+    print("Manual time speech:", "%02d:%02d" % (now["hour"], now["minute"]))
+
+
+def st_mo_pressed():
+    global st_mo_pressed_ms
+    st_mo_pressed_ms = time.ticks_ms()
+
+
+def st_mo_released():
+    global st_mo_pressed_ms
+    if not st_mo_pressed_ms:
+        return
+    held_ms = time.ticks_diff(time.ticks_ms(), st_mo_pressed_ms)
+    st_mo_pressed_ms = 0
+    if held_ms >= ST_MO_LONG_PRESS_MS:
+        speak_current_time()
+    else:
+        mode_button()
+    mark_input()
+
+
 def minus_button():
     if stop_active_alarm():
         return
@@ -706,7 +740,7 @@ def settings_button():
 # GP19 - TIMER encoder push / start-stop-confirm
 # GP28 - Timer 1/2 / exact HH:MM:SS setup
 # GP21 - Alarm / alarm music preview on track selection screen
-# GP22 - ST/MO
+# GP22 - ST/MO short: mode switch, long: speak current time
 # GP26 - Preset/Search '-' / Back
 # GP27 - Preset/Setup '+' / Setup-enter
 btn_volume = Button(20)
@@ -718,7 +752,8 @@ btn_timer_mode.when_pressed = timer_mode_button
 btn_alarm = Button(21)
 btn_alarm.when_pressed = alarm_button
 btn_st_mo = Button(22)
-btn_st_mo.when_pressed = mode_button
+btn_st_mo.when_pressed = st_mo_pressed
+btn_st_mo.when_released = st_mo_released
 btn_minus = Button(26)
 btn_minus.when_pressed = minus_button
 btn_setup_plus = Button(27)
