@@ -2,7 +2,7 @@
 
 This document describes the current front-panel controls, operating modes, and user-facing behavior of the `develop/v3` firmware.
 
-Current documented firmware baseline: **v3.2.0**.
+Current documented firmware baseline: **v3.3.0**.
 
 > This file is intended to be maintained together with the firmware. When button behavior, menu structure, audio behavior, or operating modes change, this document should be updated in the same development cycle.
 
@@ -17,6 +17,7 @@ Physical label: `- VOLUME +`
 - Range - `0..30`.
 - Push - global sound ON/OFF.
 - When volume changes, the LCD temporarily shows the current volume.
+- If an alarm is ringing, push stops the alarm instead of toggling mute.
 
 GPIO:
 
@@ -33,8 +34,9 @@ Its function depends on the current screen.
 - Main clock screen - quick countdown timer adjustment in minutes.
 - Timer edit - changes hours, minutes, or seconds.
 - Settings - moves through menu items or changes the selected value.
-- Alarm menu - selects Alarm 1..5 and edits ON/OFF, hour, and minute.
+- Alarm menu - selects Alarm 1..5 and edits ON/OFF, hour, minute, sound type, and music track.
 - Push - start/stop/confirm depending on context.
+- If an alarm is ringing, push stops the alarm.
 
 GPIO:
 
@@ -59,6 +61,8 @@ There is only **one countdown timer** in v3.
 - Opens the alarm list.
 - There are 5 daily alarms.
 - While an alarm is ringing, pressing this button stops the active alarm.
+- On the `ALARM N MUSIC` track-selection screen, pressing this button previews the selected music track.
+- Press `Alarm` again during preview to stop the preview.
 
 ### Button GP22 - ST/MO
 
@@ -78,6 +82,7 @@ Current v3 use:
 - Back from settings and edit screens.
 - Exit quick timer selection without starting it.
 - Return toward the normal clock display.
+- Exit alarm editing without saving the current edit sequence.
 
 ### Button GP27 - Setup / Plus
 
@@ -278,32 +283,102 @@ A dedicated half-hour sound can be substituted later.
 
 Five independent daily alarms are available.
 
-Each alarm stores:
+Each alarm stores independently:
 
 - enabled / disabled
 - hour
 - minute
+- sound type - `signal` or `music`
+- selected music track - `01..45`
 
-Typical list screen:
+Typical list screens:
 
 ```text
-ALARM 1 ON
+ALARM 1 ON SIG
 07:30 DAILY
 ```
 
-Editing sequence:
+or:
+
+```text
+ALARM 1 ON M12
+07:30 DAILY
+```
+
+`SIG` means the standard long signal. `M12` means music track 12.
+
+### Alarm editing sequence
 
 1. Select Alarm 1..5
 2. ON/OFF
 3. Hour
 4. Minute
-5. Save
+5. Sound type - SIGNAL or MUSIC
+6. If MUSIC is selected - music track 01..45
+7. Save
 
-Alarm settings are stored in `/config.json` and survive Pico restart.
+For `SIGNAL`, saving happens immediately after confirming the sound type.
 
-### Alarm audio
+For `MUSIC`, the track-selection screen appears:
 
-Current alarm behavior uses the language-specific service phrase track for the corresponding alarm number.
+```text
+ALARM 1 MUSIC
+TRACK 12 / 45
+```
+
+Rotate the right encoder to choose a track.
+
+### Previewing alarm music
+
+On the music track-selection screen:
+
+- Press the physical `Alarm` button to preview the selected track.
+- The screen changes the second line to `PLAY NN / 45` while preview is active.
+- Press `Alarm` again to stop preview.
+- Rotating to another track stops the current preview before changing the track number.
+- Leaving the edit screen also stops preview.
+
+### Alarm audio sequence
+
+At the alarm time, the audio sequence is:
+
+```text
+Alarm N spoken/service phrase
+            ->
+selected SIGNAL or MUSIC track
+            ->
+return to clock when audio ends
+```
+
+The alarm does **not** loop indefinitely.
+
+It ends when either:
+
+- the user stops it, or
+- the selected signal/music finishes naturally.
+
+A large safety timeout exists only as protection against a stuck DFPlayer/BUSY condition. It is not the normal alarm duration and should not truncate ordinary music tracks.
+
+### Alarm signal mode
+
+The language-specific Alarm 1..5 phrase plays first.
+
+Then the standard long signal uses service phrase track `013`:
+
+- Russian - `07/013`
+- German - `17/013`
+
+### Alarm music mode
+
+The language-specific Alarm 1..5 phrase plays first.
+
+Then one selected music track from folder `08` is played:
+
+- `08/001` through `08/045`
+
+Each of the five alarms can use a different music track.
+
+### Alarm phrase tracks
 
 Russian service folder:
 
@@ -321,16 +396,19 @@ German service folder:
 - `17/004` - Alarm 4
 - `17/005` - Alarm 5
 
-At the moment this produces the available alarm speech/service audio only. A separate music or repeating alarm signal after the spoken phrase is **not yet implemented**.
+### Stopping a ringing alarm
 
-When an alarm is active, it can be stopped using:
+A ringing alarm can be stopped using:
 
 - the Alarm button
 - the right encoder push
+- the left encoder push / ON-OFF
 
-The active alarm screen also has a safety timeout so it cannot remain permanently on the LCD.
+The stop request clears the pending alarm queue and sends a DFPlayer pause command. If the DFPlayer command-gap interval is still active, the pause command is deferred and sent as soon as the transport allows it.
 
 Quiet mode does not block alarms.
+
+Existing v3.2.0 alarm configurations are backward-compatible. If an old alarm has no `sound` field, v3.3.0 automatically treats it as `SIGNAL`.
 
 ## 13. Global sound ON/OFF
 
@@ -338,10 +416,9 @@ Push the left volume encoder.
 
 - ON - normal audio operation.
 - OFF - global audio mute.
+- While an alarm is ringing, the same push stops the alarm instead of toggling the mute state.
 
-The LCD briefly displays the sound state.
-
-Note: interaction between mute and an already-playing DFPlayer track still deserves additional hardware testing.
+The LCD briefly displays the sound state during normal operation.
 
 ## 14. Audio folder map used by v3
 
@@ -354,7 +431,7 @@ Primary numeric DFPlayer folder structure:
 - 05 - Russian years 2023..2029
 - 06 - Russian weekdays
 - 07 - Russian service phrases / alarms / timer phrases
-- 08 - music
+- 08 - music, tracks 001..045 currently used for selectable alarm music
 - 09 - Russian generic numbers
 - 10 - reserved
 - 11 - German hours
@@ -373,23 +450,22 @@ Primary numeric DFPlayer folder structure:
 
 The following areas are not yet considered complete:
 
-- separate alarm music / repeating alarm tone after the spoken alarm phrase
-- music player mode using folder 08
+- standalone music player mode using folder 08
 - final half-hour ST sound
-- audio priority rules between alarm, timer, clock speech/chime, and future music
+- broader audio priority rules between alarm, timer, clock speech/chime, and future music player
 - persistent/deferred volume saving strategy
 - long-term RTC correction validation
-- final verification of sound-off behavior during an already-playing track
 - birthday function / birthday melody
+- extended hardware testing of all 45 selectable music tracks
 
 ## 16. Firmware versioning
 
 `main_v3.py` contains an explicit application version and prints it on startup.
 
-Example:
+Current expected startup line:
 
 ```text
-Speaking Timer-Clock v3.2.0 starting
+Speaking Timer-Clock v3.3.0 starting
 ```
 
 For hardware testing, always verify this line in the REPL before diagnosing behavior.
@@ -418,4 +494,4 @@ For hardware testing, always verify this line in the REPL before diagnosing beha
 
 ---
 
-Last documented state: v3.2.0, hardware-tested core clock/timer/date/time/alarm navigation working. This document should be updated whenever user-visible behavior changes.
+Last documented state: v3.3.0. Core clock/timer/date/time functions are hardware-tested. Alarm navigation and spoken alarm phrase were hardware-tested in v3.2.0; selectable signal/music behavior introduced in v3.3.0 requires the next hardware test cycle. This document should be updated whenever user-visible behavior changes.
