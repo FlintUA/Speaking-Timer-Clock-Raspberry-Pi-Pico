@@ -36,6 +36,8 @@ def _default_alarms():
             "enabled": enabled,
             "hour": hour,
             "minute": minute,
+            "sound": "signal",
+            "track": 1,
         })
     return result
 
@@ -58,10 +60,20 @@ def _validated_alarms(value):
             minute = int(item.get("minute", default["minute"])) % 60
         except (TypeError, ValueError):
             minute = default["minute"]
+        sound = item.get("sound", "signal")
+        if sound not in ("signal", "music"):
+            sound = "signal"
+        try:
+            track = int(item.get("track", 1))
+        except (TypeError, ValueError):
+            track = 1
+        track = max(1, min(45, track))
         result.append({
             "enabled": bool(item.get("enabled", default["enabled"])),
             "hour": hour,
             "minute": minute,
+            "sound": sound,
+            "track": track,
         })
     return result
 
