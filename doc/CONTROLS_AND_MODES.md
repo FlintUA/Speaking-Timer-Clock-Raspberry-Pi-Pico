@@ -2,7 +2,7 @@
 
 This document describes the current front-panel controls, operating modes, and user-facing behavior of the `develop/v3` firmware.
 
-Current documented firmware baseline: **v3.3.1**.
+Current documented firmware baseline: **v3.4.0**.
 
 > This file is intended to be maintained together with the firmware. When button behavior, menu structure, audio behavior, or operating modes change, this document should be updated in the same development cycle.
 
@@ -35,6 +35,7 @@ Its function depends on the current screen.
 - Timer edit - changes hours, minutes, or seconds.
 - Settings - moves through menu items or changes the selected value.
 - Alarm menu - selects Alarm 1..5 and edits ON/OFF, hour, minute, sound type, and music track.
+- Music Player - rotation changes track; push toggles Play/Pause.
 - Push - start/stop/confirm depending on context.
 - If an alarm is ringing, push stops the alarm.
 
@@ -56,17 +57,28 @@ The physical `Timer 1/2` label is reused for the single precise countdown timer.
 
 There is only **one countdown timer** in v3.
 
-### Button GP21 - Alarm
+### Button GP21 - Alarm / MEM-AMS
 
-- Opens the alarm list.
-- There are 5 daily alarms.
-- While an alarm is ringing, pressing this button stops the active alarm.
-- On the `ALARM N MUSIC` track-selection screen, pressing this button previews the selected music track.
-- Press `Alarm` again during preview to stop the preview.
+This button now uses both original front-panel meanings.
+
+Normal clock/alarm operation:
+
+- Short press - opens the alarm list.
+- While an alarm is ringing - stops the active alarm.
+- On the `ALARM N MUSIC` track-selection screen - short press previews/stops the selected alarm music track.
+
+Music Player:
+
+- Long press, about 0.9 seconds or longer - enters Music Player.
+- Long press again while Music Player is open - stops music and exits to the clock.
+- Short press while Music Player is open - cycles playback mode:
+  - `NORMAL`
+  - `SHUFFLE`
+  - `REPEAT ONE`
 
 ### Button GP22 - ST/MO
 
-The button now has two actions:
+The button has two actions:
 
 - Short press - switches the automatic clock audio mode between `MO` and `ST`.
 - Long press, about 0.9 seconds or longer - speaks the current time once.
@@ -90,12 +102,14 @@ Current v3 use:
 - Exit quick timer selection without starting it.
 - Return toward the normal clock display.
 - Exit alarm editing without saving the current edit sequence.
+- Music Player - previous track.
 
 ### Button GP27 - Setup / Plus
 
 - From the normal clock screen - opens Settings.
 - Inside Settings - enters the selected menu item.
 - While editing a setting - acts as confirm/next in the same way as the right encoder push where implemented.
+- Music Player - next track.
 
 ## 2. Main clock screen
 
@@ -360,9 +374,9 @@ Rotate the right encoder to choose a track.
 
 On the music track-selection screen:
 
-- Press the physical `Alarm` button to preview the selected track.
+- Short-press the physical `Alarm` button to preview the selected track.
 - The screen changes the second line to `PLAY NN / 45` while preview is active.
-- Press `Alarm` again to stop preview.
+- Short-press `Alarm` again to stop preview.
 - Rotating to another track stops the current preview before changing the track number.
 - Leaving the edit screen also stops preview.
 
@@ -406,24 +420,6 @@ Then one selected music track from folder `08` is played:
 
 Each of the five alarms can use a different music track.
 
-### Alarm phrase tracks
-
-Russian service folder:
-
-- `07/001` - Alarm 1
-- `07/002` - Alarm 2
-- `07/003` - Alarm 3
-- `07/004` - Alarm 4
-- `07/005` - Alarm 5
-
-German service folder:
-
-- `17/001` - Alarm 1
-- `17/002` - Alarm 2
-- `17/003` - Alarm 3
-- `17/004` - Alarm 4
-- `17/005` - Alarm 5
-
 ### Stopping a ringing alarm
 
 A ringing alarm can be stopped using:
@@ -436,19 +432,120 @@ The stop request clears the pending alarm queue and sends a DFPlayer pause comma
 
 Quiet mode does not block alarms.
 
-Existing v3.2.0 alarm configurations are backward-compatible. If an old alarm has no `sound` field, v3.3.x automatically treats it as `SIGNAL`.
+Existing v3.2.0 alarm configurations are backward-compatible. If an old alarm has no `sound` field, v3.3.x and later automatically treat it as `SIGNAL`.
 
-## 13. Global sound ON/OFF
+## 13. Music Player
+
+Music Player uses folder `08`, currently tracks `001..045`.
+
+### Enter / exit
+
+From normal operation:
+
+- Hold `Alarm / MEM-AMS` for about 0.9 seconds or longer - enter Music Player and start playback.
+- Hold the same button again - stop playback and return to the normal clock.
+
+Music Player is not opened while a countdown timer is running or an alarm is actively ringing.
+
+Typical LCD:
+
+```text
+MUSIC SHUF
+PLAY 12/45
+```
+
+When paused:
+
+```text
+MUSIC SHUF
+PAUSE 12/45
+```
+
+### Controls
+
+While Music Player is open:
+
+- Right encoder rotation clockwise - next track.
+- Right encoder rotation counter-clockwise - previous track.
+- Right encoder push - Play/Pause.
+- `-` button - previous track.
+- `+ / Setup` button - next track.
+- Short `Alarm / MEM-AMS` - cycle playback mode.
+- Long `Alarm / MEM-AMS` - stop and exit Music Player.
+- Left encoder rotation - volume as usual.
+
+### Playback modes
+
+Short-press `Alarm / MEM-AMS` while Music Player is open to cycle:
+
+1. `NORMAL`
+2. `SHUFFLE`
+3. `REPEAT ONE`
+
+LCD abbreviations:
+
+- `NORM` - Normal
+- `SHUF` - Shuffle
+- `REP1` - Repeat One
+
+`SHUFFLE` is the default mode after firmware start.
+
+### NORMAL
+
+Tracks advance sequentially:
+
+```text
+01 -> 02 -> 03 -> ... -> 45 -> 01
+```
+
+### REPEAT ONE
+
+The currently selected track is played repeatedly until the user changes track, changes mode, pauses, exits the player, or another higher-priority function stops playback.
+
+### SHUFFLE - no-repeat design
+
+Shuffle does **not** choose a fresh random number for every song.
+
+Instead, it uses a shuffle bag containing all available tracks. The complete `01..45` set is randomly reordered and consumed one track at a time.
+
+Guarantees:
+
+- Every available track is played once before any automatic shuffle repeat is allowed.
+- A track cannot randomly reappear after only 5, 6, or 7 songs within the same shuffle cycle.
+- There are 45 unique tracks in one complete shuffle cycle.
+- When a new cycle is generated, the final 7 tracks of the previous cycle are explicitly excluded from the front of the new cycle.
+- With the current 45-track library and a guard of 7, at least 38 other tracks are placed ahead of those previous final 7 tracks in the new cycle.
+
+Therefore the cycle boundary cannot immediately produce the same group of recently heard songs again.
+
+The shuffle queue and recent-history guard live in RAM. A Pico reboot creates a fresh shuffle order rather than repeatedly writing shuffle state to flash.
+
+Manual `Previous` is intentionally allowed to replay an already heard track because the user explicitly requested it. This does not weaken the no-repeat guarantee for automatic shuffle progression.
+
+### Automatic next track
+
+When DFPlayer BUSY reports that the current music file has ended, the player automatically queues the next track according to the selected playback mode.
+
+### Interaction with automatic clock audio
+
+Automatic `MO` spoken-time and `ST` chimes are suppressed while Music Player is actively playing so they do not get mixed into the music queue.
+
+An alarm has priority over Music Player. If an alarm fires, music is stopped and the alarm audio sequence takes control.
+
+Broader pause/resume priority behavior around future sleep-timer and other features can be refined later.
+
+## 14. Global sound ON/OFF
 
 Push the left volume encoder.
 
 - ON - normal audio operation.
 - OFF - global audio mute.
 - While an alarm is ringing, the same push stops the alarm instead of toggling the mute state.
+- In Music Player, switching sound off stops current music playback.
 
 The LCD briefly displays the sound state during normal operation.
 
-## 14. Audio folder map used by v3
+## 15. Audio folder map used by v3
 
 Primary numeric DFPlayer folder structure:
 
@@ -459,7 +556,7 @@ Primary numeric DFPlayer folder structure:
 - 05 - Russian years 2023..2029
 - 06 - Russian weekdays
 - 07 - Russian service phrases / alarms / timer phrases
-- 08 - music, tracks 001..045 currently used for selectable alarm music
+- 08 - music, tracks 001..045 used by alarm music and Music Player
 - 09 - Russian generic numbers
 - 10 - reserved
 - 11 - German hours
@@ -474,31 +571,32 @@ Primary numeric DFPlayer folder structure:
 - 20 - reserved
 - 21 - reserved
 
-## 15. Current known incomplete features
+## 16. Current known incomplete features
 
 The following areas are not yet considered complete:
 
-- standalone music player mode using folder 08
+- Snooze and day-of-week schedules for alarms
+- Sleep Timer for Music Player
 - final half-hour ST sound
-- broader audio priority rules between alarm, timer, clock speech/chime, manual time speech, and future music player
+- broader audio priority/resume rules between alarm, timer, clock speech/chime, manual speech, and music
 - persistent/deferred volume saving strategy
 - long-term RTC correction validation
 - birthday function / birthday melody
 - extended hardware testing of all 45 selectable music tracks
 
-## 16. Firmware versioning
+## 17. Firmware versioning
 
 `main_v3.py` contains an explicit application version and prints it on startup.
 
 Current expected startup line:
 
 ```text
-Speaking Timer-Clock v3.3.1 starting
+Speaking Timer-Clock v3.4.0 starting
 ```
 
 For hardware testing, always verify this line in the REPL before diagnosing behavior.
 
-## 17. Hardware pin summary
+## 18. Hardware pin summary
 
 - LCD SDA - GP0
 - LCD SCL - GP1
@@ -515,11 +613,11 @@ For hardware testing, always verify this line in the REPL before diagnosing beha
 - Timer encoder B/CLK - GP10
 - Timer encoder push - GP19
 - Timer 1/2 button - GP28
-- Alarm button - GP21
+- Alarm / MEM-AMS button - GP21
 - ST/MO button - GP22
-- Minus/Back button - GP26
-- Setup/Plus button - GP27
+- Minus/Back/Music Previous button - GP26
+- Setup/Plus/Music Next button - GP27
 
 ---
 
-Last documented state: v3.3.1. Core clock/timer/date/time functions are hardware-tested. Alarm navigation and spoken alarm phrase were hardware-tested in v3.2.0; selectable signal/music behavior introduced in v3.3.0 and ST/MO long-press manual current-time speech introduced in v3.3.1 require hardware confirmation. This document should be updated whenever user-visible behavior changes.
+Last documented state: v3.4.0. Core clock/timer/date/time and manual time speech are hardware-tested by the user. Music Player, automatic no-repeat shuffle, and the new long-press `Alarm/MEM-AMS` entry gesture require the next hardware test cycle. This document should be updated whenever user-visible behavior changes.
