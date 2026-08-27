@@ -80,13 +80,18 @@ class AudioQueue:
         self._seen_busy = False
         self._start_ms = 0
         self._volume_pending = None
+        self._pause_pending = False
 
     def clear(self, pause=False):
         self._queue = []
         self._track_started = False
         self._seen_busy = False
-        if pause and self.transport.command_ready():
-            self.transport.pause()
+        if pause:
+            if self.transport.command_ready():
+                self.transport.pause()
+                self._pause_pending = False
+            else:
+                self._pause_pending = True
 
     def enqueue(self, folder, track):
         self._queue.append((int(folder), int(track)))
@@ -102,6 +107,12 @@ class AudioQueue:
         return not self._queue and not self._track_started
 
     def service(self):
+        if self._pause_pending:
+            if self.transport.command_ready():
+                self.transport.pause()
+                self._pause_pending = False
+            return
+
         if self._volume_pending is not None and self.transport.command_ready():
             value = self._volume_pending
             self._volume_pending = None
