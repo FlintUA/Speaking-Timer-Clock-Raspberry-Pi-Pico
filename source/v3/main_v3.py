@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.4.2
+# Version: 3.4.3
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.4.2"
+APP_VERSION = "3.4.3"
 
 import time
 from machine import Pin, I2C
@@ -23,6 +23,7 @@ from audio import (
     FOLDER_CHIMES,
     FOLDER_SILENCE,
     SILENCE_HALF_HOUR_TRACK,
+    PHRASE_TIMER_SET,
     PHRASE_TIMER_FINISHED,
     PHRASE_TIMER_SIGNAL_LONG,
     PHRASE_TIMER_CANCELLED,
@@ -507,6 +508,8 @@ def start_current_timer():
     clear_overlay()
     timer.start()
     ui.set_state(STATE_TIMER_RUNNING)
+    if sound_enabled:
+        speech.phrase(PHRASE_TIMER_SET)
     mark_input()
     print("Timer started:", timer.get_hms())
 
