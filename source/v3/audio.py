@@ -171,8 +171,18 @@ FOLDER_CHIMES = 18
 FOLDER_SILENCE = 7
 SILENCE_HALF_HOUR_TRACK = 15
 
+# Confirmed service phrase map in folders 07 (RU) and 17 (DE):
+# 006 - timer setup
+# 007 - timer set / timer started
+# 009 - sound off
+# 011 - timer finished
+# 012 - short timer signal
+# 013 - long timer signal
+# 014 - timer cancelled
+# 015 - half-hour double beep
 PHRASE_TIMER_SETUP = 6
-PHRASE_TIMER_SET = 9
+PHRASE_TIMER_SET = 7
+PHRASE_SOUND_OFF = 9
 PHRASE_TIMER_FINISHED = 11
 PHRASE_TIMER_SIGNAL_SHORT = 12
 PHRASE_TIMER_SIGNAL_LONG = 13
