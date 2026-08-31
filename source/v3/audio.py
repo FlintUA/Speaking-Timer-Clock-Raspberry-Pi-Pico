@@ -28,12 +28,15 @@ class DFPlayerTransport:
     def busy(self):
         return self.busy_pin.value() == 0
 
-    def _send(self, command, p1=0, p2=0):
+    def _send(self, command, p1=0, p2=0, ack=None):
+        if ack is None:
+            ack = self.ACKNOWLEDGE
+        ack = 1 if ack else 0
         checksum = -(
             self.VERSION_BYTE
             + self.COMMAND_LENGTH
             + command
-            + self.ACKNOWLEDGE
+            + ack
             + p1
             + p2
         )
@@ -44,7 +47,7 @@ class DFPlayerTransport:
             self.VERSION_BYTE,
             self.COMMAND_LENGTH,
             command,
-            self.ACKNOWLEDGE,
+            ack,
             p1 & 0xFF,
             p2 & 0xFF,
             high,
@@ -68,6 +71,62 @@ class DFPlayerTransport:
 
     def resume(self):
         self._send(0x0D, 0, 0)
+
+    def _drain_uart(self):
+        while self.uart.any():
+            self.uart.read()
+
+    def _wait_for_response(self, command, timeout_ms=700):
+        deadline = time.ticks_add(time.ticks_ms(), int(timeout_ms))
+        buffer = bytearray()
+
+        while time.ticks_diff(deadline, time.ticks_ms()) > 0:
+            if self.uart.any():
+                data = self.uart.read()
+                if data:
+                    buffer.extend(data)
+
+                while len(buffer) >= 10:
+                    while buffer and buffer[0] != self.START_BYTE:
+                        del buffer[0]
+                    if len(buffer) < 10:
+                        break
+
+                    if buffer[9] != self.END_BYTE:
+                        del buffer[0]
+                        continue
+
+                    frame = buffer[:10]
+                    del buffer[:10]
+                    if frame[3] == command:
+                        return (frame[5] << 8) | frame[6]
+            time.sleep_ms(10)
+
+        return None
+
+    def read_file_count_in_folder(self, folder, timeout_ms=700, retries=3):
+        """Return DFPlayer file count for a numbered folder, or None on failure.
+
+        DFPlayer query command 0x4E reports the number of files in a folder.
+        Some compatible clones have unreliable feedback, so callers should
+        retain a safe fallback count.
+        """
+        folder = max(1, min(99, int(folder)))
+        retries = max(1, int(retries))
+
+        for _ in range(retries):
+            self._drain_uart()
+            while not self.command_ready():
+                time.sleep_ms(10)
+
+            # Match DFRobot's query form: 16-bit argument 0x00, folder and ACK.
+            self._send(0x4E, 0, folder, ack=1)
+            value = self._wait_for_response(0x4E, timeout_ms)
+            if value is not None and 1 <= value <= 255:
+                return value
+            time.sleep_ms(150)
+
+        return None
 
 
 class AudioQueue:
