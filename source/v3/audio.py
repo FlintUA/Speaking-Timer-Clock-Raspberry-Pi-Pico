@@ -87,17 +87,20 @@ class DFPlayerTransport:
                     buffer.extend(data)
 
                 while len(buffer) >= 10:
-                    while buffer and buffer[0] != self.START_BYTE:
-                        del buffer[0]
+                    start = 0
+                    while start < len(buffer) and buffer[start] != self.START_BYTE:
+                        start += 1
+                    if start:
+                        buffer = buffer[start:]
                     if len(buffer) < 10:
                         break
 
                     if buffer[9] != self.END_BYTE:
-                        del buffer[0]
+                        buffer = buffer[1:]
                         continue
 
                     frame = buffer[:10]
-                    del buffer[:10]
+                    buffer = buffer[10:]
                     if frame[3] == command:
                         return (frame[5] << 8) | frame[6]
             time.sleep_ms(10)
