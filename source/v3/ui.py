@@ -181,16 +181,17 @@ class ClockUI:
             "%s STOP=KEY" % detail,
         )
 
-    def show_music_player(self, track, mode, paused=False):
+    def show_music_player(self, track, mode, paused=False, total=45):
         mode_name = {
             "normal": "NORM",
             "shuffle": "SHUF",
             "repeat": "REP1",
         }.get(mode, "SHUF")
         state = "PAUSE" if paused else "PLAY"
+        total = max(1, int(total))
         self._write(
             "MUSIC %s" % mode_name,
-            "%s %02d/45" % (state, track),
+            "%s %02d/%02d" % (state, track, total),
         )
 
     def show_message(self, line1, line2=""):
