@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.4.3
+# Version: 3.5.0
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.4.3"
+APP_VERSION = "3.5.0"
 
 import time
 from machine import Pin, I2C
@@ -27,6 +27,7 @@ from audio import (
     PHRASE_TIMER_FINISHED,
     PHRASE_TIMER_SIGNAL_LONG,
     PHRASE_TIMER_CANCELLED,
+    PHRASE_UI_CLICK,
 )
 from ui import (
     ClockUI,
@@ -67,6 +68,7 @@ SETTINGS_TIMEOUT_MS = 20000
 ALARM_SAFETY_TIMEOUT_MS = 15 * 60 * 1000
 ST_MO_LONG_PRESS_MS = 900
 ALARM_LONG_PRESS_MS = 900
+UI_CLICK_MIN_GAP_MS = 90
 TIMER_MAX_MINUTES = 240
 
 lcd = I2cLcd(
@@ -134,11 +136,35 @@ last_auto_key = None
 last_rtc_correction_key = None
 last_timer_rotary_ms = 0
 timer_fast_streak = 0
+last_ui_click_ms = time.ticks_add(time.ticks_ms(), -UI_CLICK_MIN_GAP_MS)
 
 
 def mark_input():
     global last_input_ms
     last_input_ms = time.ticks_ms()
+
+
+def feedback_click(force=False):
+    """Queue one short UI click without interrupting important audio."""
+    global last_ui_click_ms
+
+    if not force:
+        if (
+            not sound_enabled
+            or music.active
+            or active_alarm_index is not None
+            or alarm_preview_active
+            or not audio.idle()
+        ):
+            return False
+
+    now_ms = time.ticks_ms()
+    if time.ticks_diff(now_ms, last_ui_click_ms) < UI_CLICK_MIN_GAP_MS:
+        return False
+
+    speech.phrase(PHRASE_UI_CLICK)
+    last_ui_click_ms = now_ms
+    return True
 
 
 def rtc_now():
@@ -406,6 +432,7 @@ def on_volume(event):
         volume -= 1
     else:
         return
+    feedback_click()
     config["volume"] = volume
     audio.set_volume(volume)
     show_overlay("volume", volume)
@@ -422,6 +449,7 @@ def on_timer(event):
     global edit_alarm_sound, edit_alarm_track, alarm_preview_active
 
     direction = 1 if event == Rotary.ROT_CW else -1
+    feedback_click()
     mark_input()
 
     if ui.state == STATE_MUSIC_PLAYER:
@@ -497,9 +525,13 @@ def toggle_sound():
         return
     if ui.state == STATE_MUSIC_PLAYER and music.active:
         music.stop()
+
     sound_enabled = not sound_enabled
     if not sound_enabled:
         audio.clear(pause=True)
+        feedback_click(force=True)
+    else:
+        feedback_click()
     show_overlay("sound", sound_enabled)
     print("Sound:", sound_enabled)
 
@@ -574,6 +606,7 @@ def enter_selected_setting():
 def timer_button():
     if stop_active_alarm():
         return
+    feedback_click()
     if ui.state == STATE_MUSIC_PLAYER:
         if not sound_enabled:
             show_overlay("sound", False)
@@ -664,6 +697,7 @@ def timer_mode_button():
     global edit_h, edit_m, edit_s
     if stop_active_alarm():
         return
+    feedback_click()
     if ui.state == STATE_MUSIC_PLAYER:
         return
     if timer.running:
@@ -704,6 +738,7 @@ def alarm_short_action():
 
 def alarm_pressed():
     global alarm_pressed_ms
+    feedback_click()
     alarm_pressed_ms = time.ticks_ms()
 
 
@@ -752,6 +787,7 @@ def speak_current_time():
 
 def st_mo_pressed():
     global st_mo_pressed_ms
+    feedback_click()
     st_mo_pressed_ms = time.ticks_ms()
 
 
@@ -774,6 +810,7 @@ def st_mo_released():
 def minus_button():
     if stop_active_alarm():
         return
+    feedback_click()
     if ui.state == STATE_MUSIC_PLAYER:
         music.previous()
         print("Music previous:", music.current_track)
@@ -810,6 +847,7 @@ def minus_button():
 def settings_button():
     if stop_active_alarm():
         return
+    feedback_click()
     if ui.state == STATE_MUSIC_PLAYER:
         music.next()
         print("Music next:", music.current_track)
@@ -1108,6 +1146,7 @@ print(
     "RTC correction:", config["rtc_correction_sec_per_day"],
     "Alarms:", sum(1 for alarm in config["alarms"] if alarm["enabled"]),
     "Music mode:", music.mode,
+    "UI click:", PHRASE_UI_CLICK,
 )
 
 while True:
