@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.5.1
+# Version: 3.5.2
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.5.1"
+APP_VERSION = "3.5.2"
 
 import time
 from machine import Pin, I2C
@@ -454,7 +454,6 @@ def on_volume(event):
         volume -= 1
     else:
         return
-    feedback_click()
     config["volume"] = volume
     audio.set_volume(volume)
     show_overlay("volume", volume)
@@ -471,7 +470,6 @@ def on_timer(event):
     global edit_alarm_sound, edit_alarm_track, alarm_preview_active
 
     direction = 1 if event == Rotary.ROT_CW else -1
-    feedback_click()
     mark_input()
 
     if ui.state == STATE_MUSIC_PLAYER:
@@ -551,9 +549,6 @@ def toggle_sound():
     sound_enabled = not sound_enabled
     if not sound_enabled:
         audio.clear(pause=True)
-        feedback_click(force=True)
-    else:
-        feedback_click()
     show_overlay("sound", sound_enabled)
     print("Sound:", sound_enabled)
 
@@ -628,7 +623,6 @@ def enter_selected_setting():
 def timer_button():
     if stop_active_alarm():
         return
-    feedback_click()
     if ui.state == STATE_MUSIC_PLAYER:
         if not sound_enabled:
             show_overlay("sound", False)
