@@ -174,25 +174,28 @@ SILENCE_HALF_HOUR_TRACK = 15
 # Confirmed service phrase map in folders 07 (RU) and 17 (DE):
 # 006 - timer setup
 # 007 - timer set / timer started
+# 008 - sound on
 # 009 - sound off
+# 010 - volume
 # 011 - timer finished
 # 012 - short timer signal
 # 013 - long timer signal
 # 014 - timer cancelled
 # 015 - half-hour double beep
+# 016 - short UI click (same sound in 07 and 17)
+# 017 - German-only "Minuten" in folder 17
 PHRASE_TIMER_SETUP = 6
 PHRASE_TIMER_SET = 7
+PHRASE_SOUND_ON = 8
 PHRASE_SOUND_OFF = 9
+PHRASE_VOLUME = 10
 PHRASE_TIMER_FINISHED = 11
 PHRASE_TIMER_SIGNAL_SHORT = 12
 PHRASE_TIMER_SIGNAL_LONG = 13
 PHRASE_TIMER_CANCELLED = 14
 PHRASE_HALF_HOUR_DOUBLE_BEEP = 15
-
-# German-only service phrase 17/016 = "Minuten".
-# Standard spoken clock output intentionally does not append it because
-# expressions such as "zwei Uhr dreißig" are natural and complete in German.
-PHRASE_DE_MINUTEN = 16
+PHRASE_UI_CLICK = 16
+PHRASE_DE_MINUTEN = 17
 
 
 class Speech:
