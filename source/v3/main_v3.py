@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.5.0
+# Version: 3.5.1
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.5.0"
+APP_VERSION = "3.5.1"
 
 import time
 from machine import Pin, I2C
@@ -70,6 +70,10 @@ ST_MO_LONG_PRESS_MS = 900
 ALARM_LONG_PRESS_MS = 900
 UI_CLICK_MIN_GAP_MS = 90
 TIMER_MAX_MINUTES = 240
+MUSIC_TRACK_FALLBACK = 54
+MUSIC_DETECT_SETTLE_MS = 1800
+MUSIC_DETECT_TIMEOUT_MS = 700
+MUSIC_DETECT_RETRIES = 4
 
 lcd = I2cLcd(
     I2C(0, sda=Pin(0), scl=Pin(1), freq=400000),
@@ -79,6 +83,24 @@ lcd = I2cLcd(
 )
 rtc = DS1302(Pin(2), Pin(5), Pin(4))
 transport = DFPlayerTransport(0, 16, 17, 18)
+
+# Give DFPlayer and its SD card time to become ready after power-up, then ask
+# the module how many files are present in numbered folder 08. Compatible
+# clones do not always answer query commands reliably, so 54 is the safe
+# current fallback and keeps the player usable even when detection fails.
+time.sleep_ms(MUSIC_DETECT_SETTLE_MS)
+detected_music_tracks = transport.read_file_count_in_folder(
+    FOLDER_MUSIC,
+    timeout_ms=MUSIC_DETECT_TIMEOUT_MS,
+    retries=MUSIC_DETECT_RETRIES,
+)
+if detected_music_tracks is None:
+    music_track_count = MUSIC_TRACK_FALLBACK
+    music_track_count_source = "fallback"
+else:
+    music_track_count = detected_music_tracks
+    music_track_count_source = "detected"
+
 audio = AudioQueue(transport)
 rotary_volume = Rotary(14, 15)
 rotary_timer = Rotary(11, 10)
@@ -86,7 +108,7 @@ rotary_timer = Rotary(11, 10)
 config = load_config()
 speech = Speech(audio, config["language"])
 timer = CountdownTimer()
-music = MusicPlayer(audio, FOLDER_MUSIC, 45, 7)
+music = MusicPlayer(audio, FOLDER_MUSIC, music_track_count, 7)
 ui = ClockUI(lcd)
 
 sound_enabled = True
@@ -1133,7 +1155,12 @@ def service_display(now):
             alarm["sound"], alarm["track"],
         )
     elif ui.state == STATE_MUSIC_PLAYER:
-        ui.show_music_player(music.current_track, music.mode, music.paused)
+        ui.show_music_player(
+            music.current_track,
+            music.mode,
+            music.paused,
+            music.track_count,
+        )
 
 
 print("Speaking Timer-Clock v%s starting" % APP_VERSION)
@@ -1146,6 +1173,8 @@ print(
     "RTC correction:", config["rtc_correction_sec_per_day"],
     "Alarms:", sum(1 for alarm in config["alarms"] if alarm["enabled"]),
     "Music mode:", music.mode,
+    "Music tracks:", music.track_count,
+    "Music count source:", music_track_count_source,
     "UI click:", PHRASE_UI_CLICK,
 )
 
