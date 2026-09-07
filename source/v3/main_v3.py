@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.5.2
+# Version: 3.5.3
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.5.2"
+APP_VERSION = "3.5.3"
 
 import time
 from machine import Pin, I2C
@@ -28,6 +28,7 @@ from audio import (
     PHRASE_TIMER_SIGNAL_LONG,
     PHRASE_TIMER_CANCELLED,
     PHRASE_UI_CLICK,
+    PHRASE_DE_MINUTEN,
 )
 from ui import (
     ClockUI,
@@ -415,8 +416,10 @@ def trigger_alarm(index):
         )
     )
     if sound_enabled:
+        now = rtc_now()
         audio.clear(pause=True)
         speech.phrase(index + 1)
+        speech.say_time(now["hour"], now["minute"])
         if alarm["sound"] == "music":
             audio.enqueue(FOLDER_MUSIC, alarm["track"])
         else:
@@ -553,12 +556,39 @@ def toggle_sound():
     print("Sound:", sound_enabled)
 
 
+def speak_timer_duration():
+    """Announce a timer duration when existing recordings can say it exactly."""
+    hours, minutes, seconds = timer.get_hms()
+
+    # No confirmed recordings for a seconds unit yet. Do not announce a
+    # rounded/incomplete duration when the configured timer includes seconds.
+    if seconds:
+        return False
+
+    if config["language"] == "ru":
+        if hours:
+            audio.enqueue(speech.folders["hours"], hours)
+        if minutes:
+            audio.enqueue(speech.folders["minutes"], minutes)
+        return bool(hours or minutes)
+
+    # German clock-hour files say "Uhr", not duration "Stunde(n)". For a
+    # minute-only timer we can say the minute number followed by 17/017.
+    if config["language"] == "de" and hours == 0 and minutes:
+        audio.enqueue(speech.folders["minutes"], minutes)
+        speech.phrase(PHRASE_DE_MINUTEN)
+        return True
+
+    return False
+
+
 def start_current_timer():
     clear_overlay()
     timer.start()
     ui.set_state(STATE_TIMER_RUNNING)
     if sound_enabled:
         speech.phrase(PHRASE_TIMER_SET)
+        speak_timer_duration()
     mark_input()
     print("Timer started:", timer.get_hms())
 
