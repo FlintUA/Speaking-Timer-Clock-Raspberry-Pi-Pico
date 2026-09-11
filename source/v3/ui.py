@@ -19,6 +19,8 @@ STATE_SETTINGS_QUIET_ENABLED = 28
 STATE_SETTINGS_QUIET_START = 29
 STATE_SETTINGS_QUIET_END = 30
 STATE_SETTINGS_RTC_CORR = 31
+STATE_SETTINGS_HALF_HOUR = 32
+STATE_SETTINGS_EXACT_HOUR = 33
 STATE_ALARM_LIST = 40
 STATE_ALARM_ENABLED = 41
 STATE_ALARM_HOUR = 42
@@ -145,6 +147,12 @@ class ClockUI:
 
     def show_rtc_correction(self, value):
         self._write("RTC CORRECTION", "%+d sec/day" % value, (0, 1, True))
+
+    def show_half_hour(self, enabled):
+        self._write("HALF-HOUR BEEP", "ON" if enabled else "OFF", (0, 1, True))
+
+    def show_exact_hour(self, enabled):
+        self._write("EXACT-HOUR WORD", "ON" if enabled else "OFF", (0, 1, True))
 
     def show_alarm_list(self, index, enabled, hour, minute, sound, track):
         state = "ON" if enabled else "OFF"
