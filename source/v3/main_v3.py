@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.5.3
+# Version: 3.6.0
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.5.3"
+APP_VERSION = "3.6.0"
 
 import time
 from machine import Pin, I2C
@@ -51,6 +51,8 @@ from ui import (
     STATE_SETTINGS_QUIET_START,
     STATE_SETTINGS_QUIET_END,
     STATE_SETTINGS_RTC_CORR,
+    STATE_SETTINGS_HALF_HOUR,
+    STATE_SETTINGS_EXACT_HOUR,
     STATE_ALARM_LIST,
     STATE_ALARM_ENABLED,
     STATE_ALARM_HOUR,
@@ -123,6 +125,8 @@ edit_date_y = 2026
 edit_quiet_enabled = config["quiet_enabled"]
 edit_quiet_start = config["quiet_start"]
 edit_quiet_end = config["quiet_end"]
+edit_half_hour_enabled = config["half_hour_enabled"]
+edit_exact_hour_phrase_enabled = config["exact_hour_phrase_enabled"]
 edit_rtc_corr = config["rtc_correction_sec_per_day"]
 
 alarm_index = 0
@@ -144,6 +148,8 @@ settings_items = (
     "Time",
     "Date",
     "Quiet mode",
+    "Half-hour beep",
+    "Exact-hour word",
     "RTC correction",
     "Alarms",
 )
@@ -468,6 +474,7 @@ def on_timer(event):
     global edit_time_h, edit_time_m, edit_time_s
     global edit_date_d, edit_date_m, edit_date_y
     global edit_quiet_enabled, edit_quiet_start, edit_quiet_end, edit_rtc_corr
+    global edit_half_hour_enabled, edit_exact_hour_phrase_enabled
     global settings_index, alarm_index
     global edit_alarm_enabled, edit_alarm_hour, edit_alarm_minute
     global edit_alarm_sound, edit_alarm_track, alarm_preview_active
@@ -518,6 +525,10 @@ def on_timer(event):
         edit_quiet_start = _wrap(edit_quiet_start, 0, 23, direction)
     elif ui.state == STATE_SETTINGS_QUIET_END:
         edit_quiet_end = _wrap(edit_quiet_end, 0, 23, direction)
+    elif ui.state == STATE_SETTINGS_HALF_HOUR:
+        edit_half_hour_enabled = not edit_half_hour_enabled
+    elif ui.state == STATE_SETTINGS_EXACT_HOUR:
+        edit_exact_hour_phrase_enabled = not edit_exact_hour_phrase_enabled
     elif ui.state == STATE_SETTINGS_RTC_CORR:
         edit_rtc_corr = _wrap(edit_rtc_corr, -30, 30, direction)
     elif ui.state == STATE_ALARM_LIST:
@@ -623,6 +634,7 @@ def enter_selected_setting():
     global edit_time_h, edit_time_m, edit_time_s
     global edit_date_d, edit_date_m, edit_date_y
     global edit_quiet_enabled, edit_quiet_start, edit_quiet_end, edit_rtc_corr
+    global edit_half_hour_enabled, edit_exact_hour_phrase_enabled
 
     now = rtc_now()
     item = settings_items[settings_index]
@@ -643,6 +655,12 @@ def enter_selected_setting():
         edit_quiet_start = config["quiet_start"]
         edit_quiet_end = config["quiet_end"]
         ui.set_state(STATE_SETTINGS_QUIET_ENABLED)
+    elif item == "Half-hour beep":
+        edit_half_hour_enabled = config["half_hour_enabled"]
+        ui.set_state(STATE_SETTINGS_HALF_HOUR)
+    elif item == "Exact-hour word":
+        edit_exact_hour_phrase_enabled = config["exact_hour_phrase_enabled"]
+        ui.set_state(STATE_SETTINGS_EXACT_HOUR)
     elif item == "RTC correction":
         edit_rtc_corr = config["rtc_correction_sec_per_day"]
         ui.set_state(STATE_SETTINGS_RTC_CORR)
@@ -707,6 +725,16 @@ def timer_button():
         save_config(config)
         ui.set_state(STATE_SETTINGS)
         show_overlay("message", ("QUIET MODE", "SAVED"))
+    elif ui.state == STATE_SETTINGS_HALF_HOUR:
+        config["half_hour_enabled"] = edit_half_hour_enabled
+        save_config(config)
+        ui.set_state(STATE_SETTINGS)
+        show_overlay("message", ("HALF-HOUR", "SAVED"))
+    elif ui.state == STATE_SETTINGS_EXACT_HOUR:
+        config["exact_hour_phrase_enabled"] = edit_exact_hour_phrase_enabled
+        save_config(config)
+        ui.set_state(STATE_SETTINGS)
+        show_overlay("message", ("EXACT-HOUR", "SAVED"))
     elif ui.state == STATE_SETTINGS_RTC_CORR:
         config["rtc_correction_sec_per_day"] = edit_rtc_corr
         save_config(config)
@@ -874,6 +902,7 @@ def minus_button():
         STATE_SETTINGS_QUIET_ENABLED,
         STATE_SETTINGS_QUIET_START,
         STATE_SETTINGS_QUIET_END,
+        STATE_SETTINGS_HALF_HOUR, STATE_SETTINGS_EXACT_HOUR,
         STATE_SETTINGS_RTC_CORR,
     ):
         ui.set_state(STATE_SETTINGS)
@@ -1034,12 +1063,16 @@ def service_clock_auto(now):
     if key == last_auto_key:
         return
 
-    # Half-hour signal is common to both MO and ST modes.
-    # It always uses the classic double-beep service track 07/015.
+    # Half-hour signal is common to both MO and ST modes and is independently
+    # controlled by Settings. At the exact hour, voice mode always announces
+    # the hour; track 000 from the selected language's minutes folder is added
+    # only when the optional exact-hour word is enabled.
     if now["minute"] == 30:
         audio.enqueue(FOLDER_SILENCE, SILENCE_HALF_HOUR_TRACK)
     elif config["clock_mode"] == "voice":
-        speech.say_time(now["hour"], now["minute"])
+        audio.enqueue(speech.folders["hours"], now["hour"])
+        if config["exact_hour_phrase_enabled"]:
+            audio.enqueue(speech.folders["minutes"], 0)
     else:
         strikes = now["hour"] % 12
         if strikes == 0:
@@ -1092,6 +1125,7 @@ def service_display(now):
         STATE_SETTINGS_QUIET_ENABLED,
         STATE_SETTINGS_QUIET_START,
         STATE_SETTINGS_QUIET_END,
+        STATE_SETTINGS_HALF_HOUR, STATE_SETTINGS_EXACT_HOUR,
         STATE_SETTINGS_RTC_CORR,
         STATE_ALARM_ENABLED, STATE_ALARM_HOUR, STATE_ALARM_MINUTE,
         STATE_ALARM_SOUND, STATE_ALARM_TRACK,
@@ -1154,6 +1188,10 @@ def service_display(now):
         ui.show_quiet_time(True, edit_quiet_start)
     elif ui.state == STATE_SETTINGS_QUIET_END:
         ui.show_quiet_time(False, edit_quiet_end)
+    elif ui.state == STATE_SETTINGS_HALF_HOUR:
+        ui.show_half_hour(edit_half_hour_enabled)
+    elif ui.state == STATE_SETTINGS_EXACT_HOUR:
+        ui.show_exact_hour(edit_exact_hour_phrase_enabled)
     elif ui.state == STATE_SETTINGS_RTC_CORR:
         ui.show_rtc_correction(edit_rtc_corr)
     elif ui.state == STATE_ALARM_LIST:
@@ -1194,6 +1232,8 @@ print(
     "Clock mode:", config["clock_mode"],
     "Quiet:", config["quiet_enabled"],
     config["quiet_start"], "-", config["quiet_end"],
+    "Half-hour:", config["half_hour_enabled"],
+    "Exact-hour word:", config["exact_hour_phrase_enabled"],
     "RTC correction:", config["rtc_correction_sec_per_day"],
     "Alarms:", sum(1 for alarm in config["alarms"] if alarm["enabled"]),
     "Music mode:", music.mode,
