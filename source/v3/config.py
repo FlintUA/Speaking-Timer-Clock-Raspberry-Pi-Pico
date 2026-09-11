@@ -23,7 +23,13 @@ DEFAULTS = {
     "quiet_end": 7,
     # Clock automatic mode is exclusive: "voice" OR "chime".
     "clock_mode": "voice",
-    "half_hour_enabled": True,
+    # User-controlled automatic announcement options. Both default OFF.
+    "half_hour_enabled": False,
+    "exact_hour_phrase_enabled": False,
+    # Migration marker for v3.6.0. Older configs had half-hour enabled by
+    # default but no UI switch, so the first v3.6.0 load starts both options
+    # OFF as explicit user-facing defaults.
+    "auto_announce_options_initialized": True,
     "rtc_correction_sec_per_day": 0,
     "alarms": [],
 }
@@ -81,15 +87,27 @@ def _validated_alarms(value):
 def _validated(data):
     cfg = dict(DEFAULTS)
     cfg["alarms"] = _default_alarms()
-    if isinstance(data, dict):
+    source_is_dict = isinstance(data, dict)
+    legacy_auto_options = (
+        source_is_dict and "auto_announce_options_initialized" not in data
+    )
+    if source_is_dict:
         cfg.update(data)
 
     # Backward compatibility with early v3 config files.
-    if "clock_mode" not in data if isinstance(data, dict) else True:
-        if isinstance(data, dict) and data.get("chimes_enabled"):
+    if "clock_mode" not in data if source_is_dict else True:
+        if source_is_dict and data.get("chimes_enabled"):
             cfg["clock_mode"] = "chime"
         else:
             cfg["clock_mode"] = "voice"
+
+    # v3.6.0 exposes both options in Settings. Existing installations may
+    # contain half_hour_enabled=True only because that was the historical
+    # default, not an explicit user choice. Start both switches OFF once.
+    if legacy_auto_options:
+        cfg["half_hour_enabled"] = False
+        cfg["exact_hour_phrase_enabled"] = False
+    cfg["auto_announce_options_initialized"] = True
 
     if cfg["language"] not in ("ru", "de"):
         cfg["language"] = "ru"
@@ -101,6 +119,7 @@ def _validated(data):
     cfg["quiet_end"] = int(cfg["quiet_end"]) % 24
     cfg["quiet_enabled"] = bool(cfg["quiet_enabled"])
     cfg["half_hour_enabled"] = bool(cfg["half_hour_enabled"])
+    cfg["exact_hour_phrase_enabled"] = bool(cfg["exact_hour_phrase_enabled"])
     cfg["rtc_correction_sec_per_day"] = max(
         -30, min(30, int(cfg["rtc_correction_sec_per_day"]))
     )
