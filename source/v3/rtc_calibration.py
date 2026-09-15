@@ -350,6 +350,15 @@ def correction_due(state, ds_now):
     current_ordinal = date_ordinal(ds_now["year"], ds_now["month"], ds_now["day"])
     last_ordinal = int(state.get("last_apply_ordinal", 0))
 
+    # A manual date/time edit invalidates the learning baseline. On the first
+    # service pass after that edit, also reset the correction calendar anchor
+    # so a changed date cannot be mistaken for many missed correction days.
+    if not int(state.get("baseline_ref_sec", 0)):
+        if last_ordinal != current_ordinal:
+            state["last_apply_ordinal"] = current_ordinal
+            state["fraction"] = 0.0
+            return save_state(state), 0, None, True
+
     if last_ordinal <= 0:
         state["last_apply_ordinal"] = current_ordinal
         return save_state(state), 0, None, True
