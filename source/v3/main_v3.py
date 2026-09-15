@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.7.0
+# Version: 3.7.1
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.7.0"
+APP_VERSION = "3.7.1"
 
 import time
 from machine import Pin, I2C
@@ -92,10 +92,6 @@ lcd = I2cLcd(
 rtc = DS1302(Pin(2), Pin(5), Pin(4))
 transport = DFPlayerTransport(0, 16, 17, 18)
 
-# Give DFPlayer and its SD card time to become ready after power-up, then ask
-# the module how many files are present in numbered folder 08. Compatible
-# clones do not always answer query commands reliably, so 54 is the safe
-# current fallback and keeps the player usable even when detection fails.
 time.sleep_ms(MUSIC_DETECT_SETTLE_MS)
 detected_music_tracks = transport.read_file_count_in_folder(
     FOLDER_MUSIC,
@@ -180,9 +176,7 @@ def mark_input():
 
 
 def feedback_click(force=False):
-    """Queue one short UI click without interrupting important audio."""
     global last_ui_click_ms
-
     if not force:
         if (
             not sound_enabled
@@ -192,11 +186,9 @@ def feedback_click(force=False):
             or not audio.idle()
         ):
             return False
-
     now_ms = time.ticks_ms()
     if time.ticks_diff(now_ms, last_ui_click_ms) < UI_CLICK_MIN_GAP_MS:
         return False
-
     speech.phrase(PHRASE_UI_CLICK)
     last_ui_click_ms = now_ms
     return True
@@ -223,6 +215,16 @@ def quiet_now(now):
     if start < end:
         return start <= now["hour"] < end
     return now["hour"] >= start or now["hour"] < end
+
+
+def enqueue_clock_time(hour, minute):
+    """Queue current time respecting the Exact-hour word preference."""
+    audio.enqueue(speech.folders["hours"], int(hour))
+    minute = int(minute)
+    if minute:
+        audio.enqueue(speech.folders["minutes"], minute)
+    elif config["exact_hour_phrase_enabled"]:
+        audio.enqueue(speech.folders["minutes"], 0)
 
 
 def _wrap(value, minimum, maximum, delta):
@@ -263,7 +265,6 @@ def write_rtc(year, month, day, hour, minute, second):
 
 
 def reset_rtc_calibration_baseline(reason):
-    """Invalidate drift learning after an untrusted manual date/time change."""
     global rtc_calibration_state
     if not rtc_calibration_state.get("enabled"):
         return
@@ -300,14 +301,12 @@ def timer_accel_step():
     now_ms = time.ticks_ms()
     elapsed = time.ticks_diff(now_ms, last_timer_rotary_ms)
     last_timer_rotary_ms = now_ms
-
     if elapsed < 120:
         timer_fast_streak += 1
     elif elapsed < 260:
         timer_fast_streak = min(timer_fast_streak + 1, 4)
     else:
         timer_fast_streak = 0
-
     if timer_fast_streak >= 4:
         return 10
     if timer_fast_streak >= 2:
@@ -327,11 +326,7 @@ def set_quick_timer_delta(direction):
     ui.set_state(STATE_QUICK_TIMER)
     quick_until_ms = time.ticks_add(time.ticks_ms(), QUICK_TIMER_TIMEOUT_MS)
     mark_input()
-    print(
-        "Quick timer:",
-        "%02d:%02d:%02d" % (edit_h, edit_m, edit_s),
-        "step", step,
-    )
+    print("Quick timer:", "%02d:%02d:%02d" % (edit_h, edit_m, edit_s), "step", step)
 
 
 def current_alarm():
@@ -392,8 +387,7 @@ def save_alarm_editor():
         "Alarm %d saved:" % (alarm_index + 1),
         "ON" if alarm["enabled"] else "OFF",
         "%02d:%02d" % (alarm["hour"], alarm["minute"]),
-        alarm["sound"],
-        alarm["track"],
+        alarm["sound"], alarm["track"],
     )
 
 
@@ -423,27 +417,38 @@ def stop_active_alarm():
 
 
 def trigger_alarm(index):
-    global active_alarm_index, alarm_safety_until_ms
+    global active_alarm_index, alarm_safety_until_ms, last_auto_key
     alarm = config["alarms"][index]
     if music.active:
         music.stop()
     active_alarm_index = index
-    alarm_safety_until_ms = time.ticks_add(
-        time.ticks_ms(), ALARM_SAFETY_TIMEOUT_MS
-    )
+    alarm_safety_until_ms = time.ticks_add(time.ticks_ms(), ALARM_SAFETY_TIMEOUT_MS)
     stop_alarm_preview()
     clear_overlay()
     ui.set_state(STATE_ALARM_RINGING)
+    now = rtc_now()
+
+    # An alarm owns this clock minute. Suppress the regular xx:00/xx:30
+    # automatic announcement after the alarm audio has completed.
+    if now["minute"] in (0, 30):
+        last_auto_key = (
+            now["year"], now["month"], now["day"], now["hour"], now["minute"]
+        )
+
     print(
         "Alarm %d ringing: %s track %d" % (
             index + 1, alarm["sound"], alarm["track"]
         )
     )
     if sound_enabled:
-        now = rtc_now()
         audio.clear(pause=True)
-        speech.phrase(index + 1)
-        speech.say_time(now["hour"], now["minute"])
+        # Alarm-number recordings 001..005 are currently confirmed only in RU.
+        if config["language"] == "ru":
+            speech.phrase(index + 1)
+            print("Alarm phrase: folder 7 track", index + 1)
+        else:
+            print("Alarm phrase skipped: no DE alarm-number recording")
+        enqueue_clock_time(now["hour"], now["minute"])
         if alarm["sound"] == "music":
             audio.enqueue(FOLDER_MUSIC, alarm["track"])
         else:
@@ -507,11 +512,9 @@ def on_timer(event):
             music.previous()
         print("Music track:", music.current_track)
         return
-
     if ui.state in (STATE_CLOCK, STATE_QUICK_TIMER):
         set_quick_timer_delta(direction)
         return
-
     if ui.state == STATE_TIMER_EDIT_H:
         edit_h = _wrap(edit_h, 0, 4, direction)
     elif ui.state == STATE_TIMER_EDIT_M:
@@ -577,7 +580,6 @@ def toggle_sound():
         return
     if ui.state == STATE_MUSIC_PLAYER and music.active:
         music.stop()
-
     sound_enabled = not sound_enabled
     if not sound_enabled:
         audio.clear(pause=True)
@@ -586,28 +588,19 @@ def toggle_sound():
 
 
 def speak_timer_duration():
-    """Announce a timer duration when existing recordings can say it exactly."""
     hours, minutes, seconds = timer.get_hms()
-
-    # No confirmed recordings for a seconds unit yet. Do not announce a
-    # rounded/incomplete duration when the configured timer includes seconds.
     if seconds:
         return False
-
     if config["language"] == "ru":
         if hours:
             audio.enqueue(speech.folders["hours"], hours)
         if minutes:
             audio.enqueue(speech.folders["minutes"], minutes)
         return bool(hours or minutes)
-
-    # German clock-hour files say "Uhr", not duration "Stunde(n)". For a
-    # minute-only timer we can say the minute number followed by 17/017.
     if config["language"] == "de" and hours == 0 and minutes:
         audio.enqueue(speech.folders["minutes"], minutes)
         speech.phrase(PHRASE_DE_MINUTEN)
         return True
-
     return False
 
 
@@ -632,20 +625,14 @@ def cancel_timer():
 
 def save_time_to_rtc():
     now = rtc_now()
-    write_rtc(
-        now["year"], now["month"], now["day"],
-        edit_time_h, edit_time_m, edit_time_s,
-    )
+    write_rtc(now["year"], now["month"], now["day"], edit_time_h, edit_time_m, edit_time_s)
     reset_rtc_calibration_baseline("manual_time")
     print("RTC time set:", "%02d:%02d:%02d" % (edit_time_h, edit_time_m, edit_time_s))
 
 
 def save_date_to_rtc():
     now = rtc_now()
-    write_rtc(
-        edit_date_y, edit_date_m, edit_date_d,
-        now["hour"], now["minute"], now["second"],
-    )
+    write_rtc(edit_date_y, edit_date_m, edit_date_d, now["hour"], now["minute"], now["second"])
     reset_rtc_calibration_baseline("manual_date")
     print("RTC date set:", "%02d-%02d-%04d" % (edit_date_d, edit_date_m, edit_date_y))
 
@@ -655,7 +642,6 @@ def enter_selected_setting():
     global edit_date_d, edit_date_m, edit_date_y
     global edit_quiet_enabled, edit_quiet_start, edit_quiet_end, edit_rtc_corr
     global edit_half_hour_enabled, edit_exact_hour_phrase_enabled
-
     now = rtc_now()
     item = settings_items[settings_index]
     if item == "Language":
@@ -702,7 +688,6 @@ def timer_button():
     if timer.running and ui.state == STATE_TIMER_RUNNING:
         cancel_timer()
         return
-
     if ui.state in (STATE_CLOCK, STATE_QUICK_TIMER):
         start_current_timer()
     elif ui.state == STATE_TIMER_EDIT_H:
@@ -783,7 +768,6 @@ def timer_button():
         show_overlay("message", ("ALARM %d" % (alarm_index + 1), "SAVED"))
     elif ui.state == STATE_TIMER_FINISHED:
         ui.set_state(STATE_CLOCK)
-
     mark_input()
 
 
@@ -792,9 +776,7 @@ def timer_mode_button():
     if stop_active_alarm():
         return
     feedback_click()
-    if ui.state == STATE_MUSIC_PLAYER:
-        return
-    if timer.running:
+    if ui.state == STATE_MUSIC_PLAYER or timer.running:
         return
     clear_overlay()
     if ui.state in (STATE_CLOCK, STATE_QUICK_TIMER):
@@ -853,9 +835,7 @@ def alarm_released():
 
 
 def mode_button():
-    if stop_active_alarm():
-        return
-    if timer.running:
+    if stop_active_alarm() or timer.running:
         return
     config["clock_mode"] = "chime" if config["clock_mode"] == "voice" else "voice"
     save_config(config)
@@ -874,7 +854,7 @@ def speak_current_time():
         return
     now = rtc_now()
     audio.clear(pause=True)
-    speech.say_time(now["hour"], now["minute"])
+    enqueue_clock_time(now["hour"], now["minute"])
     show_overlay("message", ("SPEAK TIME", "%02d:%02d" % (now["hour"], now["minute"])))
     print("Manual time speech:", "%02d:%02d" % (now["hour"], now["minute"]))
 
@@ -960,14 +940,6 @@ def settings_button():
     mark_input()
 
 
-# Physical front-panel mapping:
-# GP20 - VOLUME encoder push / ON-OFF
-# GP19 - TIMER encoder push / start-stop-confirm; Music Play/Pause
-# GP28 - Timer 1/2 / exact HH:MM:SS setup
-# GP21 - Alarm short / MEM-AMS long: Music Player; short in Music: play mode
-# GP22 - ST/MO short: mode switch; long: speak time, or exit Music Player
-# GP26 - Preset/Search '-' / Back; Music Previous
-# GP27 - Preset/Setup '+' / Setup-enter; Music Next
 btn_volume = Button(20)
 btn_volume.when_pressed = toggle_sound
 btn_timer = Button(19)
@@ -988,13 +960,11 @@ btn_setup_plus.when_pressed = settings_button
 
 def service_timer():
     global timer_finished_until_ms
-
     if (
         ui.state == STATE_QUICK_TIMER
         and time.ticks_diff(quick_until_ms, time.ticks_ms()) <= 0
     ):
         ui.set_state(STATE_CLOCK)
-
     if (
         ui.state == STATE_TIMER_FINISHED
         and timer_finished_until_ms
@@ -1002,7 +972,6 @@ def service_timer():
     ):
         timer_finished_until_ms = 0
         ui.set_state(STATE_CLOCK)
-
     timer.service()
     if timer.consume_finished():
         timer_finished_until_ms = time.ticks_add(time.ticks_ms(), TIMER_FINISHED_TIMEOUT_MS)
@@ -1012,6 +981,8 @@ def service_timer():
         if sound_enabled and active_alarm_index is None:
             speech.phrase(PHRASE_TIMER_FINISHED)
             speech.phrase(PHRASE_TIMER_SIGNAL_LONG)
+        elif active_alarm_index is not None:
+            print("Timer audio suppressed: alarm has priority")
 
 
 def service_ui_timeout():
@@ -1032,7 +1003,6 @@ def service_alarm_preview():
 
 def service_alarms(now):
     global alarm_minute_key, alarm_fired_indices
-
     minute_key = (
         now["year"], now["month"], now["day"],
         now["hour"], now["minute"],
@@ -1040,7 +1010,6 @@ def service_alarms(now):
     if minute_key != alarm_minute_key:
         alarm_minute_key = minute_key
         alarm_fired_indices = []
-
     if active_alarm_index is not None:
         if audio.idle():
             finish_active_alarm("audio completed")
@@ -1052,7 +1021,6 @@ def service_alarms(now):
             audio.clear(pause=True)
             finish_active_alarm("safety timeout")
         return
-
     for index, alarm in enumerate(config["alarms"]):
         if index in alarm_fired_indices:
             continue
@@ -1078,42 +1046,27 @@ def service_clock_auto(now):
         return
     if now["minute"] == 30 and not config["half_hour_enabled"]:
         return
-
     key = (now["year"], now["month"], now["day"], now["hour"], now["minute"])
     if key == last_auto_key:
         return
-
-    # Half-hour signal is common to both MO and ST modes and is independently
-    # controlled by Settings. At the exact hour, voice mode always announces
-    # the hour; track 000 from the selected language's minutes folder is added
-    # only when the optional exact-hour word is enabled.
     if now["minute"] == 30:
         audio.enqueue(FOLDER_SILENCE, SILENCE_HALF_HOUR_TRACK)
     elif config["clock_mode"] == "voice":
-        audio.enqueue(speech.folders["hours"], now["hour"])
-        if config["exact_hour_phrase_enabled"]:
-            audio.enqueue(speech.folders["minutes"], 0)
+        enqueue_clock_time(now["hour"], now["minute"])
     else:
         strikes = now["hour"] % 12
         if strikes == 0:
             strikes = 12
         audio.enqueue(FOLDER_CHIMES, strikes)
-
     last_auto_key = key
 
 
 def service_rtc_correction(now):
     global last_rtc_correction_key, rtc_calibration_state
-
-    # Once a trusted USB/Thonny baseline exists, the self-learning calibration
-    # owns RTC correction. The old integer manual correction remains a fallback
-    # for installations that have never activated USB calibration.
     if rtc_calibration_state.get("enabled"):
         if now["hour"] < 3:
             return
-        state, correction, shifted, changed = rtc_correction_due(
-            rtc_calibration_state, now
-        )
+        state, correction, shifted, changed = rtc_correction_due(rtc_calibration_state, now)
         rtc_calibration_state = state
         if shifted is not None:
             write_rtc(
@@ -1125,21 +1078,17 @@ def service_rtc_correction(now):
                 rtc_calibration_state.get("rate_sec_per_day", 0.0), "sec/day",
             )
         return
-
     correction = int(config["rtc_correction_sec_per_day"])
     if correction == 0:
         return
     if now["hour"] != 3 or now["minute"] != 5 or now["second"] > 10:
         return
-
     key = (now["year"], now["month"], now["day"])
     if key == last_rtc_correction_key:
         return
-
     second = now["second"] + correction
     minute = now["minute"]
     hour = now["hour"]
-
     while second < 0:
         second += 60
         minute -= 1
@@ -1152,7 +1101,6 @@ def service_rtc_correction(now):
     while minute >= 60:
         minute -= 60
         hour += 1
-
     write_rtc(now["year"], now["month"], now["day"], hour, minute, second)
     last_rtc_correction_key = key
     print("RTC manual correction applied:", correction, "sec")
@@ -1172,7 +1120,6 @@ def service_display(now):
         STATE_ALARM_ENABLED, STATE_ALARM_HOUR, STATE_ALARM_MINUTE,
         STATE_ALARM_SOUND, STATE_ALARM_TRACK,
     )
-
     if (
         overlay_active()
         and ui.state not in (STATE_TIMER_RUNNING, STATE_ALARM_RINGING, STATE_MUSIC_PLAYER)
@@ -1289,9 +1236,11 @@ print(
 
 while True:
     now = rtc_now()
+    # Alarm scheduling has priority over timer completion. If both events land
+    # in the same loop, the alarm becomes active before timer audio is emitted.
+    service_alarms(now)
     service_timer()
     service_ui_timeout()
-    service_alarms(now)
     service_clock_auto(now)
     service_rtc_correction(now)
     audio.service()
