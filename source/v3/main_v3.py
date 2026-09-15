@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.6.0
+# Version: 3.7.0
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.6.0"
+APP_VERSION = "3.7.0"
 
 import time
 from machine import Pin, I2C
@@ -15,6 +15,11 @@ from rotary import Rotary
 from config import load_config, save_config
 from timer_engine import CountdownTimer
 from music_player import MusicPlayer
+from rtc_calibration import (
+    load_state as load_rtc_calibration_state,
+    save_state as save_rtc_calibration_state,
+    correction_due as rtc_correction_due,
+)
 from audio import (
     DFPlayerTransport,
     AudioQueue,
@@ -109,6 +114,7 @@ rotary_volume = Rotary(14, 15)
 rotary_timer = Rotary(11, 10)
 
 config = load_config()
+rtc_calibration_state = load_rtc_calibration_state()
 speech = Speech(audio, config["language"])
 timer = CountdownTimer()
 music = MusicPlayer(audio, FOLDER_MUSIC, music_track_count, 7)
@@ -254,6 +260,18 @@ def write_rtc(year, month, day, hour, minute, second):
     weekday = weekday_for_date(year, month, day)
     rtc.date_time([year, month, day, weekday, hour, minute, second])
     rtc.start()
+
+
+def reset_rtc_calibration_baseline(reason):
+    """Invalidate drift learning after an untrusted manual date/time change."""
+    global rtc_calibration_state
+    if not rtc_calibration_state.get("enabled"):
+        return
+    rtc_calibration_state["baseline_ref_sec"] = 0
+    rtc_calibration_state["fraction"] = 0.0
+    rtc_calibration_state["last_event"] = reason
+    rtc_calibration_state = save_rtc_calibration_state(rtc_calibration_state)
+    print("RTC auto calibration baseline reset:", reason)
 
 
 def show_overlay(kind, value=None, duration_ms=OVERLAY_TIMEOUT_MS):
@@ -618,6 +636,7 @@ def save_time_to_rtc():
         now["year"], now["month"], now["day"],
         edit_time_h, edit_time_m, edit_time_s,
     )
+    reset_rtc_calibration_baseline("manual_time")
     print("RTC time set:", "%02d:%02d:%02d" % (edit_time_h, edit_time_m, edit_time_s))
 
 
@@ -627,6 +646,7 @@ def save_date_to_rtc():
         edit_date_y, edit_date_m, edit_date_d,
         now["hour"], now["minute"], now["second"],
     )
+    reset_rtc_calibration_baseline("manual_date")
     print("RTC date set:", "%02d-%02d-%04d" % (edit_date_d, edit_date_m, edit_date_y))
 
 
@@ -1083,7 +1103,29 @@ def service_clock_auto(now):
 
 
 def service_rtc_correction(now):
-    global last_rtc_correction_key
+    global last_rtc_correction_key, rtc_calibration_state
+
+    # Once a trusted USB/Thonny baseline exists, the self-learning calibration
+    # owns RTC correction. The old integer manual correction remains a fallback
+    # for installations that have never activated USB calibration.
+    if rtc_calibration_state.get("enabled"):
+        if now["hour"] < 3:
+            return
+        state, correction, shifted, changed = rtc_correction_due(
+            rtc_calibration_state, now
+        )
+        rtc_calibration_state = state
+        if shifted is not None:
+            write_rtc(
+                shifted["year"], shifted["month"], shifted["day"],
+                shifted["hour"], shifted["minute"], shifted["second"],
+            )
+            print(
+                "RTC auto correction applied:", correction, "sec; rate",
+                rtc_calibration_state.get("rate_sec_per_day", 0.0), "sec/day",
+            )
+        return
+
     correction = int(config["rtc_correction_sec_per_day"])
     if correction == 0:
         return
@@ -1113,7 +1155,7 @@ def service_rtc_correction(now):
 
     write_rtc(now["year"], now["month"], now["day"], hour, minute, second)
     last_rtc_correction_key = key
-    print("RTC correction applied:", correction, "sec")
+    print("RTC manual correction applied:", correction, "sec")
 
 
 def service_display(now):
@@ -1234,7 +1276,10 @@ print(
     config["quiet_start"], "-", config["quiet_end"],
     "Half-hour:", config["half_hour_enabled"],
     "Exact-hour word:", config["exact_hour_phrase_enabled"],
-    "RTC correction:", config["rtc_correction_sec_per_day"],
+    "RTC manual correction:", config["rtc_correction_sec_per_day"],
+    "RTC auto:", rtc_calibration_state.get("enabled", False),
+    "RTC auto rate:", rtc_calibration_state.get("rate_sec_per_day", 0.0),
+    "RTC samples:", rtc_calibration_state.get("sample_count", 0),
     "Alarms:", sum(1 for alarm in config["alarms"] if alarm["enabled"]),
     "Music mode:", music.mode,
     "Music tracks:", music.track_count,
