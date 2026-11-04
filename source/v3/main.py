@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.8.1
+# Version: 3.9.0
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.8.1"
+APP_VERSION = "3.9.0"
 
 import time
 from machine import Pin, I2C
@@ -54,6 +54,7 @@ from audio import (
     PHRASE_TIMER_CANCELLED,
     PHRASE_UI_CLICK,
     PHRASE_DE_MINUTEN,
+    PHRASE_STARTUP_SOUND,
 )
 from ui import (
     ClockUI,
@@ -107,6 +108,8 @@ NTP_SERVER = "pool.ntp.org"
 NTP_TIMEOUT_SEC = 3
 NTP_DAILY_HOUR = 4
 NTP_DAILY_MINUTE = 10
+STARTUP_SPLASH_MIN_MS = 1600
+STARTUP_SOUND_FOLDER = 7
 
 lcd = I2cLcd(
     I2C(0, sda=Pin(0), scl=Pin(1), freq=400000),
@@ -114,6 +117,14 @@ lcd = I2cLcd(
     2,
     16,
 )
+
+startup_splash_started_ms = time.ticks_ms()
+lcd.clear()
+lcd.move_to(0, 0)
+lcd.putstr("TIMER-CLOCK")
+lcd.move_to(0, 1)
+lcd.putstr(("v%s START" % APP_VERSION)[:16])
+
 rtc = DS1302(Pin(2), Pin(5), Pin(4))
 transport = DFPlayerTransport(0, 16, 17, 18)
 
@@ -172,6 +183,10 @@ else:
 sound_enabled = True
 volume = config["volume"]
 audio.set_volume(volume)
+
+# Dedicated, language-neutral startup sound. It is intentionally queued only
+# after the configured volume is known.
+audio.enqueue(STARTUP_SOUND_FOLDER, PHRASE_STARTUP_SOUND)
 
 edit_h, edit_m, edit_s = timer.get_hms()
 edit_time_h = edit_time_m = edit_time_s = 0
@@ -1338,6 +1353,16 @@ def service_display(now):
             music.track_count,
         )
 
+
+remaining_splash_ms = STARTUP_SPLASH_MIN_MS - time.ticks_diff(
+    time.ticks_ms(), startup_splash_started_ms
+)
+while remaining_splash_ms > 0:
+    audio.service()
+    time.sleep_ms(20)
+    remaining_splash_ms = STARTUP_SPLASH_MIN_MS - time.ticks_diff(
+        time.ticks_ms(), startup_splash_started_ms
+    )
 
 print("Speaking Timer-Clock v%s starting" % APP_VERSION)
 print(
