@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.9.1
+# Version: 3.10.0
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.9.1"
+APP_VERSION = "3.10.0"
 
 import time
 from machine import Pin, I2C
@@ -50,6 +50,7 @@ from audio import (
     SILENCE_HALF_HOUR_TRACK,
     PHRASE_TIMER_SET,
     PHRASE_TIMER_FINISHED,
+    PHRASE_TIMER_SIGNAL_SHORT,
     PHRASE_TIMER_SIGNAL_LONG,
     PHRASE_TIMER_CANCELLED,
     PHRASE_UI_CLICK,
@@ -108,7 +109,7 @@ NTP_TIMEOUT_SEC = 3
 NTP_DAILY_HOUR = 4
 NTP_DAILY_MINUTE = 10
 STARTUP_SPLASH_MIN_MS = 1600
-STARTUP_SOUND_FOLDER = 7
+STARTUP_STATUS_MS = 1400
 
 lcd = I2cLcd(
     I2C(0, sda=Pin(0), scl=Pin(1), freq=400000),
@@ -183,9 +184,9 @@ sound_enabled = True
 volume = config["volume"]
 audio.set_volume(volume)
 
-# Dedicated, language-neutral startup sound. It is intentionally queued only
-# after the configured volume is known.
-audio.enqueue(STARTUP_SOUND_FOLDER, PHRASE_UI_CLICK)
+# Reuse the already-confirmed short timer signal as the startup sound.
+# Queue it only after the configured volume is known.
+speech.phrase(PHRASE_TIMER_SIGNAL_SHORT)
 
 edit_h, edit_m, edit_s = timer.get_hms()
 edit_time_h = edit_time_m = edit_time_s = 0
@@ -1386,8 +1387,22 @@ print(
     "NTP:", "READY" if NTP_AVAILABLE else "UNAVAILABLE",
 )
 
+startup_ntp_ok = False
 if wifi_connected:
-    ntp_sync_now("startup")
+    startup_ntp_ok = ntp_sync_now("startup")
+
+if wifi_connected:
+    ui.show_message(
+        "WIFI OK",
+        "NTP OK" if startup_ntp_ok else "NTP ERROR",
+    )
+else:
+    ui.show_message("WIFI OFFLINE", "RTC LOCAL")
+
+startup_status_until_ms = time.ticks_add(time.ticks_ms(), STARTUP_STATUS_MS)
+while time.ticks_diff(startup_status_until_ms, time.ticks_ms()) > 0:
+    audio.service()
+    time.sleep_ms(20)
 
 while True:
     now = rtc_now()
