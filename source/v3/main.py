@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.8.0
+# Version: 3.8.1
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.8.0"
+APP_VERSION = "3.8.1"
 
 import time
 from machine import Pin, I2C
@@ -19,7 +19,16 @@ from rtc_calibration import (
     load_state as load_rtc_calibration_state,
     save_state as save_rtc_calibration_state,
     correction_due as rtc_correction_due,
+    process_reference as rtc_process_reference,
 )
+
+try:
+    from ntp_time import query_berlin_local
+    NTP_AVAILABLE = True
+except Exception as exc:
+    query_berlin_local = None
+    NTP_AVAILABLE = False
+    NTP_IMPORT_ERROR = exc
 
 try:
     from wifi_manager import WiFiManager
@@ -94,6 +103,10 @@ MUSIC_DETECT_SETTLE_MS = 1800
 MUSIC_DETECT_TIMEOUT_MS = 700
 MUSIC_DETECT_RETRIES = 4
 WIFI_CONNECT_TIMEOUT_MS = 10000
+NTP_SERVER = "pool.ntp.org"
+NTP_TIMEOUT_SEC = 3
+NTP_DAILY_HOUR = 4
+NTP_DAILY_MINUTE = 10
 
 lcd = I2cLcd(
     I2C(0, sda=Pin(0), scl=Pin(1), freq=400000),
@@ -205,6 +218,7 @@ overlay_value = None
 
 last_auto_key = None
 last_rtc_correction_key = None
+last_ntp_attempt_key = None
 last_timer_rotary_ms = 0
 timer_fast_streak = 0
 last_ui_click_ms = time.ticks_add(time.ticks_ms(), -UI_CLICK_MIN_GAP_MS)
@@ -313,6 +327,77 @@ def reset_rtc_calibration_baseline(reason):
     rtc_calibration_state["last_event"] = reason
     rtc_calibration_state = save_rtc_calibration_state(rtc_calibration_state)
     print("RTC auto calibration baseline reset:", reason)
+
+
+def ntp_sync_now(reason):
+    global rtc_calibration_state, last_ntp_attempt_key
+
+    now = rtc_now()
+    last_ntp_attempt_key = (
+        now["year"], now["month"], now["day"]
+    )
+
+    if not NTP_AVAILABLE:
+        print("NTP unavailable - module import failed")
+        try:
+            print("NTP import detail:", NTP_IMPORT_ERROR)
+        except Exception:
+            pass
+        return False
+
+    if wifi is None or not wifi.connected():
+        print("NTP skipped - Wi-Fi offline")
+        return False
+
+    try:
+        reference, utc_offset = query_berlin_local(
+            NTP_SERVER,
+            timeout_sec=NTP_TIMEOUT_SEC,
+        )
+    except Exception as exc:
+        print("NTP failed:", exc)
+        return False
+
+    before = rtc_now()
+    rtc_calibration_state, event, sync_value = rtc_process_reference(
+        rtc_calibration_state,
+        before,
+        reference,
+        preserve_too_soon=True,
+    )
+
+    if sync_value is not None:
+        write_rtc(
+            sync_value["year"], sync_value["month"], sync_value["day"],
+            sync_value["hour"], sync_value["minute"], sync_value["second"],
+        )
+
+    print(
+        "NTP %s:" % reason,
+        "%04d-%02d-%02d %02d:%02d:%02d" % (
+            reference["year"], reference["month"], reference["day"],
+            reference["hour"], reference["minute"], reference["second"],
+        ),
+        "UTC offset:", utc_offset // 3600,
+        "event:", event,
+        "DS error sec:", rtc_calibration_state.get("last_error_sec", 0),
+        "rate:", rtc_calibration_state.get("rate_sec_per_day", 0.0),
+        "samples:", rtc_calibration_state.get("sample_count", 0),
+    )
+    return True
+
+
+def service_ntp(now):
+    global last_ntp_attempt_key
+
+    if now["hour"] != NTP_DAILY_HOUR or now["minute"] < NTP_DAILY_MINUTE:
+        return
+
+    key = (now["year"], now["month"], now["day"])
+    if key == last_ntp_attempt_key:
+        return
+
+    ntp_sync_now("daily")
 
 
 def show_overlay(kind, value=None, duration_ms=OVERLAY_TIMEOUT_MS):
@@ -1274,7 +1359,11 @@ print(
     "UI click:", PHRASE_UI_CLICK,
     "Wi-Fi:", "CONNECTED" if wifi_connected else "OFFLINE",
     "IP:", wifi_ip if wifi_ip else "-",
+    "NTP:", "READY" if NTP_AVAILABLE else "UNAVAILABLE",
 )
+
+if wifi_connected:
+    ntp_sync_now("startup")
 
 while True:
     now = rtc_now()
@@ -1285,6 +1374,7 @@ while True:
     service_ui_timeout()
     service_clock_auto(now)
     service_rtc_correction(now)
+    service_ntp(now)
     audio.service()
     service_alarm_preview()
     if ui.state == STATE_MUSIC_PLAYER and active_alarm_index is None:
