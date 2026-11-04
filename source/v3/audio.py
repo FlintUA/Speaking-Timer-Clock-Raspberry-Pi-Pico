@@ -246,6 +246,7 @@ SILENCE_HALF_HOUR_TRACK = 15
 # 015 - half-hour double beep
 # 016 - short UI click (same sound in 07 and 17)
 # 017 - German-only "Minuten" in folder 17
+# 018 - language-neutral short startup sound in folder 07
 PHRASE_TIMER_SETUP = 6
 PHRASE_TIMER_SET = 7
 PHRASE_SOUND_ON = 8
@@ -258,6 +259,7 @@ PHRASE_TIMER_CANCELLED = 14
 PHRASE_HALF_HOUR_DOUBLE_BEEP = 15
 PHRASE_UI_CLICK = 16
 PHRASE_DE_MINUTEN = 17
+PHRASE_STARTUP_SOUND = 18
 
 
 class Speech:
