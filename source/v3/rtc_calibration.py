@@ -276,13 +276,16 @@ def _start_baseline(state, reference):
     state["fraction"] = 0.0
 
 
-def process_reference(state, ds_now, reference):
+def process_reference(state, ds_now, reference, preserve_too_soon=False):
     """Learn from a trusted PC/USB time reference.
 
     Positive error means the DS1302 is ahead. The returned event is one of:
     baseline, learned, dst, large_change, too_soon, invalid.
-    The caller should set DS1302 to the returned reference for every event
-    except invalid.
+    By default the caller should set DS1302 to the returned reference for
+    every event except invalid. If preserve_too_soon=True and the trusted
+    interval is shorter than MIN_SAMPLE_DAYS, the learning baseline is kept
+    and sync_value is None so automated daily checks do not destroy the
+    long-term drift sample.
     """
     state = _validated_state(state)
     if not valid_datetime(ds_now) or not valid_datetime(reference):
@@ -316,8 +319,10 @@ def process_reference(state, ds_now, reference):
         return save_state(state), "large_change", reference
 
     if days < MIN_SAMPLE_DAYS:
-        _start_baseline(state, reference)
         state["last_event"] = "too_soon"
+        if preserve_too_soon:
+            return save_state(state), "too_soon", None
+        _start_baseline(state, reference)
         return save_state(state), "too_soon", reference
 
     # During the interval, baseline_rate was already compensating the DS1302.
