@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.9.0
+# Version: 3.9.1
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.9.0"
+APP_VERSION = "3.9.1"
 
 import time
 from machine import Pin, I2C
@@ -54,7 +54,6 @@ from audio import (
     PHRASE_TIMER_CANCELLED,
     PHRASE_UI_CLICK,
     PHRASE_DE_MINUTEN,
-    PHRASE_STARTUP_SOUND,
 )
 from ui import (
     ClockUI,
@@ -186,7 +185,7 @@ audio.set_volume(volume)
 
 # Dedicated, language-neutral startup sound. It is intentionally queued only
 # after the configured volume is known.
-audio.enqueue(STARTUP_SOUND_FOLDER, PHRASE_STARTUP_SOUND)
+audio.enqueue(STARTUP_SOUND_FOLDER, PHRASE_UI_CLICK)
 
 edit_h, edit_m, edit_s = timer.get_hms()
 edit_time_h = edit_time_m = edit_time_s = 0
