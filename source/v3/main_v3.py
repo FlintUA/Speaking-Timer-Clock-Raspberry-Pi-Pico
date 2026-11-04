@@ -1,8 +1,8 @@
 # Speaking Timer-Clock v3 - modular hardware build
-# Version: 3.7.1
+# Version: 3.8.0
 # MicroPython / Raspberry Pi Pico
 
-APP_VERSION = "3.7.1"
+APP_VERSION = "3.8.0"
 
 import time
 from machine import Pin, I2C
@@ -20,6 +20,17 @@ from rtc_calibration import (
     save_state as save_rtc_calibration_state,
     correction_due as rtc_correction_due,
 )
+
+try:
+    from wifi_manager import WiFiManager
+    from wifi_secrets import WIFI_SSID, WIFI_PASSWORD
+    WIFI_CONFIG_AVAILABLE = True
+except Exception as exc:
+    WiFiManager = None
+    WIFI_SSID = None
+    WIFI_PASSWORD = None
+    WIFI_CONFIG_AVAILABLE = False
+    WIFI_IMPORT_ERROR = exc
 from audio import (
     DFPlayerTransport,
     AudioQueue,
@@ -82,6 +93,7 @@ MUSIC_TRACK_FALLBACK = 54
 MUSIC_DETECT_SETTLE_MS = 1800
 MUSIC_DETECT_TIMEOUT_MS = 700
 MUSIC_DETECT_RETRIES = 4
+WIFI_CONNECT_TIMEOUT_MS = 10000
 
 lcd = I2cLcd(
     I2C(0, sda=Pin(0), scl=Pin(1), freq=400000),
@@ -115,6 +127,34 @@ speech = Speech(audio, config["language"])
 timer = CountdownTimer()
 music = MusicPlayer(audio, FOLDER_MUSIC, music_track_count, 7)
 ui = ClockUI(lcd)
+
+wifi = None
+wifi_connected = False
+wifi_ip = None
+
+if WIFI_CONFIG_AVAILABLE:
+    try:
+        wifi = WiFiManager(
+            WIFI_SSID,
+            WIFI_PASSWORD,
+            timeout_ms=WIFI_CONNECT_TIMEOUT_MS,
+        )
+        wifi_connected = wifi.connect()
+        if wifi_connected:
+            wifi_ip = wifi.ifconfig()[0]
+            print("Wi-Fi connected:", wifi_ip)
+        else:
+            print("Wi-Fi unavailable - continuing offline; status:", wifi.status())
+    except Exception as exc:
+        wifi = None
+        wifi_connected = False
+        print("Wi-Fi startup error - continuing offline:", exc)
+else:
+    print("Wi-Fi config unavailable - continuing offline")
+    try:
+        print("Wi-Fi import detail:", WIFI_IMPORT_ERROR)
+    except Exception:
+        pass
 
 sound_enabled = True
 volume = config["volume"]
@@ -1232,6 +1272,8 @@ print(
     "Music tracks:", music.track_count,
     "Music count source:", music_track_count_source,
     "UI click:", PHRASE_UI_CLICK,
+    "Wi-Fi:", "CONNECTED" if wifi_connected else "OFFLINE",
+    "IP:", wifi_ip if wifi_ip else "-",
 )
 
 while True:
