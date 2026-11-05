@@ -26,16 +26,20 @@ add_executable(speaking_clock_c
     drivers/dfplayer.c
     audio/queue.c
     audio/speech.c
+    services/settings_store.c
 )
 target_include_directories(speaking_clock_c PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/drivers
     ${CMAKE_CURRENT_LIST_DIR}/app
     ${CMAKE_CURRENT_LIST_DIR}/audio
+    ${CMAKE_CURRENT_LIST_DIR}/services
 )
 target_link_libraries(speaking_clock_c PRIVATE
     pico_stdlib
     hardware_i2c
     hardware_uart
+    hardware_flash
+    pico_flash
 )
 pico_enable_stdio_usb(speaking_clock_c 1)
 pico_enable_stdio_uart(speaking_clock_c 0)
