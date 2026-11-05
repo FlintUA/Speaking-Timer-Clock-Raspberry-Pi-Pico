@@ -440,9 +440,9 @@ int main(void) {
 
         char top[17], bottom[17];
         if (language_menu_open) {
-            snprintf(top, sizeof(top), "SETTINGS LANGUAGE");
-            snprintf(bottom, sizeof(bottom), "%s  <TURN/PRESS>",
-                     language_menu_choice == SPEECH_RU ? "RUSSIAN" : "DEUTSCH");
+            snprintf(top, sizeof(top), "LANGUAGE SETTING");
+            snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
+                     language_menu_choice == SPEECH_RU ? "RU" : "DE");
         } else if (speech_overlay_until_ms && now < speech_overlay_until_ms) {
             snprintf(top, sizeof(top), "SPEAK TIME %s", speech_language_name(language));
             snprintf(bottom, sizeof(bottom), "%s", speech_overlay_time);
