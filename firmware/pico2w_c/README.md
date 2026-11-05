@@ -135,3 +135,68 @@ in parallel if no RTC is attached.
 
 **Status:** code committed but build and physical tests of the countdown
 version are pending.
+
+## GPIO buttons and rotary encoders - diagnostic build
+
+The driver `drivers/controls.c` is wired to the **original v3.10.0
+pin mapping**, with internal pull-ups. The firmware only logs input
+events to USB for this milestone. It does **not yet** bind GPIO events to
+clock menus, alarm editing or audio; the serial countdown commands are
+still available.
+
+| Device | Pico GPIO |
+| --- | --- |
+| Volume encoder DT / CLK | GP14 / GP15 |
+| Timer encoder DT / CLK | GP11 / GP10 |
+| Volume encoder push | GP20 |
+| Timer encoder push | GP19 |
+| Timer-mode button | GP28 |
+| Alarm button | GP21 |
+| Mode button | GP22 |
+| Minus button | GP26 |
+| Settings / plus button | GP27 |
+
+When hardware is connected, expect logs such as:
+
+```text
+[INPUT] GPIO controls initialized (2 encoders, 7 buttons)
+[INPUT] encoder TIMER CW
+[INPUT] encoder TIMER CCW
+[INPUT] button TIMER PRESS
+[INPUT] button TIMER RELEASE
+```
+
+Button debounce is 25 ms; encoders are polled at approximately 1 ms
+intervals, recognizing the same two quadrature transitions as the
+original MicroPython driver. This is a preliminary strategy and
+**must be checked for missed steps/bounce** on the actual encoders.
+Rotating or pressing a physical control does not start/stop the clock
+yet.
+
+### Test without the original clock hardware
+
+Compile:
+
+```powershell
+git pull --ff-only
+& "C:\Users\Flint123\.pico-sdk\cmake\v4.3.4\bin\cmake.exe" --build build-ninja --target speaking_clock_c
+```
+
+Flash `build-ninja/speaking_clock_c.uf2` to the **spare Pico 2 W only**,
+open COM7 or the newly enumerated COM port, 115200/USB CDC.
+
+Existing serial commands provide a software-only validation:
+
+- `t 30` + Enter, `start` + Enter
+- `cancel` + Enter before 30 seconds elapse
+- `status` + Enter should show `STOPPED`; no `FINISHED` should follow.
+
+For GPIO tests, connect one ordinary normally-open pushbutton between
+**GP19 and GND** on the spare board; do not apply an external voltage.
+Press/release should produce `button TIMER PRESS` then
+`button TIMER RELEASE`. A free-standing encoder can then be connected
+to the documented pins and GND, with 3.3 V only if required for a
+compatible passive encoder module. **Never attach 5 V logic directly
+to Pico GPIO.** No need to dismantle the production clock.
+
+Status: **committed, pending local build and hardware validation**.
