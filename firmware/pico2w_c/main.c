@@ -54,6 +54,10 @@ typedef enum {
     MENU_EDIT_DATE_M,
     MENU_EDIT_DATE_Y,
     MENU_EDIT_VOLUME,
+    MENU_EDIT_QUIET_ENABLED,
+    MENU_EDIT_QUIET_START,
+    MENU_EDIT_QUIET_END,
+    MENU_EDIT_HALF_HOUR,
     MENU_EDIT_EXACT
 } menu_state_t;
 static menu_state_t menu_state;
@@ -61,11 +65,19 @@ static uint8_t menu_index;
 static speech_language_t menu_language_choice;
 static uint8_t menu_volume_choice;
 static bool menu_exact_choice;
+static bool menu_quiet_enabled_choice;
+static uint8_t menu_quiet_start_choice;
+static uint8_t menu_quiet_end_choice;
+static bool menu_half_hour_choice;
 static ds1302_datetime_t menu_rtc_choice;
 static uint64_t menu_last_input_ms;
 #define SETTINGS_MENU_TIMEOUT_MS 20000u
-#define SETTINGS_MENU_ITEMS 5u
+#define SETTINGS_MENU_ITEMS 7u
 static bool exact_hour_phrase;
+static bool quiet_enabled = true;
+static uint8_t quiet_start = 22;
+static uint8_t quiet_end = 7;
+static bool half_hour_enabled;
 static uint64_t mode_pressed_at_ms;
 static bool mode_press_active;
 static uint64_t speech_overlay_until_ms;
@@ -163,7 +175,11 @@ static clock_settings_t settings_snapshot(void) {
     clock_settings_t cfg = {
         .language = (uint8_t)language,
         .volume = volume,
-        .exact_hour = exact_hour_phrase
+        .exact_hour = exact_hour_phrase,
+        .quiet_enabled = quiet_enabled,
+        .quiet_start = quiet_start,
+        .quiet_end = quiet_end,
+        .half_hour_enabled = half_hour_enabled
     };
     return cfg;
 }
@@ -171,7 +187,11 @@ static clock_settings_t settings_snapshot(void) {
 static bool settings_equal(clock_settings_t a, clock_settings_t b) {
     // Compare fields explicitly, not struct padding.
     return a.language == b.language && a.volume == b.volume &&
-           a.exact_hour == b.exact_hour;
+           a.exact_hour == b.exact_hour &&
+           a.quiet_enabled == b.quiet_enabled &&
+           a.quiet_start == b.quiet_start &&
+           a.quiet_end == b.quiet_end &&
+           a.half_hour_enabled == b.half_hour_enabled;
 }
 
 static void settings_mark_changed(void) {
@@ -318,7 +338,8 @@ static bool menu_write_rtc(bool date_only) {
 
 static const char *menu_item_name(unsigned index) {
     static const char *names[SETTINGS_MENU_ITEMS] = {
-        "Language", "Time", "Date", "Volume", "Exact-hour word"
+        "Language", "Time", "Date", "Quiet mode",
+        "Half-hour beep", "Exact-hour word", "Volume"
     };
     return index < SETTINGS_MENU_ITEMS ? names[index] : "?";
 }
@@ -358,12 +379,22 @@ static void menu_begin_edit(uint64_t now) {
             menu_state = menu_index == 1u ? MENU_EDIT_TIME_H : MENU_EDIT_DATE_D;
             break;
         case 3:
-            menu_volume_choice = volume;
-            menu_state = MENU_EDIT_VOLUME;
+            menu_quiet_enabled_choice = quiet_enabled;
+            menu_quiet_start_choice = quiet_start;
+            menu_quiet_end_choice = quiet_end;
+            menu_state = MENU_EDIT_QUIET_ENABLED;
             break;
         case 4:
+            menu_half_hour_choice = half_hour_enabled;
+            menu_state = MENU_EDIT_HALF_HOUR;
+            break;
+        case 5:
             menu_exact_choice = exact_hour_phrase;
             menu_state = MENU_EDIT_EXACT;
+            break;
+        case 6:
+            menu_volume_choice = volume;
+            menu_state = MENU_EDIT_VOLUME;
             break;
         default:
             return;
@@ -410,6 +441,35 @@ static void menu_commit(uint64_t now) {
             return;
         case MENU_EDIT_DATE_Y:
             if (!menu_write_rtc(true)) return;
+            break;
+        case MENU_EDIT_QUIET_ENABLED:
+            menu_state = MENU_EDIT_QUIET_START;
+            puts("[MENU] Set quiet start hour");
+            return;
+        case MENU_EDIT_QUIET_START:
+            menu_state = MENU_EDIT_QUIET_END;
+            puts("[MENU] Set quiet end hour");
+            return;
+        case MENU_EDIT_QUIET_END:
+            if (quiet_enabled != menu_quiet_enabled_choice ||
+                quiet_start != menu_quiet_start_choice ||
+                quiet_end != menu_quiet_end_choice) {
+                quiet_enabled = menu_quiet_enabled_choice;
+                quiet_start = menu_quiet_start_choice;
+                quiet_end = menu_quiet_end_choice;
+                settings_mark_changed();
+            }
+            printf("[MENU] Quiet mode selected: %s %02u-%02u\n",
+                   quiet_enabled ? "ON" : "OFF",
+                   (unsigned)quiet_start, (unsigned)quiet_end);
+            break;
+        case MENU_EDIT_HALF_HOUR:
+            if (half_hour_enabled != menu_half_hour_choice) {
+                half_hour_enabled = menu_half_hour_choice;
+                settings_mark_changed();
+            }
+            printf("[MENU] Half-hour beep selected: %s (playback not enabled yet)\n",
+                   half_hour_enabled ? "ON" : "OFF");
             break;
         case MENU_EDIT_EXACT:
             if (exact_hour_phrase != menu_exact_choice) {
@@ -483,6 +543,22 @@ static void menu_rotate(int direction, uint64_t now) {
             printf("[MENU] Volume candidate: %u/30\n", (unsigned)menu_volume_choice);
             break;
         }
+        case MENU_EDIT_QUIET_ENABLED:
+            menu_quiet_enabled_choice = !menu_quiet_enabled_choice;
+            printf("[MENU] Quiet candidate: %s\n", menu_quiet_enabled_choice ? "ON" : "OFF");
+            break;
+        case MENU_EDIT_QUIET_START:
+            menu_quiet_start_choice = wrap_u8(menu_quiet_start_choice, 0, 23, direction);
+            printf("[MENU] Quiet start candidate: %02u\n", (unsigned)menu_quiet_start_choice);
+            break;
+        case MENU_EDIT_QUIET_END:
+            menu_quiet_end_choice = wrap_u8(menu_quiet_end_choice, 0, 23, direction);
+            printf("[MENU] Quiet end candidate: %02u\n", (unsigned)menu_quiet_end_choice);
+            break;
+        case MENU_EDIT_HALF_HOUR:
+            menu_half_hour_choice = !menu_half_hour_choice;
+            printf("[MENU] Half-hour candidate: %s\n", menu_half_hour_choice ? "ON" : "OFF");
+            break;
         case MENU_EDIT_EXACT:
             menu_exact_choice = !menu_exact_choice;
             printf("[MENU] Exact-hour candidate: %s\n", menu_exact_choice ? "ON" : "OFF");
@@ -523,9 +599,15 @@ static void load_settings_at_boot(void) {
         language = saved.language == 1u ? SPEECH_DE : SPEECH_RU;
         volume = saved.volume;
         exact_hour_phrase = saved.exact_hour;
-        printf("[FLASH] loaded lang=%s volume=%u exact=%s\n",
+        quiet_enabled = saved.quiet_enabled;
+        quiet_start = saved.quiet_start;
+        quiet_end = saved.quiet_end;
+        half_hour_enabled = saved.half_hour_enabled;
+        printf("[FLASH] loaded lang=%s volume=%u exact=%s quiet=%s %02u-%02u half_hour=%s\n",
                speech_language_name(language), (unsigned)volume,
-               exact_hour_phrase ? "ON" : "OFF");
+               exact_hour_phrase ? "ON" : "OFF",
+               quiet_enabled ? "ON" : "OFF", (unsigned)quiet_start,
+               (unsigned)quiet_end, half_hour_enabled ? "ON" : "OFF");
     } else {
         printf("[FLASH] load=%s; using defaults (RU, volume=10)\n",
                settings_store_result_name(result));
@@ -583,7 +665,7 @@ static void handle_command(char *line) {
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, rtc-debug, rtc-reset-stats, save, help");
+        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, rtc-debug, rtc-reset-stats, save, help");
     } else if (strcmp(line, "rtc-debug") == 0) {
         print_rtc_debug();
     } else if (strcmp(line, "rtc-reset-stats") == 0) {
@@ -599,6 +681,10 @@ static void handle_command(char *line) {
         save_settings_now();
     } else if (strcmp(line, "autosave-status") == 0) {
         print_autosave_status(now);
+    } else if (strcmp(line, "quiet-status") == 0) {
+        printf("[QUIET] enabled=%s start=%02u end=%02u half_hour=%s (automatic playback disabled)\n",
+               quiet_enabled ? "ON" : "OFF", (unsigned)quiet_start,
+               (unsigned)quiet_end, half_hour_enabled ? "ON" : "OFF");
     } else if (strcmp(line, "menu") == 0) {
         if (menu_state != MENU_CLOSED) menu_close();
         else menu_open(now);
@@ -892,6 +978,22 @@ int main(void) {
             snprintf(top, sizeof(top), "SET VOLUME");
             snprintf(bottom, sizeof(bottom), "%u / 30 PRESS=OK",
                      (unsigned)menu_volume_choice);
+        } else if (menu_state == MENU_EDIT_QUIET_ENABLED) {
+            snprintf(top, sizeof(top), "QUIET MODE");
+            snprintf(bottom, sizeof(bottom), "%s PRESS=NEXT",
+                     menu_quiet_enabled_choice ? "ON" : "OFF");
+        } else if (menu_state == MENU_EDIT_QUIET_START) {
+            snprintf(top, sizeof(top), "QUIET START");
+            snprintf(bottom, sizeof(bottom), "%02u:00 PRESS=NEXT",
+                     (unsigned)menu_quiet_start_choice);
+        } else if (menu_state == MENU_EDIT_QUIET_END) {
+            snprintf(top, sizeof(top), "QUIET END");
+            snprintf(bottom, sizeof(bottom), "%02u:00 PRESS=SAVE",
+                     (unsigned)menu_quiet_end_choice);
+        } else if (menu_state == MENU_EDIT_HALF_HOUR) {
+            snprintf(top, sizeof(top), "HALF-HOUR BEEP");
+            snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
+                     menu_half_hour_choice ? "ON" : "OFF");
         } else if (menu_state == MENU_EDIT_EXACT) {
             snprintf(top, sizeof(top), "EXACT HOUR WORD");
             snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
