@@ -156,7 +156,7 @@ int main(void) {
             previous_remaining = UINT32_MAX;
         }
         if (now < next_rtc_ms) {
-            sleep_ms(10);
+            sleep_ms(1);
             continue;
         }
         next_rtc_ms = now + 1000u;
