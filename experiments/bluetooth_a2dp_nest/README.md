@@ -130,3 +130,44 @@ boot
 ```
 
 No MOD music should be started in the custom test.
+
+## 300 ms tone + persistent SBC silence (experimental)
+
+The standalone `nest_autotest` build now patches the SDK's upstream
+`a2dp_source_demo.c` **at CMake configure time** into a generated file inside
+`nest_autotest/build/`. This avoids committing the upstream source, whose
+license restricts commercial use. Review the upstream license before any
+commercial distribution.
+
+The generated A2DP source plays a generated 441 Hz tone for exactly 300 ms
+of PCM samples after stream start, then encodes and sends zero-valued PCM
+samples without suspending the A2DP stream. This keeps the SBC transport
+running (at a continuous bandwidth and power cost).
+
+The CMake patch is deliberately strict. If a Pico SDK update changes the
+upstream code, configuration fails with a useful error rather than silently
+falling back to an endless tone.
+
+### Build in VS Code
+
+1. `git pull` on `develop/v3`.
+2. In VS Code, `CMake: Build Target` -> `nest_a2dp_autotest`.
+3. Flash `nest_autotest/build/nest_a2dp_autotest.uf2` to the **spare** Pico 2 W.
+4. Open Serial Monitor and inspect `[TONE]` diagnostics.
+
+Expected log after A2DP stream starts:
+
+```text
+[TONE] Scheduled 300 ms at 44100 Hz (13230 samples per channel)
+A2DP Source: Stream started ...
+[TONE] 300 ms complete; sending SBC silence, A2DP stays active
+```
+
+The precise log order includes upstream A2DP events. The actual acoustic
+duration can be delayed by Bluetooth buffering. Audio stream persistence
+during prolonged silence is still unverified on Nest. Automatic connection
+continues to use upstream discovery of the first matching audio-class device;
+explicit filtering by the name Nest is a future task.
+
+`usb_stdio_test` remains an independent target. The production MicroPython
+clock in `source/v3` remains unchanged.
