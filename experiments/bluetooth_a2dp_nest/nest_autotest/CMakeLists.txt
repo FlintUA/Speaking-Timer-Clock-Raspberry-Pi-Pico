@@ -50,3 +50,17 @@ pico_enable_stdio_usb(nest_a2dp_autotest 1)
 pico_enable_stdio_uart(nest_a2dp_autotest 0)
 
 pico_add_extra_outputs(nest_a2dp_autotest)
+
+
+add_executable(usb_stdio_test
+    usb_stdio_test.c
+)
+
+target_link_libraries(usb_stdio_test PRIVATE
+    pico_stdlib
+)
+
+pico_enable_stdio_usb(usb_stdio_test 1)
+pico_enable_stdio_uart(usb_stdio_test 0)
+
+pico_add_extra_outputs(usb_stdio_test)
