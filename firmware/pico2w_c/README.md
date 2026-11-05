@@ -401,3 +401,73 @@ Flash the newly built `build-ninja/speaking_clock_c.uf2`, then test
 SETTINGS -> one detent -> TIMER button -> long MODE press. Confirm
 the language actually changes without changing the selected timer
 duration. Test cancelling menu and the 20-second timeout separately.
+
+
+## Persistent settings - cautious A/B flash pilot
+
+**Status: committed, build and hardware read/write tests pending.**
+This is the first nonvolatile-storage implementation. It uses Pico SDK
+`pico_flash/flash_safe_execute` and `hardware_flash` under a one-core
+assumption, with two sector-sized A/B slots at the end of the Pico 2 W
+board-defined flash, a record magic/version, monotonic sequence and
+IEEE CRC32. The program-image-end guard refuses writes if the firmware
+overlaps the reserved area, leaving an additional 4 KiB margin.
+
+**Critical legacy protection:** because the clock previously ran
+MicroPython, the last flash sectors may contain old MicroPython
+filesystem data. The C implementation **does not erase unfamiliar
+nonblank sectors**. A valid owned sector must contain our valid CRC32
+header and only FF bytes for the remainder of the entire sector.
+If there is legacy content the command replies `OCCUPIED`, and no
+erase or write is attempted. Do not erase the Pico's MicroPython
+filesystem merely to make this test pass before independently verifying
+its backup. There is no force-save command.
+
+### Read-only stage (do this FIRST)
+
+Build/flash the updated UF2, open Serial Monitor with LF and send:
+
+```text
+flash-info
+```
+
+Expected output includes the board flash size, computed sector offsets,
+the linked firmware-end address, `guard=OK` or `guard=FAIL`, and
+`slot0`/`slot1` states (`BLANK`, `VALID` or `OCCUPIED`).
+**Copy the full output before proceeding to save.**
+
+At boot the firmware reads a valid latest record if present; otherwise
+it uses defaults: RU, volume 10, exact-hour OFF. A read never erases
+or changes flash. The selected language and volume can still be
+changed using controls as before.
+
+### Explicit save test - only after confirming slot safety
+
+The firmware does **not** autosave on encoder detents or on language
+selection. The Serial Monitor command
+
+```text
+save
+```
+
+asks the firmware to persist exactly three parameters: language,
+volume, and exact-hour phrase. It returns `[FLASH] save=OK` on
+successful write and readback verification. It refuses `OCCUPIED`
+or `IMAGE_OVERLAP` and reports flash/verification errors.
+
+The settings record alternates sectors: a new record is written
+to the inactive slot while the previous valid record remains,
+to better tolerate power interruption. This is not a filesystem
+and does not preserve MicroPython files in the same sectors.
+Flash endurance and arbitrary power loss DURING first save remain
+hardware-dependent. Firmware updates using a full-chip erase
+will remove saved settings, and settings retained through a normal
+UF2 update are not yet proven.
+
+After a confirmed `save=OK`, **power-cycle** the clock and read
+the boot `[FLASH] loaded ...` message; verify language, volume
+and `exact` against the saved values. Use `flash-info` after
+reboot to confirm the active slot. No other settings are yet saved.
+
+Implementation: `services/settings_store.[ch]`. The stable
+MicroPython implementation and SD card files are unchanged.
