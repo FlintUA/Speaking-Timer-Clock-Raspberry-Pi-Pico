@@ -42,11 +42,22 @@ static audio_queue_t audio_queue;
 static uint8_t volume = 10; // Default; overridden by saved flash settings.
 static bool sound_enabled = true;
 static speech_language_t language = SPEECH_RU;
-// UI selection updates RAM, and schedules a delayed flash save.
-static bool language_menu_open;
-static speech_language_t language_menu_choice;
-static uint64_t language_menu_last_input_ms;
-#define LANGUAGE_MENU_TIMEOUT_MS 20000u
+// Two-level settings menu, following the MicroPython navigation model.
+typedef enum {
+    MENU_CLOSED = 0,
+    MENU_LIST,
+    MENU_EDIT_LANGUAGE,
+    MENU_EDIT_VOLUME,
+    MENU_EDIT_EXACT
+} menu_state_t;
+static menu_state_t menu_state;
+static uint8_t menu_index;
+static speech_language_t menu_language_choice;
+static uint8_t menu_volume_choice;
+static bool menu_exact_choice;
+static uint64_t menu_last_input_ms;
+#define SETTINGS_MENU_TIMEOUT_MS 20000u
+#define SETTINGS_MENU_ITEMS 3u
 static bool exact_hour_phrase;
 static uint64_t mode_pressed_at_ms;
 static bool mode_press_active;
@@ -175,7 +186,7 @@ static void autosave_service(uint64_t now_ms) {
     if (autosave_attempted &&
         now_ms - last_autosave_attempt_ms < AUTOSAVE_ERROR_RETRY_MS) return;
     // Avoid interrupting live countdown and queued DFPlayer speech.
-    if (timer.running || language_menu_open || !audio_queue_idle(&audio_queue)) return;
+    if (timer.running || menu_state != MENU_CLOSED || !audio_queue_idle(&audio_queue)) return;
 
     clock_settings_t cfg = settings_snapshot();
     if (settings_equal(cfg, last_persisted_settings)) {
@@ -237,32 +248,123 @@ static void toggle_sound(void) {
     printf("[AUDIO] sound=%s\n", sound_enabled ? "ON" : "OFF");
 }
 
-static void close_language_menu(bool commit) {
-    if (!language_menu_open) return;
-    if (commit) {
-        speech_language_t previous = language;
-        language = language_menu_choice;
-        if (previous != language) settings_mark_changed();
-        printf("[MENU] Language selected: %s (autosave if changed)\n",
-               speech_language_name(language));
-    } else {
-        printf("[MENU] Language selection cancelled; remains %s\n",
-               speech_language_name(language));
-    }
-    language_menu_open = false;
+static const char *menu_item_name(unsigned index) {
+    static const char *names[SETTINGS_MENU_ITEMS] = {
+        "Language", "Volume", "Exact-hour word"
+    };
+    return index < SETTINGS_MENU_ITEMS ? names[index] : "?";
 }
 
-static void open_language_menu(uint64_t now_ms) {
+static void menu_close(void) {
+    if (menu_state == MENU_CLOSED) return;
+    menu_state = MENU_CLOSED;
+    timer_screen = false;
+    puts("[MENU] Closed");
+}
+
+static void menu_open(uint64_t now) {
     if (timer.running) {
         puts("[MENU] Settings unavailable during countdown");
         return;
     }
-    language_menu_choice = language;
-    language_menu_last_input_ms = now_ms;
-    language_menu_open = true;
-    // The dedicated menu takes precedence over any prior temporary overlays.
-    printf("[MENU] Select language: %s (turn TIMER, press TIMER to confirm, SETTINGS to cancel)\n",
-           speech_language_name(language_menu_choice));
+    menu_index = 0;
+    menu_state = MENU_LIST;
+    menu_last_input_ms = now;
+    printf("[MENU] Open: %s\n", menu_item_name(menu_index));
+}
+
+static void menu_begin_edit(uint64_t now) {
+    menu_last_input_ms = now;
+    if (menu_state != MENU_LIST) return;
+    switch (menu_index) {
+        case 0:
+            menu_language_choice = language;
+            menu_state = MENU_EDIT_LANGUAGE;
+            break;
+        case 1:
+            menu_volume_choice = volume;
+            menu_state = MENU_EDIT_VOLUME;
+            break;
+        default:
+            menu_exact_choice = exact_hour_phrase;
+            menu_state = MENU_EDIT_EXACT;
+            break;
+    }
+    printf("[MENU] Edit %s\n", menu_item_name(menu_index));
+}
+
+static void menu_commit(uint64_t now) {
+    menu_last_input_ms = now;
+    switch (menu_state) {
+        case MENU_EDIT_LANGUAGE:
+            if (language != menu_language_choice) {
+                language = menu_language_choice;
+                settings_mark_changed();
+            }
+            printf("[MENU] Language selected: %s\n", speech_language_name(language));
+            break;
+        case MENU_EDIT_VOLUME:
+            if (volume != menu_volume_choice) {
+                volume = menu_volume_choice;
+                audio_queue_set_volume(&audio_queue, volume);
+                settings_mark_changed();
+            }
+            printf("[MENU] Volume selected: %u/30\n", (unsigned)volume);
+            break;
+        case MENU_EDIT_EXACT:
+            if (exact_hour_phrase != menu_exact_choice) {
+                exact_hour_phrase = menu_exact_choice;
+                settings_mark_changed();
+            }
+            printf("[MENU] Exact-hour selected: %s\n", exact_hour_phrase ? "ON" : "OFF");
+            break;
+        default:
+            return;
+    }
+    // Match MicroPython: commit returns to the settings list.
+    menu_state = MENU_LIST;
+}
+
+static void menu_back(uint64_t now) {
+    if (menu_state == MENU_CLOSED) return;
+    menu_last_input_ms = now;
+    if (menu_state == MENU_LIST) {
+        menu_close();
+    } else {
+        printf("[MENU] Cancelled edit: %s\n", menu_item_name(menu_index));
+        menu_state = MENU_LIST;
+    }
+}
+
+static void menu_rotate(int direction, uint64_t now) {
+    if (menu_state == MENU_CLOSED) return;
+    menu_last_input_ms = now;
+    switch (menu_state) {
+        case MENU_LIST:
+            menu_index = (uint8_t)((menu_index + SETTINGS_MENU_ITEMS +
+                                  (direction > 0 ? 1u : SETTINGS_MENU_ITEMS - 1u)) %
+                                  SETTINGS_MENU_ITEMS);
+            printf("[MENU] Item: %s\n", menu_item_name(menu_index));
+            break;
+        case MENU_EDIT_LANGUAGE:
+            menu_language_choice = menu_language_choice == SPEECH_RU ? SPEECH_DE : SPEECH_RU;
+            printf("[MENU] Language candidate: %s\n", speech_language_name(menu_language_choice));
+            break;
+        case MENU_EDIT_VOLUME: {
+            int choice = (int)menu_volume_choice + direction;
+            if (choice < 0) choice = 0;
+            if (choice > 30) choice = 30;
+            menu_volume_choice = (uint8_t)choice;
+            printf("[MENU] Volume candidate: %u/30\n", (unsigned)menu_volume_choice);
+            break;
+        }
+        case MENU_EDIT_EXACT:
+            menu_exact_choice = !menu_exact_choice;
+            printf("[MENU] Exact-hour candidate: %s\n", menu_exact_choice ? "ON" : "OFF");
+            break;
+        default:
+            break;
+    }
 }
 
 static void save_settings_now(void) {
@@ -364,10 +466,10 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "autosave-status") == 0) {
         print_autosave_status(now);
     } else if (strcmp(line, "menu") == 0) {
-        if (language_menu_open) close_language_menu(false);
-        else open_language_menu(now);
+        if (menu_state != MENU_CLOSED) menu_close();
+        else menu_open(now);
     } else if (strcmp(line, "start") == 0) {
-        if (language_menu_open) close_language_menu(false);
+        if (menu_state != MENU_CLOSED) menu_close();
         timer_start_now(now);
         print_timer_status(now);
     } else if (strcmp(line, "cancel") == 0) {
@@ -400,10 +502,7 @@ static void handle_command(char *line) {
         speech_language_t previous = language;
         language = line[5] == 'd' ? SPEECH_DE : SPEECH_RU;
         if (previous != language) settings_mark_changed();
-        if (language_menu_open) {
-            language_menu_choice = language;
-            language_menu_last_input_ms = now;
-        }
+        if (menu_state == MENU_EDIT_LANGUAGE) menu_language_choice = language;
         printf("[SPEECH] language=%s\n", speech_language_name(language));
     } else if (strcmp(line, "exact on") == 0 || strcmp(line, "exact off") == 0) {
         bool previous = exact_hour_phrase;
@@ -491,11 +590,8 @@ static void on_control_event(const control_event_t *event, void *context) {
         change_volume(event->direction);
     } else if (event->type == CONTROL_TIMER_ROTATE) {
         printf("[INPUT] encoder TIMER %s\n", event->direction > 0 ? "CW" : "CCW");
-        if (language_menu_open) {
-            language_menu_choice = language_menu_choice == SPEECH_RU ? SPEECH_DE : SPEECH_RU;
-            language_menu_last_input_ms = now;
-            printf("[MENU] Language candidate: %s\n",
-                   speech_language_name(language_menu_choice));
+        if (menu_state != MENU_CLOSED) {
+            menu_rotate(event->direction, now);
             return;
         }
         // One minute per encoder event; don't edit a running timer.
@@ -512,17 +608,21 @@ static void on_control_event(const control_event_t *event, void *context) {
         printf("[INPUT] button %s %s\n",
                controls_button_name(event->button),
                event->type == CONTROL_BUTTON_PRESS ? "PRESS" : "RELEASE");
-        if (event->button == BUTTON_SETTINGS &&
-            event->type == CONTROL_BUTTON_PRESS) {
-            if (language_menu_open) close_language_menu(false);
-            else open_language_menu(now);
+        if (event->type == CONTROL_BUTTON_PRESS && event->button == BUTTON_SETTINGS) {
+            if (menu_state == MENU_CLOSED) menu_open(now);
+            else if (menu_state == MENU_LIST) menu_begin_edit(now);
+            else menu_commit(now);
             return;
         }
-        if (event->button == BUTTON_TIMER &&
-            event->type == CONTROL_BUTTON_PRESS && language_menu_open) {
-            language_menu_last_input_ms = now;
-            close_language_menu(true);
-            timer_screen = false;
+        if (event->type == CONTROL_BUTTON_PRESS && event->button == BUTTON_MINUS &&
+            menu_state != MENU_CLOSED) {
+            menu_back(now);
+            return;
+        }
+        if (event->type == CONTROL_BUTTON_PRESS && event->button == BUTTON_TIMER &&
+            menu_state != MENU_CLOSED) {
+            if (menu_state == MENU_LIST) menu_begin_edit(now);
+            else menu_commit(now);
             return;
         }
         if (event->button == BUTTON_MODE) {
@@ -594,10 +694,10 @@ int main(void) {
         uint64_t now = to_ms_since_boot(get_absolute_time());
         countdown_service(&timer, now);
         autosave_service(now);
-        if (language_menu_open &&
-            now - language_menu_last_input_ms >= LANGUAGE_MENU_TIMEOUT_MS) {
-            puts("[MENU] Timeout (20s); discarding unconfirmed choice");
-            close_language_menu(false);
+        if (menu_state != MENU_CLOSED &&
+            now - menu_last_input_ms >= SETTINGS_MENU_TIMEOUT_MS) {
+            puts("[MENU] Timeout (20s); unsaved edit discarded");
+            menu_close();
         }
         if (countdown_consume_finished(&timer)) {
             puts("[TIMER] FINISHED");
@@ -632,10 +732,22 @@ int main(void) {
         }
 
         char top[17], bottom[17];
-        if (language_menu_open) {
+        if (menu_state == MENU_LIST) {
+            snprintf(top, sizeof(top), "SETTINGS %u/%u",
+                     (unsigned)(menu_index + 1u), (unsigned)SETTINGS_MENU_ITEMS);
+            snprintf(bottom, sizeof(bottom), "%s", menu_item_name(menu_index));
+        } else if (menu_state == MENU_EDIT_LANGUAGE) {
             snprintf(top, sizeof(top), "LANGUAGE SETTING");
             snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
-                     language_menu_choice == SPEECH_RU ? "RU" : "DE");
+                     menu_language_choice == SPEECH_RU ? "RU" : "DE");
+        } else if (menu_state == MENU_EDIT_VOLUME) {
+            snprintf(top, sizeof(top), "SET VOLUME");
+            snprintf(bottom, sizeof(bottom), "%u / 30 PRESS=OK",
+                     (unsigned)menu_volume_choice);
+        } else if (menu_state == MENU_EDIT_EXACT) {
+            snprintf(top, sizeof(top), "EXACT HOUR WORD");
+            snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
+                     menu_exact_choice ? "ON" : "OFF");
         } else if (speech_overlay_until_ms && now < speech_overlay_until_ms) {
             snprintf(top, sizeof(top), "SPEAK TIME %s", speech_language_name(language));
             snprintf(bottom, sizeof(bottom), "%s", speech_overlay_time);
