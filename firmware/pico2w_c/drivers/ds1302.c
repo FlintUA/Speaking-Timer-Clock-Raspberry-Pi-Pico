@@ -1,9 +1,12 @@
 #include "ds1302.h"
 #include "pico/stdlib.h"
+#include <string.h>
 
 static uint s_clk, s_dio, s_ce;
+static ds1302_diagnostics_t stats;
 
 void ds1302_init(uint clk_gpio, uint dio_gpio, uint ce_gpio) {
+    memset(&stats, 0, sizeof(stats));
     s_clk = clk_gpio;
     s_dio = dio_gpio;
     s_ce = ce_gpio;
@@ -52,30 +55,79 @@ static uint8_t bcd_to_dec(uint8_t b) {
     return (uint8_t)(((b >> 4) * 10u) + (b & 0x0fu));
 }
 
+static bool invalid_bcd(uint8_t value) {
+    return ((value & 0x0fu) > 9u) || (((value >> 4) & 0x0fu) > 9u);
+}
+
+void ds1302_get_diagnostics(ds1302_diagnostics_t *out) {
+    if (out) *out = stats;
+}
+
+void ds1302_reset_diagnostics(void) {
+    memset(&stats, 0, sizeof(stats));
+}
+
 bool ds1302_read_datetime(ds1302_datetime_t *out) {
     if (!out) return false;
-    // Same register masks as library/ds1302.py. CH bit indicates halted clock.
-    uint8_t seconds_raw = read_register(0x80);
-    uint8_t minutes_raw = read_register(0x82);
-    uint8_t hours_raw = read_register(0x84);
-    uint8_t day_raw = read_register(0x86);
-    uint8_t month_raw = read_register(0x88);
-    uint8_t weekday_raw = read_register(0x8a);
-    uint8_t year_raw = read_register(0x8c);
+    // Preserve original read timings/register order. Capture EXACT raw bytes
+    // from the same read used by the clock; no extra transactions or retries.
+    uint8_t raw[7] = {
+        read_register(0x80), read_register(0x82), read_register(0x84),
+        read_register(0x86), read_register(0x88), read_register(0x8a),
+        read_register(0x8c)
+    };
+    memcpy(stats.last_raw, raw, sizeof(raw));
+    uint8_t seconds_raw = raw[0];
+    uint8_t minutes_raw = raw[1];
+    uint8_t hours_raw = raw[2];
+    uint8_t day_raw = raw[3];
+    uint8_t month_raw = raw[4];
+    uint8_t weekday_raw = raw[5];
+    uint8_t year_raw = raw[6];
 
-    out->second = bcd_to_dec(seconds_raw & 0x7f);
-    out->minute = bcd_to_dec(minutes_raw & 0x7f);
-    // First bring-up supports 24-hour mode (production uses 24-hour clock).
-    if (hours_raw & 0x80) return false;
-    out->hour = bcd_to_dec(hours_raw & 0x3f);
-    out->day = bcd_to_dec(day_raw & 0x3f);
-    out->month = bcd_to_dec(month_raw & 0x1f);
-    out->weekday = bcd_to_dec(weekday_raw & 0x07);
+    // Identical masking and decimal conversion as the original C driver.
+    out->second = bcd_to_dec(seconds_raw & 0x7fu);
+    out->minute = bcd_to_dec(minutes_raw & 0x7fu);
+    out->hour = bcd_to_dec(hours_raw & 0x3fu);
+    out->day = bcd_to_dec(day_raw & 0x3fu);
+    out->month = bcd_to_dec(month_raw & 0x1fu);
+    out->weekday = bcd_to_dec(weekday_raw & 0x07u);
     out->year = 2000u + bcd_to_dec(year_raw);
-    return !(seconds_raw & 0x80) &&
-           out->second < 60 && out->minute < 60 && out->hour < 24 &&
-           out->day >= 1 && out->day <= 31 &&
-           out->month >= 1 && out->month <= 12 &&
-           out->weekday >= 1 && out->weekday <= 7 &&
-           out->year >= 2000 && out->year <= 2099;
+
+    uint32_t flags = 0;
+    if (seconds_raw & 0x80u) flags |= DS1302_ERR_CH;
+    if (hours_raw & 0x80u) flags |= DS1302_ERR_12H_MODE;
+    if (out->second >= 60u) flags |= DS1302_ERR_SECONDS;
+    if (out->minute >= 60u) flags |= DS1302_ERR_MINUTES;
+    if (out->hour >= 24u) flags |= DS1302_ERR_HOURS;
+    if (out->day < 1u || out->day > 31u) flags |= DS1302_ERR_DAY;
+    if (out->month < 1u || out->month > 12u) flags |= DS1302_ERR_MONTH;
+    if (out->weekday < 1u || out->weekday > 7u) flags |= DS1302_ERR_WEEKDAY;
+    // Invalid BCD diagnostics are new: some invalid digit combinations
+    // previously passed the numeric range checks. Still reject them.
+    if (invalid_bcd(seconds_raw & 0x7fu) ||
+        invalid_bcd(minutes_raw & 0x7fu) ||
+        invalid_bcd(hours_raw & 0x3fu) ||
+        invalid_bcd(day_raw & 0x3fu) ||
+        invalid_bcd(month_raw & 0x1fu) ||
+        invalid_bcd(weekday_raw & 0x07u) ||
+        invalid_bcd(year_raw)) {
+        flags |= DS1302_ERR_INVALID_BCD;
+    }
+    if (invalid_bcd(year_raw)) flags |= DS1302_ERR_YEAR_BCD;
+
+    if (flags) {
+        ++stats.reads_failed;
+        ++stats.consecutive_failures;
+        if (stats.consecutive_failures > stats.max_consecutive_failures) {
+            stats.max_consecutive_failures = stats.consecutive_failures;
+        }
+        memcpy(stats.last_failed_raw, raw, sizeof(raw));
+        stats.last_failure_flags = flags;
+        stats.have_last_failure = true;
+        return false;
+    }
+    ++stats.reads_ok;
+    stats.consecutive_failures = 0;
+    return true;
 }
