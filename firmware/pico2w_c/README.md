@@ -226,3 +226,46 @@ Check that `build-ninja/speaking_clock_c.uf2` was regenerated before flashing.
 Test right/left turns and button press on assembled clock; compare displayed
 minute increments against actual encoder detents. If one detent causes more
 than one minute change, the encoder step scaling still needs calibration.
+
+## DFPlayer Mini - first C UART/queue bring-up
+
+**Status: source committed, local build and audible test pending.**
+The first DFPlayer stage ports the frame format, 9600-baud UART,
+active-low BUSY indication, command-spacing rule (120 ms), and simple
+nonblocking fixed-size playback queue from `source/v3/audio.py`.
+The same hardware pins are used: **UART0 TX GP16, RX GP17, BUSY GP18**.
+
+There is **no playback on boot**, no automatic timer-complete sound,
+and no changes to audio volume. The existing speaker wiring and SD card
+remain in place. In Serial Monitor (select LF), send one command per line:
+
+| Command | Result |
+| --- | --- |
+| `audio` | Read BUSY pin and queue state |
+| `play 7 16` | Queue RU service-folder short UI click (07/016) |
+| `play 7 12` | Queue short timer signal (07/012) |
+| `pause` | Clear queue and request DFPlayer pause |
+
+Folder/track references are from `source/v3/audio.py`; the actual files
+must be present on the SD card and DFPlayer must be powered and connected.
+Each playback command uses DFPlayer's `0x0F` folder/track format.
+The driver does **not** yet parse DFPlayer UART acknowledgements or
+query folder contents, and `audio` reflects the BUSY pin rather than
+verified playback success.
+
+**Hardware check:** after confirming a successful new build, flash
+`build-ninja/speaking_clock_c.uf2`; start monitoring the correct COM
+port (previously COM8 on the assembled clock), use line ending LF,
+send `audio` then `play 7 16`. Listen for the short click. If silent,
+send `audio` again and report the full serial output. Avoid repeated
+playback commands until we confirm the first result.
+
+Build from `firmware/pico2w_c`:
+
+```powershell
+git pull --ff-only
+& "C:\Users\Flint123\.pico-sdk\cmake\v4.3.4\bin\cmake.exe" --build build-ninja --target speaking_clock_c
+```
+
+The previously functioning MicroPython firmware is still the recovery
+baseline; this test does not erase or alter DFPlayer SD card contents.
