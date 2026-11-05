@@ -1,6 +1,6 @@
 # Pico 2 W native C firmware (migration workspace)
 
-Status: **planning / not yet a bootable clock firmware**.
+Status: **first read-only hardware bring-up implementation**. Source and CMake target added; compilation and physical LCD/RTC operation still require local verification.
 
 This directory is the future integrated Pico SDK firmware. It is deliberately
 separate from the known-good Bluetooth proof of concept in
@@ -33,9 +33,9 @@ firmware/pico2w_c/
   tests/       host-side behavioral tests where feasible
 ```
 
-We will add compilable source and CMake targets incrementally; do not use
-this directory as a firmware build target until there is an implemented
-`CMakeLists.txt`.
+The first CMake target is `speaking_clock_c`, built from `main.c` and two
+independent drivers. It does not yet implement the clock's timers, menus,
+settings, DFPlayer or Bluetooth.
 
 ## First vertical slice
 
@@ -56,3 +56,49 @@ Work on `develop/v3`, commit one small change at a time, `git pull --ff-only`
 on the PC and build/test only with the spare Pico 2 W initially.
 `source/v3` is the reference implementation, not a directory to clean up.
 Do not move, delete or rename assets until the replacement firmware is proven.
+
+## Build in VS Code (Windows, Pico SDK extension)
+
+Open a terminal at the **repository root**, run `git pull --ff-only`, and then
+open the `firmware/pico2w_c` folder using VS Code **File > Open Folder**.
+Select **Raspberry Pi Pico 2 W** as the board (RP2350 ARM) when configuring.
+
+The project uses `PICO_SDK_PATH`. If the extension has not set it, configure
+CMake explicitly from a PowerShell terminal:
+
+```powershell
+cd C:\Users\Flint123\projects\Speaking-Timer-Clock-Raspberry-Pi-Pico\firmware\pico2w_c
+$env:PICO_SDK_PATH = "C:\Users\Flint123\.pico-sdk\sdk\2.3.1"
+& "C:\Users\Flint123\.pico-sdk\cmake\v4.3.4\bin\cmake.exe" -S . -B build -G Ninja -DPICO_BOARD=pico2_w -DPICO_PLATFORM=rp2350-arm-s
+& "C:\Users\Flint123\.pico-sdk\cmake\v4.3.4\bin\cmake.exe" --build build --target speaking_clock_c
+```
+
+If an existing CMake preset from the Pico extension is available, prefer
+**CMake: Configure** then **CMake: Build Target > speaking_clock_c**.
+
+Expected output: `firmware/pico2w_c/build/speaking_clock_c.uf2`.
+**Do not flash it to the production clock.**
+
+## Serial output and wiring
+
+- USB CDC serial, 115200 baud in VS Code Serial Monitor (USB CDC baud rate
+  is informational).
+- LCD1602 via PCF8574 backpack: I2C0 SDA=GP0, SCL=GP1, scan common addresses
+  `0x20..0x27` and `0x38..0x3F`.
+- DS1302 (match existing Python constructor): CLK=GP2, DIO=GP5, CE=GP4.
+- The code only **reads** DS1302 time. It does not adjust, start, stop or
+  calibrate the oscillator. Keep RTC wiring at Pico-compatible logic levels.
+- If a standalone Pico has no external clock/display attached, the serial
+  output should report missing LCD and invalid RTC; that is expected.
+- 3-second startup delay permits Serial Monitor to connect.
+- When RTC responds, expected display is HH:MM:SS on line one and
+  DD.MM.YYYY on line two. LCD lines are refreshed only when content changes.
+
+## Physical test acceptance (pending)
+
+- [ ] CMake target compiles and UF2 is generated.
+- [ ] Bare Pico prints boot and missing-peripheral diagnostics.
+- [ ] LCD is detected and two rows show stable readable text.
+- [ ] DS1302 shows advancing seconds without inadvertent register writes.
+- [ ] Cold reboot produces the same result.
+- [ ] The production MicroPython firmware remains untouched.
