@@ -10,6 +10,7 @@
 #include "ds1302.h"
 #include "lcd1602_i2c.h"
 #include "countdown.h"
+#include "controls.h"
 
 #define LCD_SDA_GPIO 0
 #define LCD_SCL_GPIO 1
@@ -95,6 +96,20 @@ static void poll_serial(void) {
     }
 }
 
+
+static void on_control_event(const control_event_t *event, void *context) {
+    (void)context;
+    if (event->type == CONTROL_VOLUME_ROTATE) {
+        printf("[INPUT] encoder VOLUME %s\\n", event->direction > 0 ? "CW" : "CCW");
+    } else if (event->type == CONTROL_TIMER_ROTATE) {
+        printf("[INPUT] encoder TIMER %s\\n", event->direction > 0 ? "CW" : "CCW");
+    } else {
+        printf("[INPUT] button %s %s\\n",
+               controls_button_name(event->button),
+               event->type == CONTROL_BUTTON_PRESS ? "PRESS" : "RELEASE");
+    }
+}
+
 int main(void) {
     stdio_init_all();
     sleep_ms(3000); // Give VS Code Serial Monitor time to attach.
@@ -115,6 +130,8 @@ int main(void) {
     ds1302_init(DS1302_CLK_GPIO, DS1302_DIO_GPIO, DS1302_CE_GPIO);
     printf("[RTC] DS1302 CLK=GP2 DIO=GP5 CE=GP4\n");
 
+    controls_init();
+    puts("[INPUT] GPIO controls initialized (2 encoders, 7 buttons)");
     countdown_init(&timer);
     puts("[CMD] Serial timer ready. Type help + Enter");
     char last_top[17] = {0};
@@ -123,6 +140,7 @@ int main(void) {
     uint32_t previous_remaining = UINT32_MAX;
     while (true) {
         poll_serial();
+        controls_poll(to_ms_since_boot(get_absolute_time()), on_control_event, NULL);
         uint64_t now = to_ms_since_boot(get_absolute_time());
         countdown_service(&timer, now);
         if (countdown_consume_finished(&timer)) {
