@@ -1,6 +1,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include "pico/stdlib.h"
 
 typedef struct {
     uint16_t year;
