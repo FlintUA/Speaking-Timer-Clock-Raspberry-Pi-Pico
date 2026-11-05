@@ -1038,3 +1038,38 @@ event is not replayed late. The serial commands remain available:
 Note: These source changes need a fresh Pico SDK compile and hardware
 verification. Previous tests of CHIME playback do not establish the
 new startup behavior.
+
+
+## Read-only AUTO scheduler diagnostics after manual RTC changes
+
+For a hardware case where a 180s timer crossed RTC 20:30 and only the
+timer completion sound played, but **no** \`[AUTO] skipped=TIMER_PRIORITY\`
+line was emitted, the scheduler now provides:
+
+- \`auto-debug\`: print enabled/boot seed/last processed calendar-minute
+  key, current RTC calendar-minute key and whether they match, timer,
+  menu, half-hour option and audio state. It does not change the RTC,
+  settings, audio or scheduler. A live RTC read is performed.
+- On re-entry into an *already processed* boundary minute after the RTC
+  first showed a different minute, a one-time diagnostic:
+  \`[AUTO-DEBUG] HH:MM suppressed=ALREADY_PROCESSED key=...\`.
+  This is **not** printed for routine one-second polling after an
+  automatically handled event.
+
+The original deduplication logic, timer priority, quiet hours,
+once-per-minute behavior and flash record format are unchanged.
+
+### Hardware regression
+
+1. With a running timer, send \`auto-debug\`; verify timer=RUNNING.
+2. Use an RTC boundary that has **not** been reached earlier since
+   boot (or restart Pico before test), and let timer cross :30;
+   expect \`[AUTO] HH:30 skipped=TIMER_PRIORITY\`.
+3. Let the timer complete and verify only \`07/013\` sounded.
+4. If the automatic event is silent again with no skip line, send
+   \`auto-debug\` and check \`same_as_last\`. If it is YES, the
+   boundary was already consumed; use another boundary.
+5. Remember: \`auto-test HH MM\` is a dry run and cannot test the
+   one-event-per-calendar-minute deduplication path.
+
+This diagnostics change has not yet been compiled or hardware-tested.
