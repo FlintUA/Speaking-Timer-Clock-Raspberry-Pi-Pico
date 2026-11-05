@@ -25,6 +25,7 @@ add_executable(speaking_clock_c
     drivers/controls.c
     drivers/dfplayer.c
     audio/queue.c
+    audio/speech.c
 )
 target_include_directories(speaking_clock_c PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/drivers
