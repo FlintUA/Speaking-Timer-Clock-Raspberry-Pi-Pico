@@ -1,5 +1,5 @@
 // Speaking-clock C firmware with protected flash settings (no Bluetooth yet).
-// DS1302 RTC is read-only.
+// DS1302 RTC supports explicit manual time/date writes.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -717,7 +717,7 @@ static void load_settings_at_boot(void) {
                speech_language_name(language), (unsigned)volume,
                exact_hour_phrase ? "ON" : "OFF",
                quiet_enabled ? "ON" : "OFF", (unsigned)quiet_start,
-               (unsigned)quiet_end, half_hour_enabled ? "ON" : "OFF");
+               (unsigned)quiet_end, half_hour_enabled ? "ON" : "OFF", auto_enabled ? "ON" : "OFF");
     } else {
         printf("[FLASH] load=%s; using defaults (RU, volume=10)\n",
                settings_store_result_name(result));
@@ -815,7 +815,7 @@ static void handle_command(char *line) {
             auto_test((uint8_t)hour, (uint8_t)minute);
         }
     } else if (strcmp(line, "quiet-status") == 0) {
-        printf("[QUIET] enabled=%s start=%02u end=%02u half_hour=%s (automatic playback disabled)\n",
+        printf("[QUIET] enabled=%s start=%02u end=%02u half_hour=%s auto_runtime=%s\n",
                quiet_enabled ? "ON" : "OFF", (unsigned)quiet_start,
                (unsigned)quiet_end, half_hour_enabled ? "ON" : "OFF");
     } else if (strcmp(line, "menu") == 0) {
