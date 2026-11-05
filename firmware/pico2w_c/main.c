@@ -41,6 +41,11 @@ static audio_queue_t audio_queue;
 static uint8_t volume = 10; // MicroPython config.py default; persistence not migrated yet.
 static bool sound_enabled = true;
 static speech_language_t language = SPEECH_RU;
+// First settings slice is RAM-only: no RP2350 flash writes.
+static bool language_menu_open;
+static speech_language_t language_menu_choice;
+static uint64_t language_menu_last_input_ms;
+#define LANGUAGE_MENU_TIMEOUT_MS 20000u
 static bool exact_hour_phrase;
 static uint64_t mode_pressed_at_ms;
 static bool mode_press_active;
@@ -141,14 +146,44 @@ static void toggle_sound(void) {
     printf("[AUDIO] sound=%s\n", sound_enabled ? "ON" : "OFF");
 }
 
+static void close_language_menu(bool commit) {
+    if (!language_menu_open) return;
+    if (commit) {
+        language = language_menu_choice;
+        printf("[MENU] Language saved to RAM: %s (not flash)\n",
+               speech_language_name(language));
+    } else {
+        printf("[MENU] Language selection cancelled; remains %s\n",
+               speech_language_name(language));
+    }
+    language_menu_open = false;
+}
+
+static void open_language_menu(uint64_t now_ms) {
+    if (timer.running) {
+        puts("[MENU] Settings unavailable during countdown");
+        return;
+    }
+    language_menu_choice = language;
+    language_menu_last_input_ms = now_ms;
+    language_menu_open = true;
+    // The dedicated menu takes precedence over any prior temporary overlays.
+    printf("[MENU] Select language: %s (turn TIMER, press TIMER to confirm, SETTINGS to cancel)\n",
+           speech_language_name(language_menu_choice));
+}
+
 static void handle_command(char *line) {
     while (isspace((unsigned char)*line)) ++line;
     size_t len = strlen(line);
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, help");
+        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, help");
+    } else if (strcmp(line, "menu") == 0) {
+        if (language_menu_open) close_language_menu(false);
+        else open_language_menu(now);
     } else if (strcmp(line, "start") == 0) {
+        if (language_menu_open) close_language_menu(false);
         timer_start_now(now);
         print_timer_status(now);
     } else if (strcmp(line, "cancel") == 0) {
@@ -179,6 +214,10 @@ static void handle_command(char *line) {
         printf("[SPEECH] language=%s\n", speech_language_name(language));
     } else if (strcmp(line, "lang ru") == 0 || strcmp(line, "lang de") == 0) {
         language = line[5] == 'd' ? SPEECH_DE : SPEECH_RU;
+        if (language_menu_open) {
+            language_menu_choice = language;
+            language_menu_last_input_ms = now;
+        }
         printf("[SPEECH] language=%s (RAM only)\n", speech_language_name(language));
     } else if (strcmp(line, "exact on") == 0 || strcmp(line, "exact off") == 0) {
         exact_hour_phrase = line[6] == 'o' && line[7] == 'n';
@@ -261,6 +300,13 @@ static void on_control_event(const control_event_t *event, void *context) {
         change_volume(event->direction);
     } else if (event->type == CONTROL_TIMER_ROTATE) {
         printf("[INPUT] encoder TIMER %s\n", event->direction > 0 ? "CW" : "CCW");
+        if (language_menu_open) {
+            language_menu_choice = language_menu_choice == SPEECH_RU ? SPEECH_DE : SPEECH_RU;
+            language_menu_last_input_ms = now;
+            printf("[MENU] Language candidate: %s\n",
+                   speech_language_name(language_menu_choice));
+            return;
+        }
         // One minute per encoder event; don't edit a running timer.
         if (!timer.running) {
             int32_t duration = (int32_t)timer.duration_seconds + (int32_t)event->direction * 60;
@@ -275,6 +321,19 @@ static void on_control_event(const control_event_t *event, void *context) {
         printf("[INPUT] button %s %s\n",
                controls_button_name(event->button),
                event->type == CONTROL_BUTTON_PRESS ? "PRESS" : "RELEASE");
+        if (event->button == BUTTON_SETTINGS &&
+            event->type == CONTROL_BUTTON_PRESS) {
+            if (language_menu_open) close_language_menu(false);
+            else open_language_menu(now);
+            return;
+        }
+        if (event->button == BUTTON_TIMER &&
+            event->type == CONTROL_BUTTON_PRESS && language_menu_open) {
+            language_menu_last_input_ms = now;
+            close_language_menu(true);
+            timer_screen = false;
+            return;
+        }
         if (event->button == BUTTON_MODE) {
             // Parity with MicroPython ST/MO long-press threshold: 900 ms.
             if (event->type == CONTROL_BUTTON_PRESS) {
@@ -342,6 +401,11 @@ int main(void) {
         controls_poll(to_ms_since_boot(get_absolute_time()), on_control_event, NULL);
         uint64_t now = to_ms_since_boot(get_absolute_time());
         countdown_service(&timer, now);
+        if (language_menu_open &&
+            now - language_menu_last_input_ms >= LANGUAGE_MENU_TIMEOUT_MS) {
+            puts("[MENU] Timeout (20s); discarding unconfirmed choice");
+            close_language_menu(false);
+        }
         if (countdown_consume_finished(&timer)) {
             puts("[TIMER] FINISHED");
             timer_audio_finished();
@@ -375,7 +439,11 @@ int main(void) {
         }
 
         char top[17], bottom[17];
-        if (speech_overlay_until_ms && now < speech_overlay_until_ms) {
+        if (language_menu_open) {
+            snprintf(top, sizeof(top), "SETTINGS LANGUAGE");
+            snprintf(bottom, sizeof(bottom), "%s  <TURN/PRESS>",
+                     language_menu_choice == SPEECH_RU ? "RUSSIAN" : "DEUTSCH");
+        } else if (speech_overlay_until_ms && now < speech_overlay_until_ms) {
             snprintf(top, sizeof(top), "SPEAK TIME %s", speech_language_name(language));
             snprintf(bottom, sizeof(bottom), "%s", speech_overlay_time);
         } else if (volume_overlay_until_ms && now < volume_overlay_until_ms) {
