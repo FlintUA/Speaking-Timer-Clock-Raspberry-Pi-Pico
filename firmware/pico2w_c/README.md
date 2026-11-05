@@ -630,3 +630,42 @@ Do **not** change the volume dozens of times merely to test wear limits.
 The timing guards reduce write frequency, but flash endurance remains finite.
 If autosave fails with OCCUPIED or IMAGE_OVERLAP, stop and report the log.
 Earlier sections referring to manual-only saving document previous milestones.
+
+
+## DS1302 intermittent read diagnostics (hardware check pending)
+
+The user observed sporadic \`[RTC] Invalid/unavailable\` messages, sometimes
+after SETTINGS/TIMER button activity, but also without a button press.
+The driver now captures raw register values **from the existing seven
+read transactions** in the same order and with the same timings:
+seconds, minutes, hours, day, month, weekday, year. It does **not**
+perform extra reads, retry failures, write RTC registers, or modify
+the clock's control pins.
+
+Two new USB Serial commands (115200 baud, LF):
+
+| Command | Description |
+| --- | --- |
+| \`rtc-debug\` | Show successful/failed counts, current and maximum consecutive failures, last raw read and last failed raw read with decoded error flags |
+| \`rtc-reset-stats\` | Reset counters and stored sample ONLY; does not alter DS1302 chip contents |
+
+Failure flags cover the oscillator CH bit, 12-hour mode bit,
+seconds/minutes/hours/day/month/weekday range checks and malformed BCD
+digits. The previous driver already rejected invalid numeric ranges;
+the new code additionally flags invalid BCD digit encodings. No recovery
+retry has yet been enabled so that the original failing packet can be
+captured for diagnosis.
+
+Test with the assembled clock:
+1. Build and flash as usual. Run \`rtc-debug\` during stable operation.
+2. Open/close SETTINGS, turn TIMER encoder, run a countdown.
+3. If an \`Invalid/unavailable\` message occurs, run \`rtc-debug\`
+   promptly, then send the full diagnostics output. The most useful
+   lines are \`last_error\` and \`error_flags\`. The last-error snapshot
+   is retained until reset or power cycle, even when good reads resume.
+4. Optionally \`rtc-reset-stats\` to start a clean observation window.
+5. Do not modify DS1302 wiring or timings yet; compare corrupted bytes
+   with good ones before deciding whether to change the driver.
+
+Do not confuse a rejected read with proven RTC power failure: invalid
+BCD/range can be caused by one sampled bit or electrical interference.
