@@ -338,6 +338,10 @@ static void timer_audio_finished(void) {
 // Use the same hour/minute file mapping as MicroPython enqueue_clock_time.
 // Never announce automatically: only on user command or MODE long press.
 static void announce_time(uint8_t hour, uint8_t minute) {
+    if (alarm_active_index >= 0) {
+        puts("[SPEECH] blocked: alarm ringing");
+        return;
+    }
     if (!sound_enabled) {
         puts("[SPEECH] skipped: sound OFF");
         return;
@@ -369,6 +373,10 @@ static void announce_rtc_time(void) {
 }
 
 static void timer_start_now(uint64_t now) {
+    if (alarm_active_index >= 0) {
+        puts("[TIMER] start blocked: alarm ringing (use alarm-stop first)");
+        return;
+    }
     countdown_start(&timer, now);
     timer_screen = true;
     finished_screen_until_ms = 0;
@@ -936,15 +944,21 @@ static void alarm_service_playback(uint64_t now) {
 
 static void alarm_service_rtc(const ds1302_datetime_t *dt, uint64_t now) {
     if (!dt || dt->second > 5u || alarm_active_index >= 0) return;
-    // Do not steal audio from an active timer or freshly completed timer.
-    if (timer.running || (finished_screen_until_ms &&
-        now < finished_screen_until_ms) || menu_state != MENU_CLOSED) return;
-    // A single alarm slot is unlocked for real hardware regression.
+    // First mark the matching alarm as seen, then evaluate priorities.
+    // This prevents a timer/menu from clearing mid-minute and causing
+    // a delayed alarm at second 01..05.
     int index = alarm_scheduler_pick(&alarm_scheduler, alarms, dt->year,
                             dt->month, dt->day, dt->hour, dt->minute, false);
-    if (index < 0) return;
-    // Slot 1 only. Ignore other slots until explicit multi-alarm integration.
-    if (index != 0) return;
+    if (index != 0) return; // Slot 1 alone is enabled for real playback.
+    if (timer.running || (finished_screen_until_ms &&
+        now < finished_screen_until_ms)) {
+        puts("[ALARM] 1 skipped=TIMER_PRIORITY");
+        return;
+    }
+    if (menu_state != MENU_CLOSED) {
+        puts("[ALARM] 1 skipped=MENU_OPEN");
+        return;
+    }
     // An alarm owns its minute: prevent normal xx:00/xx:30 announcements.
     if (dt->minute == 0u || dt->minute == 30u) {
         auto_seen_key_valid = true;
@@ -1190,8 +1204,12 @@ static void handle_command(char *line) {
             printf("[AUDIO] volume=%u/30\n", (unsigned)volume);
         }
     } else if (strcmp(line, "pause") == 0) {
-        audio_queue_clear(&audio_queue, true);
-        puts("[AUDIO] Pause requested");
+        if (alarm_active_index >= 0) {
+            puts("[AUDIO] pause blocked: use alarm-stop");
+        } else {
+            audio_queue_clear(&audio_queue, true);
+            puts("[AUDIO] Pause requested");
+        }
     } else if (strncmp(line, "play", 4) == 0 && isspace((unsigned char)line[4])) {
         unsigned int folder = 0, track = 0;
         char extra = 0;
@@ -1200,6 +1218,8 @@ static void handle_command(char *line) {
             puts("[AUDIO] Use play <folder 1..99> <track 1..255>");
         } else if (!sound_enabled) {
             puts("[AUDIO] Sound OFF; press volume button to enable");
+        } else if (alarm_active_index >= 0) {
+            puts("[AUDIO] play blocked: alarm ringing");
         } else if (audio_queue_enqueue(&audio_queue, (uint8_t)folder, (uint8_t)track)) {
             printf("[AUDIO] Queued folder=%u track=%u\n", folder, track);
         } else {
@@ -1279,6 +1299,9 @@ static void on_control_event(const control_event_t *event, void *context) {
             alarm_stop("BUTTON");
             return;
         }
+        // While the first alarm rings, only ALARM (stop) and VOLUME
+        // remain interactive. Other button actions must not clear audio.
+        if (alarm_active_index >= 0) return;
         if (event->type == CONTROL_BUTTON_PRESS && event->button == BUTTON_SETTINGS) {
             if (menu_state == MENU_CLOSED) menu_open(now);
             else if (menu_state == MENU_LIST) menu_begin_edit(now);
