@@ -22,6 +22,7 @@ add_executable(speaking_clock_c
     drivers/ds1302.c
     drivers/lcd1602_i2c.c
     app/countdown.c
+    drivers/controls.c
 )
 target_include_directories(speaking_clock_c PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/drivers
