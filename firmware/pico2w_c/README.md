@@ -102,3 +102,36 @@ Expected output: `firmware/pico2w_c/build/speaking_clock_c.uf2`.
 - [ ] DS1302 shows advancing seconds without inadvertent register writes.
 - [ ] Cold reboot produces the same result.
 - [ ] The production MicroPython firmware remains untouched.
+
+## Countdown bring-up (serial-only, no extra wiring)
+
+Native `app/countdown.c` ports the monotonic countdown semantics from
+`source/v3/timer_engine.py`. The serial line parser is polled without blocking
+the main loop. This firmware **does not yet play an alarm sound**.
+
+Build in the already-configured `build-ninja` folder:
+
+```powershell
+git pull --ff-only
+& "C:\Users\Flint123\.pico-sdk\cmake\v4.3.4\bin\cmake.exe" --build build-ninja --target speaking_clock_c
+```
+
+Flash `build-ninja/speaking_clock_c.uf2` only to the spare Pico 2 W.
+Open Serial Monitor (USB CDC, previously COM7), and **send each command
+with a newline / Enter**. The monitor's send-mode must append LF or CRLF.
+
+| Command | Purpose |
+| --- | --- |
+| `help` or `h` | Show available commands |
+| `t 10` | Set the duration to 10 seconds |
+| `start` | Start or restart the countdown |
+| `status` | Show active state and remaining seconds |
+| `cancel` | Cancel without producing a finished event |
+
+Expected after `t 5`, `start`: remaining seconds decrease, then exactly
+one `[TIMER] FINISHED` message. The deadline uses a monotonic millisecond
+counter, independent of DS1302. RTC-unavailable diagnostics can appear
+in parallel if no RTC is attached.
+
+**Status:** code committed but build and physical tests of the countdown
+version are pending.
