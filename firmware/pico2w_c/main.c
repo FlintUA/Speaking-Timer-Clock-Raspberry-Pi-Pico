@@ -208,11 +208,13 @@ static void handle_command(char *line) {
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, save, help");
+        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, save, help");
     } else if (strcmp(line, "flash-info") == 0) {
         settings_store_print_info();
     } else if (strcmp(line, "flash-inspect") == 0) {
         settings_store_inspect();
+    } else if (strcmp(line, "flash-tail") == 0) {
+        settings_store_dump_tail();
     } else if (strcmp(line, "save") == 0) {
         save_settings_now();
     } else if (strcmp(line, "menu") == 0) {
