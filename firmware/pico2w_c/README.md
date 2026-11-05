@@ -758,3 +758,61 @@ cancel without writing to the DS1302:
 
 No NTP, periodic RTC adjustment, automatic time setting, or Bluetooth
 are enabled by this milestone.
+
+
+## Quiet mode + Half-hour beep settings (hardware test pending)
+
+The settings list has seven entries in MicroPython order, with Volume
+appended for convenience:
+
+1. Language
+2. Time
+3. Date
+4. Quiet mode
+5. Half-hour beep
+6. Exact-hour word
+7. Volume
+
+Quiet mode is a three-step editor: Enabled -> Start hour -> End hour.
+Its defaults match \`source/v3/config.py\`: **ON, 22:00 until 07:00**.
+The timer encoder chooses ON/OFF or an hour in 0..23; TIMER button
+advances to the next stage, and the final press commits the whole
+group. MINUS cancels pending edits. Half-hour beep is a separate
+single ON/OFF setting, **OFF** by default.
+
+These settings are **configuration only**. No automatic voice or
+half-hour playback has been enabled. The serial command
+\`quiet-status\` displays the current settings and explicitly reports
+that automatic playback is disabled.
+
+### A/B flash migration safety
+
+Flash record v2 is 24 bytes and includes quiet_enabled, quiet_start,
+quiet_end and half_hour_enabled. The existing **v1 20-byte records**
+remain valid for load/ownership/CRC. On loading v1 the new values
+use the documented defaults (ON,22,07,OFF). The sequence number and
+same A/B sector addresses are preserved. Only after the user changes
+a setting (or requests \`save\`) is a v2 record written to the opposite
+slot. No flash nuke or manual migration is required.
+
+### Hardware tests
+
+1. Update firmware. Immediately check \`flash-info\`. Expect the
+   previous slots to remain \`VALID version=1\`, then run
+   \`quiet-status\`: \`enabled=ON start=22 end=07 half_hour=OFF\`.
+2. Open SETTINGS, rotate to Quiet mode, press TIMER to edit, rotate
+   ON/OFF, advance through Start/End, then press MINUS to cancel
+   **without writing**. Check \`quiet-status\`: should remain unchanged.
+3. Reopen Quiet mode and change just Start from 22 to 23, advance,
+   confirm. Close the menu with MINUS and allow 5 seconds idle.
+   Expect \`[FLASH] autosave=OK\`. \`flash-info\` should show one
+   \`version=2\` record with a newer sequence, the other still v1.
+4. Half-hour beep: set ON, commit and close the list. Expect normal
+   delayed save (or 60s cooldown). No sound should play automatically
+   because scheduling has not yet been added.
+5. Power cycle, check \`quiet-status\` and \`flash-info\` to confirm
+   persisted new values. Existing Language/Volume/Exact must remain.
+
+Do not change or erase flash sectors manually to test migration.
+If any slot becomes OCCUPIED or no settings load, stop and send
+the log before trying another write.
