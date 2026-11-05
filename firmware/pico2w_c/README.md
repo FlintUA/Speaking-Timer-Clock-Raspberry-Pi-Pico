@@ -471,3 +471,40 @@ reboot to confirm the active slot. No other settings are yet saved.
 
 Implementation: `services/settings_store.[ch]`. The stable
 MicroPython implementation and SD card files are unchanged.
+
+
+## Read-only diagnostic for occupied settings sectors (2026-11-05)
+
+On the assembled 4 MiB Pico 2 W, the user observed:
+
+```text
+[FLASH] size=4096 KiB slots=0x003fe000,0x003ff000 image_end=0x100185fc guard=OK
+[FLASH] slot0=OCCUPIED sequence=0
+[FLASH] slot1=OCCUPIED sequence=0
+```
+
+This does **not** establish whether the sectors hold MicroPython
+LittleFS data or another older flash layout. Do not invoke `save`
+until the original flash contents are independently backed up and
+we have chosen a safe storage location.
+
+A **new read-only** command, `flash-inspect`, prints for each of the two
+sectors the flash offset, occupied/blank/owned status, byte counts
+(0xFF, zero, other), locations of first and last non-0xFF bytes and
+just the first 16 bytes in hexadecimal. It does not erase, program,
+write a file, mount a filesystem, or modify settings. These byte
+samples are diagnostic hints, not definitive filesystem identification.
+
+Build from `firmware/pico2w_c`, flash the new UF2 and in Serial
+Monitor (115200 baud, LF) send:
+
+```text
+flash-info
+flash-inspect
+```
+
+Send each as a separate line. Capture both results.
+If the slots remain occupied, simply leave persistent saving
+disabled; all clock, timer and audio features still run using RAM
+settings. A later migration can place settings in an independently
+verified spare region or preserve a backed-up legacy filesystem.
