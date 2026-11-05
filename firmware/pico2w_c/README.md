@@ -200,3 +200,29 @@ compatible passive encoder module. **Never attach 5 V logic directly
 to Pico GPIO.** No need to dismantle the production clock.
 
 Status: **committed, pending local build and hardware validation**.
+
+## Timer encoder/button and LCD - integration milestone
+
+**Status: committed, pending compile and live hardware validation.**
+This is a partial UI implementation, not feature parity with MicroPython.
+
+- Timer encoder GP11/GP10: clockwise increases duration by 60 seconds per reported event; counterclockwise decreases it, bounded to 1..14400 seconds.
+- Timer pushbutton GP19: start the timer, or cancel when it is running.
+- LCD while selecting: `TIMER SET` / `HH:MM:SS`; while running: `TIMER RUNNING` / remaining `HH:MM:SS`.
+- On expiration: `TIMER FINISHED` for about 3 seconds, then return to clock view.
+- On cancellation: return to RTC time/date screen immediately.
+- UART/USB serial commands `t <seconds>`, `start`, `cancel` also update LCD state.
+- RTC still polled once a second; other buttons remain diagnostic only.
+- No sound, changes to RTC, flash settings, or alarms in this build.
+
+Build from `firmware/pico2w_c` using the previously configured `build-ninja`:
+
+```powershell
+git pull --ff-only
+& "C:\Users\Flint123\.pico-sdk\cmake\v4.3.4\bin\cmake.exe" --build build-ninja --target speaking_clock_c
+```
+
+Check that `build-ninja/speaking_clock_c.uf2` was regenerated before flashing.
+Test right/left turns and button press on assembled clock; compare displayed
+minute increments against actual encoder detents. If one detent causes more
+than one minute change, the encoder step scaling still needs calibration.
