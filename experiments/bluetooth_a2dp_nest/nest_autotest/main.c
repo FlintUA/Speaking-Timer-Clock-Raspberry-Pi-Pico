@@ -41,8 +41,8 @@ static void serial_poll_handler(btstack_timer_source_t *timer) {
             case '?':
                 print_commands();
                 break;
-            case '\\r':
-            case '\\n':
+            case '\r':
+            case '\n':
                 break;
             default:
                 printf("[CMD] Unknown: %c\n", ch);
