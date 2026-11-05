@@ -78,11 +78,13 @@ static bool quiet_enabled = true;
 static uint8_t quiet_start = 22;
 static uint8_t quiet_end = 7;
 static bool half_hour_enabled;
+static uint8_t clock_mode; // 0=VOICE, 1=CHIME.
 static uint64_t mode_pressed_at_ms;
 static bool mode_press_active;
 static uint64_t speech_overlay_until_ms;
 static char speech_overlay_time[17];
 static uint64_t volume_overlay_until_ms;
+static uint64_t mode_overlay_until_ms;
 #define VOLUME_OVERLAY_MS 1800u
 
 static uint64_t finished_screen_until_ms;
@@ -109,6 +111,7 @@ static uint32_t auto_played, auto_skipped;
 typedef enum {
     AUTO_NONE,
     AUTO_HOUR,
+    AUTO_CHIME,
     AUTO_HALF,
     AUTO_DISABLED,
     AUTO_QUIET,
@@ -122,6 +125,7 @@ typedef enum {
 static const char *auto_reason(auto_decision_t d) {
     switch (d) {
         case AUTO_HOUR: return "HOURLY_VOICE";
+        case AUTO_CHIME: return "HOURLY_CHIME";
         case AUTO_HALF: return "HALF_HOUR_BEEP";
         case AUTO_DISABLED: return "AUTO_DISABLED";
         case AUTO_QUIET: return "QUIET_HOURS";
@@ -164,7 +168,7 @@ static auto_decision_t auto_evaluate(uint8_t hour, uint8_t minute,
     // If boot/RTC recovers in the middle of an hour/half-hour minute,
     // do not announce stale time. A 5-second window is deliberate.
     if (second > 5u) return AUTO_LATE;
-    return minute == 0u ? AUTO_HOUR : AUTO_HALF;
+    return minute == 0u ? (clock_mode ? AUTO_CHIME : AUTO_HOUR) : AUTO_HALF;
 }
 
 static void auto_status(void) {
@@ -173,7 +177,8 @@ static void auto_status(void) {
            (unsigned)quiet_start, (unsigned)quiet_end,
            half_hour_enabled ? "ON" : "OFF", sound_enabled ? "ON" : "OFF",
            (unsigned long)auto_played, (unsigned long)auto_skipped);
-    puts("[AUTO] Mode=voice on the hour; no chime clock-mode selector in C yet");
+    printf("[AUTO] clock_mode=%s (folder 18, 1..12 strikes)\n",
+           clock_mode ? "CHIME" : "VOICE");
 }
 
 static void auto_test(uint8_t hour, uint8_t minute) {
@@ -189,15 +194,22 @@ static void auto_service_rtc(const ds1302_datetime_t *dt) {
     auto_seen_minute_key = key;
     auto_seen_key_valid = true;
     auto_decision_t d = auto_evaluate(dt->hour, dt->minute, dt->second, true);
-    if (d != AUTO_HOUR && d != AUTO_HALF) {
+    if (d != AUTO_HOUR && d != AUTO_CHIME && d != AUTO_HALF) {
         ++auto_skipped;
         printf("[AUTO] %02u:%02u skipped=%s\n",
                (unsigned)dt->hour, (unsigned)dt->minute, auto_reason(d));
         return;
     }
-    bool queued = d == AUTO_HALF
-        ? audio_queue_enqueue(&audio_queue, 7u, 15u)
-        : speech_enqueue_time(&audio_queue, language, dt->hour, 0u, exact_hour_phrase);
+    bool queued;
+    if (d == AUTO_HALF) {
+        queued = audio_queue_enqueue(&audio_queue, 7u, 15u);
+    } else if (d == AUTO_CHIME) {
+        uint8_t strikes = (uint8_t)(dt->hour % 12u);
+        if (strikes == 0u) strikes = 12u;
+        queued = audio_queue_enqueue(&audio_queue, 18u, strikes);
+    } else {
+        queued = speech_enqueue_time(&audio_queue, language, dt->hour, 0u, exact_hour_phrase);
+    }
     if (queued) {
         ++auto_played;
         printf("[AUTO] %02u:%02u queued=%s\n",
@@ -289,7 +301,8 @@ static clock_settings_t settings_snapshot(void) {
         .quiet_enabled = quiet_enabled,
         .quiet_start = quiet_start,
         .quiet_end = quiet_end,
-        .half_hour_enabled = half_hour_enabled
+        .half_hour_enabled = half_hour_enabled,
+        .clock_mode = clock_mode
     };
     return cfg;
 }
@@ -301,7 +314,8 @@ static bool settings_equal(clock_settings_t a, clock_settings_t b) {
            a.quiet_enabled == b.quiet_enabled &&
            a.quiet_start == b.quiet_start &&
            a.quiet_end == b.quiet_end &&
-           a.half_hour_enabled == b.half_hour_enabled;
+           a.half_hour_enabled == b.half_hour_enabled &&
+           a.clock_mode == b.clock_mode;
 }
 
 static void settings_mark_changed(void) {
@@ -366,6 +380,20 @@ static void print_autosave_status(uint64_t now_ms) {
            autosave_pending ? "yes" : "no", cfg.language ? "de" : "ru",
            (unsigned)cfg.volume, cfg.exact_hour ? "ON" : "OFF",
            (unsigned long)debounce, (unsigned long)cooldown, (unsigned long)retry);
+}
+
+static void set_clock_mode(uint8_t requested, uint64_t now) {
+    if (requested > 1u) return;
+    if (timer.running || menu_state != MENU_CLOSED) {
+        puts("[MODE] Change blocked: timer running or settings open");
+        return;
+    }
+    if (clock_mode != requested) {
+        clock_mode = requested;
+        settings_mark_changed();
+    }
+    mode_overlay_until_ms = now + 1800u;
+    printf("[MODE] clock_mode=%s\n", clock_mode ? "CHIME" : "VOICE");
 }
 
 static void change_volume(int direction) {
@@ -716,11 +744,13 @@ static void load_settings_at_boot(void) {
         quiet_start = saved.quiet_start;
         quiet_end = saved.quiet_end;
         half_hour_enabled = saved.half_hour_enabled;
-        printf("[FLASH] loaded lang=%s volume=%u exact=%s quiet=%s %02u-%02u half_hour=%s\n",
+        clock_mode = saved.clock_mode;
+        printf("[FLASH] loaded lang=%s volume=%u exact=%s quiet=%s %02u-%02u half_hour=%s mode=%s\n",
                speech_language_name(language), (unsigned)volume,
                exact_hour_phrase ? "ON" : "OFF",
                quiet_enabled ? "ON" : "OFF", (unsigned)quiet_start,
-               (unsigned)quiet_end, half_hour_enabled ? "ON" : "OFF");
+               (unsigned)quiet_end, half_hour_enabled ? "ON" : "OFF",
+                clock_mode ? "CHIME" : "VOICE");
     } else {
         printf("[FLASH] load=%s; using defaults (RU, volume=10)\n",
                settings_store_result_name(result));
@@ -778,7 +808,7 @@ static void handle_command(char *line) {
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, auto-status, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
+        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, auto-status, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
     } else if (strcmp(line, "rtc-debug") == 0) {
         print_rtc_debug();
     } else if (strcmp(line, "rtc-reset-stats") == 0) {
@@ -796,6 +826,10 @@ static void handle_command(char *line) {
         print_autosave_status(now);
     } else if (strcmp(line, "auto-status") == 0) {
         auto_status();
+    } else if (strcmp(line, "mode-status") == 0) {
+        printf("[MODE] clock_mode=%s\n", clock_mode ? "CHIME" : "VOICE");
+    } else if (strcmp(line, "mode voice") == 0 || strcmp(line, "mode chime") == 0) {
+        set_clock_mode(strcmp(line, "mode chime") == 0 ? 1u : 0u, now);
     } else if (strcmp(line, "auto on") == 0 || strcmp(line, "auto off") == 0) {
         auto_enabled = strcmp(line, "auto on") == 0;
         // Do not replay the current boundary after toggling: a fresh
@@ -983,16 +1017,21 @@ static void on_control_event(const control_event_t *event, void *context) {
             return;
         }
         if (event->button == BUTTON_MODE) {
-            // Parity with MicroPython ST/MO long-press threshold: 900 ms.
+            // MicroPython: short ST/MO switches voice/chime; long speaks time.
             if (event->type == CONTROL_BUTTON_PRESS) {
                 mode_press_active = true;
                 mode_pressed_at_ms = now;
             } else if (event->type == CONTROL_BUTTON_RELEASE && mode_press_active) {
                 mode_press_active = false;
-                if (now - mode_pressed_at_ms >= 900u) {
-                    announce_rtc_time();
+                if (menu_state == MENU_CLOSED && !timer.running) {
+                    if (now - mode_pressed_at_ms >= 900u) {
+                        announce_rtc_time();
+                    } else {
+                        set_clock_mode(clock_mode ? 0u : 1u, now);
+                    }
                 }
             }
+            return;
         }
         if (event->button == BUTTON_VOLUME && event->type == CONTROL_BUTTON_PRESS) {
             toggle_sound();
@@ -1138,6 +1177,9 @@ int main(void) {
             snprintf(top, sizeof(top), "EXACT HOUR WORD");
             snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
                      menu_exact_choice ? "ON" : "OFF");
+        } else if (mode_overlay_until_ms && now < mode_overlay_until_ms) {
+            snprintf(top, sizeof(top), "CLOCK MODE");
+            snprintf(bottom, sizeof(bottom), "%s", clock_mode ? "CHIME" : "VOICE");
         } else if (speech_overlay_until_ms && now < speech_overlay_until_ms) {
             snprintf(top, sizeof(top), "SPEAK TIME %s", speech_language_name(language));
             snprintf(bottom, sizeof(bottom), "%s", speech_overlay_time);
