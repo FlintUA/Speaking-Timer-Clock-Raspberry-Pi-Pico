@@ -110,6 +110,9 @@ static bool auto_enabled = true;
 static bool auto_boot_seeded;
 static bool auto_seen_key_valid;
 static uint64_t auto_seen_minute_key;
+// Diagnostic only: emit at most one duplicate-key note per boundary minute.
+static bool auto_duplicate_logged_valid;
+static uint64_t auto_duplicate_logged_key;
 static uint32_t auto_played, auto_skipped;
 
 typedef enum {
@@ -185,6 +188,36 @@ static void auto_status(void) {
            clock_mode ? "CHIME" : "VOICE");
 }
 
+// Read-only snapshot: useful when the RTC is manually adjusted for tests.
+static void auto_debug(void) {
+    ds1302_datetime_t dt = {0};
+    bool rtc_ok = ds1302_read_datetime(&dt);
+    printf("[AUTO-DEBUG] enabled=%s seeded=%s seen=%s last_key=%llu duplicate_logged=%s played=%lu skipped=%lu\n",
+           auto_enabled ? "ON" : "OFF",
+           auto_boot_seeded ? "YES" : "NO",
+           auto_seen_key_valid ? "YES" : "NO",
+           (unsigned long long)(auto_seen_key_valid ? auto_seen_minute_key : 0u),
+           auto_duplicate_logged_valid ? "YES" : "NO",
+           (unsigned long)auto_played, (unsigned long)auto_skipped);
+    printf("[AUTO-DEBUG] timer=%s menu=%s sound=%s quiet=%s half_hour=%s audio_idle=%s busy=%s\n",
+           timer.running ? "RUNNING" : "IDLE",
+           menu_state == MENU_CLOSED ? "CLOSED" : "OPEN",
+           sound_enabled ? "ON" : "OFF",
+           rtc_ok && auto_quiet_at(dt.hour) ? "NOW" : "NO",
+           half_hour_enabled ? "ON" : "OFF",
+           audio_queue_idle(&audio_queue) ? "YES" : "NO",
+           dfplayer_busy() ? "YES" : "NO");
+    if (rtc_ok) {
+        uint64_t key = auto_minute_key(&dt);
+        printf("[AUTO-DEBUG] rtc=%02u:%02u:%02u current_key=%llu same_as_last=%s\n",
+               (unsigned)dt.hour, (unsigned)dt.minute, (unsigned)dt.second,
+               (unsigned long long)key,
+               auto_seen_key_valid && auto_seen_minute_key == key ? "YES" : "NO");
+    } else {
+        puts("[AUTO-DEBUG] RTC read failed; no state altered");
+    }
+}
+
 static void auto_test(uint8_t hour, uint8_t minute) {
     auto_decision_t d = auto_evaluate(hour, minute, 0u, false);
     printf("[AUTO-TEST] %02u:%02u => %s (simulation: no audio, no RTC write, auto gate ignored)\n",
@@ -217,7 +250,19 @@ static void auto_service_rtc(const ds1302_datetime_t *dt) {
     }
     if (dt->minute != 0u && dt->minute != 30u) return;
     uint64_t key = auto_minute_key(dt);
-    if (auto_seen_key_valid && auto_seen_minute_key == key) return;
+    if (auto_seen_key_valid && auto_seen_minute_key == key) {
+        // Normally silent deduplication; report once if the RTC enters a
+        // previously consumed minute again, e.g. after a manual RTC edit.
+        // Avoid printing on each one-second poll in the same minute.
+        if (!auto_duplicate_logged_valid || auto_duplicate_logged_key != key) {
+            auto_duplicate_logged_valid = true;
+            auto_duplicate_logged_key = key;
+            printf("[AUTO-DEBUG] %02u:%02u suppressed=ALREADY_PROCESSED key=%llu\n",
+                   (unsigned)dt->hour, (unsigned)dt->minute,
+                   (unsigned long long)key);
+        }
+        return;
+    }
     auto_seen_minute_key = key;
     auto_seen_key_valid = true;
     auto_decision_t d = auto_evaluate(dt->hour, dt->minute, dt->second, true);
@@ -835,7 +880,7 @@ static void handle_command(char *line) {
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, auto-status, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
+        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
     } else if (strcmp(line, "rtc-debug") == 0) {
         print_rtc_debug();
     } else if (strcmp(line, "rtc-reset-stats") == 0) {
@@ -853,6 +898,8 @@ static void handle_command(char *line) {
         print_autosave_status(now);
     } else if (strcmp(line, "auto-status") == 0) {
         auto_status();
+    } else if (strcmp(line, "auto-debug") == 0) {
+        auto_debug();
     } else if (strcmp(line, "mode-status") == 0) {
         printf("[MODE] clock_mode=%s\n", clock_mode ? "CHIME" : "VOICE");
     } else if (strcmp(line, "mode voice") == 0 || strcmp(line, "mode chime") == 0) {
