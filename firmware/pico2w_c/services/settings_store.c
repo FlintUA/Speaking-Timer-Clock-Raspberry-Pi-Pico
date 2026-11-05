@@ -14,10 +14,12 @@
 #error "Flash unexpectedly small; do not enable settings storage"
 #endif
 
-// Two 4 KiB sectors at the END of the configured board flash.
-// Do not overwrite unfamiliar data: a prior MicroPython filesystem may live here.
-#define SLOT0_OFFSET (PICO_FLASH_SIZE_BYTES - 2u * FLASH_SECTOR_SIZE)
-#define SLOT1_OFFSET (PICO_FLASH_SIZE_BYTES - 1u * FLASH_SECTOR_SIZE)
+// Leave the final flash sector untouched. UF2 installers may program
+// the final 256-byte page with EF bytes for RP2350-E10 bootrom workaround.
+// Do not overwrite unfamiliar data: an old MicroPython FS may still be here.
+// This layout is provisional until its two sectors are inspected on hardware.
+#define SLOT0_OFFSET (PICO_FLASH_SIZE_BYTES - 4u * FLASH_SECTOR_SIZE)
+#define SLOT1_OFFSET (PICO_FLASH_SIZE_BYTES - 3u * FLASH_SECTOR_SIZE)
 #define RECORD_MAGIC 0x53434c4bu /* SCLK */
 #define RECORD_VERSION 1u
 #define IMAGE_SAFETY_MARGIN FLASH_SECTOR_SIZE
