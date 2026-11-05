@@ -307,3 +307,9 @@ to test the spoken number of minutes. If the short announcement overlaps
 with the finish of a five-second timer, test again with a longer countdown
 before reporting a queuing fault.
 
+
+### LCD volume overlay
+
+Confirmed hardware test (2026-11-05): volume encoder events change the value, sound output works, and timer was cancelled deliberately. The previous firmware did not display volume on LCD.
+
+New behavior (pending local compilation and physical verification): turning the volume encoder, pressing its button, or using `vol <0..30>` / `sound` shows `VOLUME ON` or `VOLUME OFF` and the current `N / 30` level for about 1.8 seconds on LCD1602. The display then returns to the previously active timer or clock view; countdown and RTC polling continue during the overlay. No DFPlayer protocol change.
