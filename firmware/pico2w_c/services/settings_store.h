@@ -13,6 +13,7 @@ typedef struct {
     uint8_t quiet_start; // 0..23
     uint8_t quiet_end;   // 0..23
     bool half_hour_enabled;
+    uint8_t clock_mode; // 0=VOICE, 1=CHIME (v2 reserved byte, FF=legacy VOICE)
 } clock_settings_t;
 
 typedef enum {
