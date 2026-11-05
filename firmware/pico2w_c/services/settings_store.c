@@ -173,6 +173,32 @@ void settings_store_inspect(void) {
     }
 }
 
+void settings_store_dump_tail(void) {
+    // Read ONLY. Print the last 256-byte flash page so we can compare its
+    // contents across power cycles. No flash erase/program API is invoked.
+    const uint32_t offset = PICO_FLASH_SIZE_BYTES - FLASH_PAGE_SIZE;
+    const uint8_t *data = (const uint8_t *)(uintptr_t)(XIP_BASE + offset);
+    uint32_t crc = 0xffffffffu;
+    for (size_t i = 0; i < FLASH_PAGE_SIZE; ++i) {
+        crc ^= data[i];
+        for (unsigned bit = 0; bit < 8u; ++bit) {
+            crc = (crc >> 1) ^ ((crc & 1u) ? 0xedb88320u : 0u);
+        }
+    }
+    crc ^= 0xffffffffu;
+
+    printf("[FLASH] tail offset=0x%08lx size=%u (READ ONLY)\n",
+           (unsigned long)offset, (unsigned)FLASH_PAGE_SIZE);
+    for (unsigned row = 0; row < FLASH_PAGE_SIZE; row += 16u) {
+        printf("[FLASH] %08lx:", (unsigned long)(offset + row));
+        for (unsigned col = 0; col < 16u; ++col) {
+            printf(" %02x", (unsigned)data[row + col]);
+        }
+        putchar('\n');
+    }
+    printf("[FLASH] tail_crc32=%08lx\n", (unsigned long)crc);
+}
+
 settings_store_result_t settings_store_load(clock_settings_t *out) {
     if (!settings_store_layout_safe()) return SETTINGS_STORE_IMAGE_OVERLAP;
     unsigned slot;
