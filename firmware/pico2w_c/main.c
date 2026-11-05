@@ -13,6 +13,7 @@
 #include "controls.h"
 #include "dfplayer.h"
 #include "queue.h"
+#include "speech.h"
 
 #define LCD_SDA_GPIO 0
 #define LCD_SCL_GPIO 1
@@ -39,16 +40,15 @@ static bool timer_screen;
 static audio_queue_t audio_queue;
 static uint8_t volume = 10; // MicroPython config.py default; persistence not migrated yet.
 static bool sound_enabled = true;
+static speech_language_t language = SPEECH_RU;
+static bool exact_hour_phrase;
+static uint64_t mode_pressed_at_ms;
+static bool mode_press_active;
+static uint64_t speech_overlay_until_ms;
+static char speech_overlay_time[17];
 static uint64_t volume_overlay_until_ms;
 #define VOLUME_OVERLAY_MS 1800u
 
-#define RU_PHRASES 7u
-#define RU_HOURS 1u
-#define RU_MINUTES 2u
-#define TRACK_TIMER_SET 7u
-#define TRACK_TIMER_FINISHED 11u
-#define TRACK_TIMER_SIGNAL_LONG 13u
-#define TRACK_TIMER_CANCELLED 14u
 static uint64_t finished_screen_until_ms;
 
 
@@ -62,32 +62,50 @@ static void print_timer_status(uint64_t now_ms) {
 static void timer_audio_start(void) {
     if (!sound_enabled) return;
     audio_queue_clear(&audio_queue, true);
-    audio_queue_enqueue(&audio_queue, RU_PHRASES, TRACK_TIMER_SET);
-    // Reproduce source/v3/main.py speak_timer_duration for default RU.
-    uint32_t seconds = timer.duration_seconds;
-    if (seconds % 60u == 0u) {
-        uint32_t hours = seconds / 3600u;
-        uint32_t minutes = (seconds / 60u) % 60u;
-        if (hours > 0u && hours <= 23u) {
-            audio_queue_enqueue(&audio_queue, RU_HOURS, (uint8_t)hours);
-        }
-        if (minutes > 0u) {
-            audio_queue_enqueue(&audio_queue, RU_MINUTES, (uint8_t)minutes);
-        }
-    }
+    speech_enqueue_timer_start(&audio_queue, language, timer.duration_seconds);
 }
 
 static void timer_audio_cancel(void) {
     audio_queue_clear(&audio_queue, true);
-    if (sound_enabled) audio_queue_enqueue(&audio_queue, RU_PHRASES, TRACK_TIMER_CANCELLED);
+    if (sound_enabled) speech_enqueue_timer_cancel(&audio_queue, language);
 }
 
 static void timer_audio_finished(void) {
     audio_queue_clear(&audio_queue, true);
-    if (sound_enabled) {
-        audio_queue_enqueue(&audio_queue, RU_PHRASES, TRACK_TIMER_FINISHED);
-        audio_queue_enqueue(&audio_queue, RU_PHRASES, TRACK_TIMER_SIGNAL_LONG);
+    if (sound_enabled) speech_enqueue_timer_finish(&audio_queue, language);
+}
+
+// Use the same hour/minute file mapping as MicroPython enqueue_clock_time.
+// Never announce automatically: only on user command or MODE long press.
+static void announce_time(uint8_t hour, uint8_t minute) {
+    if (!sound_enabled) {
+        puts("[SPEECH] skipped: sound OFF");
+        return;
     }
+    if (hour > 23u || minute > 59u) {
+        puts("[SPEECH] invalid time");
+        return;
+    }
+    audio_queue_clear(&audio_queue, true);
+    if (!speech_enqueue_time(&audio_queue, language, hour, minute, exact_hour_phrase)) {
+        puts("[SPEECH] failed to queue time");
+        return;
+    }
+    snprintf(speech_overlay_time, sizeof(speech_overlay_time), "%02u:%02u",
+             (unsigned)hour, (unsigned)minute);
+    speech_overlay_until_ms = to_ms_since_boot(get_absolute_time()) + 2000u;
+    printf("[SPEECH] language=%s time=%s exact_hour=%s\n",
+           speech_language_name(language), speech_overlay_time,
+           exact_hour_phrase ? "ON" : "OFF");
+}
+
+static void announce_rtc_time(void) {
+    ds1302_datetime_t dt = {0};
+    if (!ds1302_read_datetime(&dt)) {
+        puts("[SPEECH] RTC unavailable; try say HH MM");
+        return;
+    }
+    announce_time(dt.hour, dt.minute);
 }
 
 static void timer_start_now(uint64_t now) {
@@ -129,7 +147,7 @@ static void handle_command(char *line) {
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds>, start, cancel, status, play <folder> <track>, pause, audio, vol <0..30>, sound, help");
+        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, help");
     } else if (strcmp(line, "start") == 0) {
         timer_start_now(now);
         print_timer_status(now);
@@ -146,6 +164,25 @@ static void handle_command(char *line) {
         printf("[AUDIO] volume=%u/30 sound=%s\n", (unsigned)volume, sound_enabled ? "ON" : "OFF");
     } else if (strcmp(line, "sound") == 0) {
         toggle_sound();
+    } else if (strcmp(line, "say") == 0) {
+        announce_rtc_time();
+    } else if (strncmp(line, "say", 3) == 0 && isspace((unsigned char)line[3])) {
+        unsigned int hour = 0, minute = 0;
+        char extra = 0;
+        if (sscanf(line + 3, " %u %u %c", &hour, &minute, &extra) != 2 ||
+            hour > 23u || minute > 59u) {
+            puts("[SPEECH] Use say or say <hour 0..23> <minute 0..59>");
+        } else {
+            announce_time((uint8_t)hour, (uint8_t)minute);
+        }
+    } else if (strcmp(line, "lang") == 0) {
+        printf("[SPEECH] language=%s\n", speech_language_name(language));
+    } else if (strcmp(line, "lang ru") == 0 || strcmp(line, "lang de") == 0) {
+        language = line[5] == 'd' ? SPEECH_DE : SPEECH_RU;
+        printf("[SPEECH] language=%s (RAM only)\n", speech_language_name(language));
+    } else if (strcmp(line, "exact on") == 0 || strcmp(line, "exact off") == 0) {
+        exact_hour_phrase = line[6] == 'o' && line[7] == 'n';
+        printf("[SPEECH] exact_hour=%s (RAM only)\n", exact_hour_phrase ? "ON" : "OFF");
     } else if (strncmp(line, "vol", 3) == 0 && isspace((unsigned char)line[3])) {
         unsigned int requested = 0;
         char extra = 0;
@@ -238,6 +275,18 @@ static void on_control_event(const control_event_t *event, void *context) {
         printf("[INPUT] button %s %s\n",
                controls_button_name(event->button),
                event->type == CONTROL_BUTTON_PRESS ? "PRESS" : "RELEASE");
+        if (event->button == BUTTON_MODE) {
+            // Parity with MicroPython ST/MO long-press threshold: 900 ms.
+            if (event->type == CONTROL_BUTTON_PRESS) {
+                mode_press_active = true;
+                mode_pressed_at_ms = now;
+            } else if (event->type == CONTROL_BUTTON_RELEASE && mode_press_active) {
+                mode_press_active = false;
+                if (now - mode_pressed_at_ms >= 900u) {
+                    announce_rtc_time();
+                }
+            }
+        }
         if (event->button == BUTTON_VOLUME && event->type == CONTROL_BUTTON_PRESS) {
             toggle_sound();
         } else if (event->button == BUTTON_TIMER && event->type == CONTROL_BUTTON_PRESS) {
@@ -326,7 +375,10 @@ int main(void) {
         }
 
         char top[17], bottom[17];
-        if (volume_overlay_until_ms && now < volume_overlay_until_ms) {
+        if (speech_overlay_until_ms && now < speech_overlay_until_ms) {
+            snprintf(top, sizeof(top), "SPEAK TIME %s", speech_language_name(language));
+            snprintf(bottom, sizeof(bottom), "%s", speech_overlay_time);
+        } else if (volume_overlay_until_ms && now < volume_overlay_until_ms) {
             snprintf(top, sizeof(top), "VOLUME %s", sound_enabled ? "ON" : "OFF");
             snprintf(bottom, sizeof(bottom), "%u / 30", (unsigned)volume);
         } else if (finished_screen_until_ms && now < finished_screen_until_ms) {
