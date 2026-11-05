@@ -313,3 +313,46 @@ before reporting a queuing fault.
 Confirmed hardware test (2026-11-05): volume encoder events change the value, sound output works, and timer was cancelled deliberately. The previous firmware did not display volume on LCD.
 
 New behavior (pending local compilation and physical verification): turning the volume encoder, pressing its button, or using `vol <0..30>` / `sound` shows `VOLUME ON` or `VOLUME OFF` and the current `N / 30` level for about 1.8 seconds on LCD1602. The display then returns to the previously active timer or clock view; countdown and RTC polling continue during the overlay. No DFPlayer protocol change.
+
+## RU/DE voice time announcements - first integration
+
+**Code committed; local build and real DFPlayer playback test still required.**
+
+The bilingual mappings are in `audio/speech.[ch]`, using the original
+`source/v3/audio.py` folders: RU 01 hours, 02 minutes, 07 phrases;
+DE 11 hours, 12 minutes, 17 phrases. Neither the stable MicroPython
+files nor the DFPlayer SD card are changed.
+
+Serial Monitor (115200, LF, **one line per command**):
+
+| Command | Action |
+| --- | --- |
+| `lang` | Show selected language |
+| `lang ru` | Select Russian (RAM only, default at startup) |
+| `lang de` | Select German (RAM only) |
+| `say` | Announce current DS1302 hour and minute |
+| `say 14 23` | Test a specific time without changing RTC |
+| `say 18 0` | Test exact-hour handling |
+| `exact on` / `exact off` | Enable/disable minute track 000 at :00; off by default |
+
+**Physical control:** holding the MODE/ST-MO button (GP22) for
+at least **900 ms** and releasing it announces the RTC time.
+Short MODE presses remain diagnostics only in this milestone.
+A temporary LCD overlay shows `SPEAK TIME ru` or `SPEAK TIME de`
+and the announced HH:MM for about 2 seconds.
+
+The selected language also controls the existing timer-service phrase
+folder (07 or 17). Timer duration speech follows the established
+MicroPython behavior: RU hours/minutes for whole-minute durations;
+DE number of minutes + 17/017 when duration is under 1 hour.
+Incomplete fractional-minute durations do not speak a number.
+Other features (settings screen, saved language, automatic hourly
+announcements, quiet hours, alarms, date speech) are **not** implemented.
+
+Recommended test sequence after updating and flashing the new UF2:
+`lang ru` then `say 14 23`, wait until playback finishes,
+`lang de` then `say 14 23`, wait, then hold MODE for >900 ms.
+Check that hour and minute files play in order and LCD returns to
+the clock after the overlay. Test `exact on` and `say 18 0`
+separately. No RTC writes are performed.
+
