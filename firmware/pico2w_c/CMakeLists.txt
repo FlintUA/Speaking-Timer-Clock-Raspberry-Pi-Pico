@@ -21,9 +21,11 @@ add_executable(speaking_clock_c
     main.c
     drivers/ds1302.c
     drivers/lcd1602_i2c.c
+    app/countdown.c
 )
 target_include_directories(speaking_clock_c PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/drivers
+    ${CMAKE_CURRENT_LIST_DIR}/app
 )
 target_link_libraries(speaking_clock_c PRIVATE
     pico_stdlib
