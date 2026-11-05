@@ -58,6 +58,14 @@ void speech_enqueue_timer_cancel(audio_queue_t *queue, speech_language_t languag
 }
 
 void speech_enqueue_timer_finish(audio_queue_t *queue, speech_language_t language) {
+    if (language == SPEECH_DE) {
+        // sound/_sdcard/17 has no 011.mp3 or 013.mp3. Requests for these
+        // missing tracks play unrelated German messages on the user's DFPlayer.
+        // Use the confirmed language-neutral long signal from folder 07 only.
+        // A proper spoken DE completion phrase requires new SD-card audio.
+        audio_queue_enqueue(queue, 7u, 13u);
+        return;
+    }
     audio_queue_enqueue(queue, speech_phrases_folder(language), 11u);
     audio_queue_enqueue(queue, speech_phrases_folder(language), 13u);
 }
