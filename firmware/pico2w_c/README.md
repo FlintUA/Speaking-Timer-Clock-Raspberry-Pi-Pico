@@ -931,3 +931,62 @@ signal; then run a short German countdown to completion. Expect
 \`[AUDIO-TRACK] play folder=07 track=013\` and **no**
 \`folder=17 track=011/013\`. Check audibility and logs before
 changing any MP3 files.
+
+
+## Voice / Chime clock mode (ST/MO button)
+
+The MicroPython v3.10.0 behavior is now available in C:
+
+- **ST/MO short press** (less than 900 ms) toggles
+  \`VOICE\` ↔ \`CHIME\`. An LCD overlay confirms the selection.
+  The action is disabled during a running timer or an open settings menu.
+- **ST/MO long press** (at least 900 ms) still speaks the
+  current RTC time; no change to the selected mode.
+- In \`VOICE\` mode, each hour queues the normal RU/DE time announcement.
+- In \`CHIME\` mode, the hour queues one file in folder **18**,
+  track \`hour % 12\` (00/12 → **012**), matching original
+  \`source/v3/main.py\`. File \`18/000\` is not used for hourly
+  strikes. Repository \`sound/_sdcard/18\` includes 000..012.
+- The half-hour double-beep remains \`07/015\`, independent of
+  mode, and keeps the existing Half-hour beep setting.
+- Quiet mode, timer priority, audio-busy guard, once-per-minute
+  suppression and opt-in \`auto on\` gate all remain in effect.
+
+### Persistent settings compatibility
+
+No flash sector relocation or version change: existing **v2
+24-byte** record's reserved byte is used for mode (\`0=VOICE\`,
+\`1=CHIME\`). Existing valid v2 records have \`reserved=FF\`,
+which is read as \`VOICE\` and accepted by CRC validation; v1
+records also load as \`VOICE\`. New saves continue as
+\`version=2\`, with the same CRC and A/B safety. A short press
+changing mode marks settings dirty and follows the existing
+5-second autosave and 60-second cooldown. Toggling back to the
+saved mode cancels the pending write. Automatic scheduling stays
+OFF across reboots until \`auto on\`.
+
+### Serial commands and dry-run tests
+
+Each command must be sent on a separate line.
+
+1. \`flash-info\`, \`mode-status\`, \`auto-status\` - after flashing,
+   expect the old sectors to remain VALID and mode VOICE.
+2. \`mode chime\` - select chime without playing a sound. After
+   \`auto-test 19 00\`, expect \`HOURLY_CHIME\` and
+   \`folder=18 track=007\`. \`auto-test 00 00\` and
+   \`auto-test 12 00\` expect \`track=012\`.
+3. \`auto-test 19 30\` still reports the half-hour beep if enabled.
+   No \`auto-test\` command changes DS1302 or starts audio.
+4. Short press ST/MO twice and observe CHIME→VOICE→CHIME,
+   \`mode-status\`, and the LCD overlay. Hold for 900ms+ to
+   speak the time, without changing the mode.
+5. With chime selected and timer idle, verify sound manually by
+   sending \`play 18 7\`. For real scheduling use \`auto on\`
+   and observe a future hour; use \`auto off\` afterward.
+6. Allow the autosave delay, power cycle and confirm \`mode-status\`
+   retains CHIME and \`flash-info\` still reports v2 records.
+   Restore \`mode voice\` when desired.
+
+**Note:** the source modifications have not been compiled or tested
+on physical Pico 2 W as of this commit. Do not treat audible chime,
+persistence, or timing as verified until hardware logs are received.
