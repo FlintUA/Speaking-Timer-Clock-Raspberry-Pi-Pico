@@ -711,3 +711,50 @@ test if any RTC validation error occurs.
 **Compatibility note:** SETTINGS no longer immediately opens the language
 editor. It opens the list first. In this stage only the three items are
 available; time/date/quiet/chime/alarms are not yet implemented in C.
+
+
+## Time and Date editors (C firmware, **not yet hardware-tested**)
+
+The five-item menu now has: Language, **Time**, **Date**, Volume,
+Exact-hour word. This follows the staged editor in \`source/v3/main.py\`.
+The two new editors use the TIMER encoder to change one field at a time,
+TIMER button or SETTINGS to advance to the next field, and MINUS to
+cancel without writing to the DS1302:
+
+- Time: **hour -> minute -> second -> final confirmation**.
+- Date: **day -> month -> year -> final confirmation**. Day-of-week
+  is recalculated automatically (Monday=1..Sunday=7); leap years and
+  month lengths are validated.
+- After the last field is confirmed, C reads the RTC again, merges only
+  the edited Time/Date subset, validates the full resulting calendar,
+  writes an 8-byte DS1302 clock burst, preserves the original RTC
+  control-register write-protection bit, reads the clock back to verify,
+  and returns to the settings list only if verification passed.
+- If an RTC read is invalid, an edit cannot start and a save is
+  refused. The menu also rejects invalid calendar dates. The 20-second
+  timeout cancels an unconfirmed edit. The flash settings structure and
+  A/B slots are completely unchanged.
+- **Warning:** confirming seconds in Time or year in Date is a *real*
+  RTC write even if the displayed values were not edited. Unlike the
+  other three settings, Time/Date changes are not flash settings.
+
+### Safe-first test sequence
+
+1. Flash the build and open SETTINGS; verify five entries in both
+   directions. Check that the old Language/Volume/Exact editors still
+   work.
+2. Open Time, rotate hours one click, then press MINUS. Read the clock:
+   it must be unchanged. Repeat with Date, without advancing through
+   the final confirmation.
+3. Only when the navigation/cancel test passes and a deliberate clock
+   adjustment is desired, enter Time. Change the desired field(s),
+   advance through Hour -> Minute -> Second, then confirm once more to
+   write. Observe \`[RTC] TIME saved ...\`, continued RTC ticking, and
+   check \`rtc-debug\`.
+4. Likewise, change Date only if necessary; test month end/leap-year
+   boundaries, avoiding a real RTC date change until ready.
+5. If \`[RTC] RTC write/readback failed\` occurs, do not repeatedly
+   confirm: capture \`rtc-debug\` and inspect hardware before retrying.
+
+No NTP, periodic RTC adjustment, automatic time setting, or Bluetooth
+are enabled by this milestone.
