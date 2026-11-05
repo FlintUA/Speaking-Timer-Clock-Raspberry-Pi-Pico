@@ -299,13 +299,60 @@ static void load_settings_at_boot(void) {
     autosave_pending = false;
 }
 
+static void print_rtc_raw(const char *label, const uint8_t raw[7]) {
+    printf("[RTC-DEBUG] %s sec=%02x min=%02x hour=%02x day=%02x month=%02x weekday=%02x year=%02x\n",
+           label, (unsigned)raw[0], (unsigned)raw[1], (unsigned)raw[2],
+           (unsigned)raw[3], (unsigned)raw[4], (unsigned)raw[5],
+           (unsigned)raw[6]);
+}
+
+static void print_rtc_debug(void) {
+    ds1302_diagnostics_t d;
+    ds1302_get_diagnostics(&d);
+    printf("[RTC-DEBUG] ok=%lu failed=%lu consecutive=%lu max_consecutive=%lu\n",
+           (unsigned long)d.reads_ok, (unsigned long)d.reads_failed,
+           (unsigned long)d.consecutive_failures,
+           (unsigned long)d.max_consecutive_failures);
+    print_rtc_raw("last_read", d.last_raw);
+    if (!d.have_last_failure) {
+        puts("[RTC-DEBUG] No failures captured since boot/reset");
+        return;
+    }
+    print_rtc_raw("last_error", d.last_failed_raw);
+    printf("[RTC-DEBUG] error_flags=0x%03lx reasons:",
+           (unsigned long)d.last_failure_flags);
+    const struct { uint32_t mask; const char *name; } reasons[] = {
+        { DS1302_ERR_CH, "CH" },
+        { DS1302_ERR_12H_MODE, "12H_MODE" },
+        { DS1302_ERR_SECONDS, "SECONDS_RANGE" },
+        { DS1302_ERR_MINUTES, "MINUTES_RANGE" },
+        { DS1302_ERR_HOURS, "HOURS_RANGE" },
+        { DS1302_ERR_DAY, "DAY_RANGE" },
+        { DS1302_ERR_MONTH, "MONTH_RANGE" },
+        { DS1302_ERR_WEEKDAY, "WEEKDAY_RANGE" },
+        { DS1302_ERR_YEAR_BCD, "YEAR_BCD" },
+        { DS1302_ERR_INVALID_BCD, "INVALID_BCD" }
+    };
+    for (unsigned i = 0; i < sizeof(reasons) / sizeof(reasons[0]); ++i) {
+        if (d.last_failure_flags & reasons[i].mask) {
+            printf(" %s", reasons[i].name);
+        }
+    }
+    putchar('\n');
+}
+
 static void handle_command(char *line) {
     while (isspace((unsigned char)*line)) ++line;
     size_t len = strlen(line);
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, save, help");
+        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, rtc-debug, rtc-reset-stats, save, help");
+    } else if (strcmp(line, "rtc-debug") == 0) {
+        print_rtc_debug();
+    } else if (strcmp(line, "rtc-reset-stats") == 0) {
+        ds1302_reset_diagnostics();
+        puts("[RTC-DEBUG] counters and last failure reset; RTC registers unchanged");
     } else if (strcmp(line, "flash-info") == 0) {
         settings_store_print_info();
     } else if (strcmp(line, "flash-inspect") == 0) {
@@ -580,7 +627,7 @@ int main(void) {
                 snprintf(rtc_top, sizeof(rtc_top), "RTC unavailable");
                 snprintf(rtc_bottom, sizeof(rtc_bottom), "Check GP2/5/4");
                 // RTC is polled once a second, but missing RTC doesn't stop controls.
-                printf("[RTC] Invalid/unavailable (power, wiring, or oscillator)\n");
+                puts("[RTC] Invalid/unavailable (run rtc-debug for raw bytes and error reasons)");
             }
         }
 
