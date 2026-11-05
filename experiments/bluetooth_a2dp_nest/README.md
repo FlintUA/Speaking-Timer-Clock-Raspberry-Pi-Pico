@@ -171,3 +171,29 @@ explicit filtering by the name Nest is a future task.
 
 `usb_stdio_test` remains an independent target. The production MicroPython
 clock in `source/v3` remains unchanged.
+
+## USB command control (new, hardware verification pending)
+
+The next experimental target adds nonblocking Serial Monitor commands. USB
+input is polled every 50 ms using a BTstack timer callback and
+`getchar_timeout_us(0)`, avoiding a blocking command loop.
+
+| Command | Action |
+| --- | --- |
+| `p` | Replay a 300 ms tone when the A2DP stream is active |
+| `s` | Stop any remaining tone samples, continue sending SBC silence |
+| `i` | Print A2DP stream status, audio state, sample rate, samples remaining |
+| `h` / `?` | Print help |
+
+The A2DP stream still plays its initial 300 ms test tone on connection.
+New commands invoke functions inserted into a locally generated BTstack source;
+they never modify the installed Pico SDK. Commands are processed in the same
+BTstack event loop as audio, not in an ISR.
+
+Run `git pull`, then in VS Code use **CMake: Build Target** ->
+`nest_a2dp_autotest`. Flash the resulting UF2 only to the spare Pico 2 W.
+After connecting, send `i`, then `p`, then `s` from Serial Monitor.
+The test has not yet been confirmed on hardware.
+
+Note: `s` cannot retract SBC frames already encoded or buffered in Bluetooth,
+so the acoustic stop may be slightly delayed.
