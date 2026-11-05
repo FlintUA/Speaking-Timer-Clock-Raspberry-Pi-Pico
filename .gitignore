@@ -1,5 +1,6 @@
 # Generated Pico SDK / CMake outputs (any nested experiment or firmware)
 build/
+build-ninja/
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
