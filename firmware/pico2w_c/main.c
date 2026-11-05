@@ -482,8 +482,8 @@ static void print_autosave_status(uint64_t now_ms) {
 
 static void set_clock_mode(uint8_t requested, uint64_t now) {
     if (requested > 1u) return;
-    if (timer.running || menu_state != MENU_CLOSED) {
-        puts("[MODE] Change blocked: timer running or settings open");
+    if (timer.running || alarm_active_index >= 0 || menu_state != MENU_CLOSED) {
+        puts("[MODE] Change blocked: timer/alarm active or settings open");
         return;
     }
     if (clock_mode != requested) {
@@ -1146,12 +1146,18 @@ static void handle_command(char *line) {
                (unsigned)quiet_end, half_hour_enabled ? "ON" : "OFF",
                 auto_enabled ? "ON" : "OFF");
     } else if (strcmp(line, "menu") == 0) {
-        if (menu_state != MENU_CLOSED) menu_close();
+        if (alarm_active_index >= 0) {
+            puts("[MENU] blocked: alarm ringing");
+        } else if (menu_state != MENU_CLOSED) menu_close();
         else menu_open(now);
     } else if (strcmp(line, "start") == 0) {
-        if (menu_state != MENU_CLOSED) menu_close();
-        timer_start_now(now);
-        print_timer_status(now);
+        if (alarm_active_index >= 0) {
+            puts("[TIMER] start blocked: alarm ringing");
+        } else {
+            if (menu_state != MENU_CLOSED) menu_close();
+            timer_start_now(now);
+            print_timer_status(now);
+        }
     } else if (strcmp(line, "cancel") == 0) {
         timer_cancel_now();
         print_timer_status(now);
