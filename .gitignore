@@ -1,0 +1,29 @@
+# Generated Pico SDK / CMake outputs (any nested experiment or firmware)
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+*.uf2
+*.elf
+*.bin
+*.hex
+*.map
+
+# Python-generated runtime artifacts
+__pycache__/
+*.py[cod]
+
+# Local IDE and OS files
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Private runtime configuration (examples may be tracked explicitly)
+wifi_secrets.py
+config.json
+config.tmp
+
+# Do not accidentally commit local diagnostics or binary backups
+*.backup
+*.bak
