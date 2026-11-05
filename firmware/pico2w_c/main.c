@@ -14,6 +14,7 @@
 #include "dfplayer.h"
 #include "queue.h"
 #include "speech.h"
+#include "settings_store.h"
 
 #define LCD_SDA_GPIO 0
 #define LCD_SCL_GPIO 1
@@ -172,13 +173,46 @@ static void open_language_menu(uint64_t now_ms) {
            speech_language_name(language_menu_choice));
 }
 
+static void save_settings_now(void) {
+    clock_settings_t cfg = {
+        .language = (uint8_t)language,
+        .volume = volume,
+        .exact_hour = exact_hour_phrase
+    };
+    settings_store_result_t result = settings_store_save(&cfg);
+    printf("[FLASH] save=%s\n", settings_store_result_name(result));
+    if (result == SETTINGS_STORE_OCCUPIED) {
+        puts("[FLASH] Refusing to erase unknown contents; backup MicroPython FS first.");
+    }
+}
+
+static void load_settings_at_boot(void) {
+    clock_settings_t saved = {0};
+    settings_store_result_t result = settings_store_load(&saved);
+    if (result == SETTINGS_STORE_OK) {
+        language = saved.language == 1u ? SPEECH_DE : SPEECH_RU;
+        volume = saved.volume;
+        exact_hour_phrase = saved.exact_hour;
+        printf("[FLASH] loaded lang=%s volume=%u exact=%s\n",
+               speech_language_name(language), (unsigned)volume,
+               exact_hour_phrase ? "ON" : "OFF");
+    } else {
+        printf("[FLASH] load=%s; using defaults (RU, volume=10)\n",
+               settings_store_result_name(result));
+    }
+}
+
 static void handle_command(char *line) {
     while (isspace((unsigned char)*line)) ++line;
     size_t len = strlen(line);
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, help");
+        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, save, help");
+    } else if (strcmp(line, "flash-info") == 0) {
+        settings_store_print_info();
+    } else if (strcmp(line, "save") == 0) {
+        save_settings_now();
     } else if (strcmp(line, "menu") == 0) {
         if (language_menu_open) close_language_menu(false);
         else open_language_menu(now);
@@ -385,6 +419,7 @@ int main(void) {
     puts("[INPUT] GPIO controls initialized (2 encoders, 7 buttons)");
     dfplayer_init();
     audio_queue_init(&audio_queue);
+    load_settings_at_boot();
     audio_queue_set_volume(&audio_queue, volume);
     puts("[AUDIO] DFPlayer UART0 GP16/17 BUSY GP18; no auto playback");
     countdown_init(&timer);
