@@ -269,3 +269,41 @@ git pull --ff-only
 
 The previously functioning MicroPython firmware is still the recovery
 baseline; this test does not erase or alter DFPlayer SD card contents.
+
+
+## Volume encoder, mute and Russian timer speech
+
+**Status: code committed, build and physical test pending.** The previous
+DFPlayer test confirmed audible playback of SD tracks.
+
+This milestone mirrors the default Russian MicroPython audio behavior:
+
+- Volume encoder GP14/GP15 changes volume by one per registered detent
+  within 0..30; startup default is 10 (not persisted yet).
+- Volume button GP20 toggles sound. Sound OFF cancels playback through the
+  audio queue and requests DFPlayer pause. Sound ON permits new playback.
+- USB command `audio` prints BUSY/queue plus current volume and sound mode.
+- USB command `vol 12` sets the DFPlayer volume to 12, and
+  `sound` toggles sound for testing. Commands use LF, one per line.
+- Starting a timer announces RU service phrase folder 07 track 007,
+  followed by the hour/minute recording where applicable (only for an
+  exact number of minutes; seconds are deliberately not spoken).
+- Cancelling the timer announces folder 07 track 014.
+- Finishing the timer queues folder 07 track 011 followed by 07/013.
+- USB `start`/`cancel` and physical timer button use the same audio logic.
+- The audio queue coalesces rapid volume updates and enforces a 120 ms
+  gap between DFPlayer commands without blocking LCD/RTC polling.
+
+This build still uses **fixed RU mappings**. Persisted volume, language
+switching, the full UI, chimes, alarms, and Bluetooth remain separate work.
+The SD files must match the existing `source/v3/audio.py` mapping. The
+existing MicroPython `source/v3` remains untouched.
+
+Suggested physical tests: rotate volume slowly and monitor
+`[AUDIO] volume=N/30`; set volume at 10-15, send `play 7 16`, toggle
+sound OFF and verify silence, then ON; use `t 5` and `start` to test
+the finishing voice/signals, and rotate the timer encoder then press it
+to test the spoken number of minutes. If the short announcement overlaps
+with the finish of a five-second timer, test again with a longer countdown
+before reporting a queuing fault.
+
