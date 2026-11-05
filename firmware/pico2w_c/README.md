@@ -356,3 +356,48 @@ Check that hour and minute files play in order and LCD returns to
 the clock after the overlay. Test `exact on` and `say 18 0`
 separately. No RTC writes are performed.
 
+
+
+## Language settings menu - first LCD UI slice
+
+**Status: committed, pending local compilation and physical testing.**
+This stage intentionally does not read, erase or write RP2350 flash.
+The language is stored in RAM and resets to Russian on reboot.
+
+With timer NOT running:
+
+1. Press **SETTINGS** (GP27) to open the language selection screen.
+2. LCD1602 displays `LANGUAGE SETTING` and `RU PRESS=SAVE`
+   or `DE PRESS=SAVE`.
+3. Turn the **TIMER encoder** one detent to switch RU/DE. Subsequent
+   detents toggle between the two languages without changing timer duration.
+4. Press **TIMER encoder button** (GP19) to commit the choice **to RAM**.
+   The menu closes and LCD returns to the clock.
+5. Hold **MODE** (GP22) for 900+ ms to hear the current time in the
+   chosen language; `say` over USB performs the same playback.
+6. Reopen the menu and press **SETTINGS** again to discard any unconfirmed
+   choice. After 20 seconds without input the menu also times out and
+   discards the unconfirmed choice.
+
+`menu` in USB Serial Monitor can open/cancel the menu for diagnostics,
+while `lang` shows the current active language. Existing `lang ru` /
+`lang de` commands remain available for testing. Starting a timer from
+USB while a menu is open closes the menu first.
+
+The running timer, volume encoder, mute button, audio queue and RTC are
+not changed. **Settings cannot be opened during an active countdown.**
+Other settings and nonvolatile storage will be implemented only after
+the physical UI passes this test. Do not expect settings to survive
+a power cycle yet.
+
+Build from `firmware/pico2w_c`:
+
+```powershell
+git pull --ff-only
+& "C:\Users\Flint123\.pico-sdk\cmake\v4.3.4\bin\cmake.exe" --build build-ninja --target speaking_clock_c
+```
+
+Flash the newly built `build-ninja/speaking_clock_c.uf2`, then test
+SETTINGS -> one detent -> TIMER button -> long MODE press. Confirm
+the language actually changes without changing the selected timer
+duration. Test cancelling menu and the 20-second timeout separately.
