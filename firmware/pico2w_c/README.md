@@ -949,8 +949,9 @@ The MicroPython v3.10.0 behavior is now available in C:
   strikes. Repository \`sound/_sdcard/18\` includes 000..012.
 - The half-hour double-beep remains \`07/015\`, independent of
   mode, and keeps the existing Half-hour beep setting.
-- Quiet mode, timer priority, audio-busy guard, once-per-minute
-  suppression and opt-in \`auto on\` gate all remain in effect.
+- Quiet mode, timer priority, audio-busy guard and once-per-minute
+  suppression remain in effect. Automatic scheduling starts ON after boot;
+  \`auto off\` and \`auto on\` remain runtime diagnostic overrides.
 
 ### Persistent settings compatibility
 
@@ -962,8 +963,8 @@ records also load as \`VOICE\`. New saves continue as
 \`version=2\`, with the same CRC and A/B safety. A short press
 changing mode marks settings dirty and follows the existing
 5-second autosave and 60-second cooldown. Toggling back to the
-saved mode cancels the pending write. Automatic scheduling stays
-OFF across reboots until \`auto on\`.
+saved mode cancels the pending write. Automatic scheduling is ON after every boot, independently of
+flash mode persistence. Use \`auto off\` for temporary diagnostics.
 
 ### Serial commands and dry-run tests
 
@@ -990,3 +991,50 @@ Each command must be sent on a separate line.
 **Note:** the source modifications have not been compiled or tested
 on physical Pico 2 W as of this commit. Do not treat audible chime,
 persistence, or timing as verified until hardware logs are received.
+
+
+## Automatic clock schedule enabled on startup
+
+C behavior now matches the MicroPython v3 default: the automatic schedule
+is **ON after each power-up**, even without serial commands. Voice or chime
+at the top of the hour is determined by the flash-persisted clock mode;
+the half-hour sound is controlled by the persisted half-hour option.
+
+The boot-only safety rule consumes the first observed RTC minute if that
+minute is :00 or :30, regardless of second, preventing a duplicate or
+stale announcement after a restart exactly at the boundary. An RTC read
+failure delays this initialization until the first valid read. If the
+initial RTC minute is not a boundary, the scheduler arms for the next
+one. No RTC writes or flash format changes are involved.
+
+Existing protections remain: quiet hours, sound OFF, running/just-finished
+timer, settings menu, DFPlayer BUSY, queue occupancy, 5-second boundary
+window and once-per-calendar-minute suppression. A suppressed scheduled
+event is not replayed late. The serial commands remain available:
+
+- \`auto-status\`: shows \`enabled=ON\` after boot.
+- \`auto off\`: suppress automatic events for the current session.
+- \`auto on\`: re-enable automatic events without replaying the
+  current :00/:30 minute.
+- \`auto-test 19 00\`: dry-run only; never changes RTC or plays audio.
+
+### Pico 2 W hardware checks
+
+1. After flashing and power cycling, send \`auto-status\` and
+   \`mode-status\`. Expect \`enabled=ON\` without entering \`auto on\`,
+   and the previously saved VOICE/CHIME selection.
+2. To avoid an unscheduled chime while testing, use \`auto off\`.
+   Check \`auto-test 19 00\` and \`auto-test 19 30\`. These
+   simulations deliberately ignore the runtime ON/OFF gate.
+3. With no timer, menu or other audio active, send \`auto on\`
+   well before the next real :00 or :30. Observe the exact track
+   in \`[AUDIO-TRACK]\` and only one \`[AUTO]\` event.
+4. Restart during an existing :00/:30 minute if convenient and
+   verify \`[AUTO] boot: current ... boundary consumed (no replay)\`.
+   Do not expect automatic playback at that already-active boundary.
+5. Check a real event with a timer running through :00/:30:
+   expect \`[AUTO] ... skipped=TIMER_PRIORITY\` and no late replay.
+
+Note: These source changes need a fresh Pico SDK compile and hardware
+verification. Previous tests of CHIME playback do not establish the
+new startup behavior.
