@@ -874,3 +874,33 @@ Time/date write and manual \`say\` continue to work independently.
 This implementation is not yet compiled or tested on the user's
 physical Pico 2 W. Do not assume audio playback is proven until
 serial and speaker observations are received.
+
+
+## Timer finish / flash autosave ordering fix
+
+The main loop now calls \`countdown_consume_finished\` and queues the
+timer finish sound **before** \`autosave_service\`. Previously,
+\`countdown_service\` cleared \`timer.running\` at zero and autosave
+could write flash before the finish sound was queued.
+
+Autosave now explicitly waits until all of the following are true:
+no active timer, no open menu, the 3-second timer-finished display
+interval has expired, the audio queue is idle, and the DFPlayer
+BUSY pin is inactive. The existing 5-second debounce and 60-second
+flash-write cooldown are unchanged. This does not change the
+\`save\` command, flash record format, RTC registers or any audio tracks.
+
+### Hardware regression test
+
+1. Flash the new UF2. Confirm old settings with \`flash-info\`,
+   \`quiet-status\`.
+2. Set the timer to 60 seconds. While it runs, change volume by one
+   encoder step and issue \`autosave-status\`. Expect \`pending=yes\`
+   and no \`autosave=OK\` yet.
+3. Let the timer finish naturally, keep serial logs open. Expect
+   \`[TIMER] FINISHED\` **before** \`[FLASH] autosave=OK\`.
+   The finish sound should not be interrupted by flash activity.
+4. After finish audio and 3-second overlay, expect an eventual
+   \`[FLASH] autosave=OK\` (possibly delayed by a write cooldown).
+   Verify \`flash-info\` and retained volume after a power cycle.
+5. \`quiet-status\` now includes \`auto_runtime=ON/OFF\`.
