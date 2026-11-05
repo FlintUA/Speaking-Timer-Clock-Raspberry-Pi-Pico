@@ -39,6 +39,8 @@ static bool timer_screen;
 static audio_queue_t audio_queue;
 static uint8_t volume = 10; // MicroPython config.py default; persistence not migrated yet.
 static bool sound_enabled = true;
+static uint64_t volume_overlay_until_ms;
+#define VOLUME_OVERLAY_MS 1800u
 
 #define RU_PHRASES 7u
 #define RU_HOURS 1u
@@ -109,12 +111,14 @@ static void change_volume(int direction) {
     if (requested == volume) return;
     volume = (uint8_t)requested;
     audio_queue_set_volume(&audio_queue, volume);
+    volume_overlay_until_ms = to_ms_since_boot(get_absolute_time()) + VOLUME_OVERLAY_MS;
     printf("[AUDIO] volume=%u/30 sound=%s\n", (unsigned)volume,
            sound_enabled ? "ON" : "OFF");
 }
 
 static void toggle_sound(void) {
     sound_enabled = !sound_enabled;
+    volume_overlay_until_ms = to_ms_since_boot(get_absolute_time()) + VOLUME_OVERLAY_MS;
     if (!sound_enabled) audio_queue_clear(&audio_queue, true);
     printf("[AUDIO] sound=%s\n", sound_enabled ? "ON" : "OFF");
 }
@@ -150,6 +154,7 @@ static void handle_command(char *line) {
         } else {
             volume = (uint8_t)requested;
             audio_queue_set_volume(&audio_queue, volume);
+            volume_overlay_until_ms = now + VOLUME_OVERLAY_MS;
             printf("[AUDIO] volume=%u/30\n", (unsigned)volume);
         }
     } else if (strcmp(line, "pause") == 0) {
@@ -321,7 +326,10 @@ int main(void) {
         }
 
         char top[17], bottom[17];
-        if (finished_screen_until_ms && now < finished_screen_until_ms) {
+        if (volume_overlay_until_ms && now < volume_overlay_until_ms) {
+            snprintf(top, sizeof(top), "VOLUME %s", sound_enabled ? "ON" : "OFF");
+            snprintf(bottom, sizeof(bottom), "%u / 30", (unsigned)volume);
+        } else if (finished_screen_until_ms && now < finished_screen_until_ms) {
             snprintf(top, sizeof(top), "TIMER FINISHED");
             snprintf(bottom, sizeof(bottom), "Ready");
         } else if (timer.running || timer_screen) {
