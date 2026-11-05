@@ -21,30 +21,35 @@
 #define SLOT0_OFFSET (PICO_FLASH_SIZE_BYTES - 4u * FLASH_SECTOR_SIZE)
 #define SLOT1_OFFSET (PICO_FLASH_SIZE_BYTES - 3u * FLASH_SECTOR_SIZE)
 #define RECORD_MAGIC 0x53434c4bu /* SCLK */
-#define RECORD_VERSION 1u
+#define RECORD_VERSION 2u
+#define RECORD_V1 1u
 #define IMAGE_SAFETY_MARGIN FLASH_SECTOR_SIZE
 
 extern uint8_t __flash_binary_end;
 
+// Version 1 stays readable and erasable. Version 2 adds quiet/half-hour
+// settings without changing A/B sector offsets, magic or sequence numbering.
 typedef struct {
-    uint32_t magic;
-    uint32_t version;
-    uint32_t sequence;
-    uint8_t language;
-    uint8_t volume;
-    uint8_t exact_hour;
-    uint8_t reserved;
+    uint32_t magic, version, sequence;
+    uint8_t language, volume, exact_hour, reserved;
+    uint32_t crc32;
+} settings_record_v1_t;
+
+typedef struct {
+    uint32_t magic, version, sequence;
+    uint8_t language, volume, exact_hour, quiet_enabled;
+    uint8_t quiet_start, quiet_end, half_hour_enabled, reserved;
     uint32_t crc32;
 } settings_record_t;
 
-_Static_assert(sizeof(settings_record_t) == 20, "Unexpected record padding");
-_Static_assert(offsetof(settings_record_t, crc32) == 16, "Unexpected CRC offset");
+_Static_assert(sizeof(settings_record_v1_t) == 20, "Unexpected v1 size");
+_Static_assert(sizeof(settings_record_t) == 24, "Unexpected v2 size");
+_Static_assert(offsetof(settings_record_t, crc32) == 20, "Unexpected v2 CRC offset");
 
-static uint32_t record_crc(const settings_record_t *r) {
-    // IEEE CRC32, reflected polynomial; cover all fields before crc32.
+static uint32_t record_crc_bytes(const void *data, size_t length) {
     uint32_t crc = 0xffffffffu;
-    const uint8_t *ptr = (const uint8_t *)r;
-    for (size_t i = 0; i < offsetof(settings_record_t, crc32); ++i) {
+    const uint8_t *ptr = (const uint8_t *)data;
+    for (size_t i = 0; i < length; ++i) {
         crc ^= ptr[i];
         for (int bit = 0; bit < 8; ++bit) {
             crc = (crc >> 1) ^ ((crc & 1u) ? 0xedb88320u : 0u);
@@ -58,11 +63,23 @@ static const uint8_t *slot_bytes(unsigned slot) {
 }
 
 static bool record_valid(const settings_record_t *r) {
-    return r->magic == RECORD_MAGIC &&
-           r->version == RECORD_VERSION &&
-           r->language <= 1u && r->volume <= 30u &&
-           r->exact_hour <= 1u &&
-           r->crc32 == record_crc(r);
+    if (r->magic != RECORD_MAGIC || r->language > 1u ||
+        r->volume > 30u || r->exact_hour > 1u) return false;
+    if (r->version == RECORD_V1) {
+        settings_record_v1_t old;
+        memcpy(&old, r, sizeof(old));
+        return old.crc32 ==
+            record_crc_bytes(&old, offsetof(settings_record_v1_t, crc32));
+    }
+    if (r->version != RECORD_VERSION) return false;
+    return r->quiet_enabled <= 1u && r->quiet_start <= 23u &&
+           r->quiet_end <= 23u && r->half_hour_enabled <= 1u &&
+           r->crc32 == record_crc_bytes(r, offsetof(settings_record_t, crc32));
+}
+
+static size_t record_size(const settings_record_t *r) {
+    return r->version == RECORD_V1 ? sizeof(settings_record_v1_t) :
+                                     sizeof(settings_record_t);
 }
 
 static bool sector_blank(unsigned slot) {
@@ -80,7 +97,7 @@ static bool sector_owned(unsigned slot) {
     const uint8_t *bytes = slot_bytes(slot);
     memcpy(&r, bytes, sizeof(r));
     if (!record_valid(&r)) return false;
-    for (size_t i = sizeof(r); i < FLASH_SECTOR_SIZE; ++i) {
+    for (size_t i = record_size(&r); i < FLASH_SECTOR_SIZE; ++i) {
         if (bytes[i] != 0xffu) return false;
     }
     return true;
@@ -129,9 +146,10 @@ void settings_store_print_info(void) {
     for (unsigned i = 0; i < 2u; ++i) {
         settings_record_t r;
         memcpy(&r, slot_bytes(i), sizeof(r));
-        printf("[FLASH] slot%u=%s sequence=%lu\n", i,
+        printf("[FLASH] slot%u=%s sequence=%lu version=%lu\n", i,
                sector_owned(i) ? "VALID" : (sector_blank(i) ? "BLANK" : "OCCUPIED"),
-               sector_owned(i) ? (unsigned long)r.sequence : 0ul);
+               sector_owned(i) ? (unsigned long)r.sequence : 0ul,
+               sector_owned(i) ? (unsigned long)r.version : 0ul);
     }
 }
 
@@ -210,6 +228,11 @@ settings_store_result_t settings_store_load(clock_settings_t *out) {
         out->language = r.language;
         out->volume = r.volume;
         out->exact_hour = r.exact_hour != 0u;
+        out->quiet_enabled = r.version == RECORD_V1 ? true : r.quiet_enabled != 0u;
+        out->quiet_start = r.version == RECORD_V1 ? 22u : r.quiet_start;
+        out->quiet_end = r.version == RECORD_V1 ? 7u : r.quiet_end;
+        out->half_hour_enabled = r.version == RECORD_V1 ? false :
+                                 r.half_hour_enabled != 0u;
     }
     return SETTINGS_STORE_OK;
 }
@@ -227,7 +250,9 @@ static void flash_write_callback(void *arg) {
 
 settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
     if (!settings_store_layout_safe()) return SETTINGS_STORE_IMAGE_OVERLAP;
-    if (!cfg || cfg->language > 1u || cfg->volume > 30u) return SETTINGS_STORE_UNSUPPORTED;
+    if (!cfg || cfg->language > 1u || cfg->volume > 30u ||
+        cfg->quiet_start > 23u || cfg->quiet_end > 23u)
+        return SETTINGS_STORE_UNSUPPORTED;
     unsigned active_slot;
     settings_record_t current;
     bool valid = newest_valid(&active_slot, &current);
@@ -250,9 +275,13 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
         .language = cfg->language,
         .volume = cfg->volume,
         .exact_hour = cfg->exact_hour ? 1u : 0u,
+        .quiet_enabled = cfg->quiet_enabled ? 1u : 0u,
+        .quiet_start = cfg->quiet_start,
+        .quiet_end = cfg->quiet_end,
+        .half_hour_enabled = cfg->half_hour_enabled ? 1u : 0u,
         .reserved = 0xffu
     };
-    r.crc32 = record_crc(&r);
+    r.crc32 = record_crc_bytes(&r, offsetof(settings_record_t, crc32));
     memcpy(context.page, &r, sizeof(r));
 
     int rc = flash_safe_execute(flash_write_callback, &context, 5000u);
