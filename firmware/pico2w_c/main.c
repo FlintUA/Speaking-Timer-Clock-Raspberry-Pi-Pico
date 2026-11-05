@@ -37,6 +37,16 @@ static char command_line[48];
 static size_t command_length;
 static bool timer_screen;
 static audio_queue_t audio_queue;
+static uint8_t volume = 10; // MicroPython config.py default; persistence not migrated yet.
+static bool sound_enabled = true;
+
+#define RU_PHRASES 7u
+#define RU_HOURS 1u
+#define RU_MINUTES 2u
+#define TRACK_TIMER_SET 7u
+#define TRACK_TIMER_FINISHED 11u
+#define TRACK_TIMER_SIGNAL_LONG 13u
+#define TRACK_TIMER_CANCELLED 14u
 static uint64_t finished_screen_until_ms;
 
 
@@ -47,22 +57,80 @@ static void print_timer_status(uint64_t now_ms) {
            (unsigned long)timer.duration_seconds, (unsigned long)remaining);
 }
 
+static void timer_audio_start(void) {
+    if (!sound_enabled) return;
+    audio_queue_clear(&audio_queue, true);
+    audio_queue_enqueue(&audio_queue, RU_PHRASES, TRACK_TIMER_SET);
+    // Reproduce source/v3/main.py speak_timer_duration for default RU.
+    uint32_t seconds = timer.duration_seconds;
+    if (seconds % 60u == 0u) {
+        uint32_t hours = seconds / 3600u;
+        uint32_t minutes = (seconds / 60u) % 60u;
+        if (hours > 0u && hours <= 23u) {
+            audio_queue_enqueue(&audio_queue, RU_HOURS, (uint8_t)hours);
+        }
+        if (minutes > 0u) {
+            audio_queue_enqueue(&audio_queue, RU_MINUTES, (uint8_t)minutes);
+        }
+    }
+}
+
+static void timer_audio_cancel(void) {
+    audio_queue_clear(&audio_queue, true);
+    if (sound_enabled) audio_queue_enqueue(&audio_queue, RU_PHRASES, TRACK_TIMER_CANCELLED);
+}
+
+static void timer_audio_finished(void) {
+    audio_queue_clear(&audio_queue, true);
+    if (sound_enabled) {
+        audio_queue_enqueue(&audio_queue, RU_PHRASES, TRACK_TIMER_FINISHED);
+        audio_queue_enqueue(&audio_queue, RU_PHRASES, TRACK_TIMER_SIGNAL_LONG);
+    }
+}
+
+static void timer_start_now(uint64_t now) {
+    countdown_start(&timer, now);
+    timer_screen = true;
+    finished_screen_until_ms = 0;
+    timer_audio_start();
+}
+
+static void timer_cancel_now(void) {
+    countdown_cancel(&timer);
+    timer_screen = false;
+    finished_screen_until_ms = 0;
+    timer_audio_cancel();
+}
+
+static void change_volume(int direction) {
+    int requested = (int)volume + direction;
+    if (requested < 0) requested = 0;
+    if (requested > 30) requested = 30;
+    if (requested == volume) return;
+    volume = (uint8_t)requested;
+    audio_queue_set_volume(&audio_queue, volume);
+    printf("[AUDIO] volume=%u/30 sound=%s\n", (unsigned)volume,
+           sound_enabled ? "ON" : "OFF");
+}
+
+static void toggle_sound(void) {
+    sound_enabled = !sound_enabled;
+    if (!sound_enabled) audio_queue_clear(&audio_queue, true);
+    printf("[AUDIO] sound=%s\n", sound_enabled ? "ON" : "OFF");
+}
+
 static void handle_command(char *line) {
     while (isspace((unsigned char)*line)) ++line;
     size_t len = strlen(line);
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds>, start, cancel, status, play <folder> <track>, pause, audio, help");
+        puts("[CMD] t <seconds>, start, cancel, status, play <folder> <track>, pause, audio, vol <0..30>, sound, help");
     } else if (strcmp(line, "start") == 0) {
-        countdown_start(&timer, now);
-        timer_screen = true;
-        finished_screen_until_ms = 0;
+        timer_start_now(now);
         print_timer_status(now);
     } else if (strcmp(line, "cancel") == 0) {
-        countdown_cancel(&timer);
-        timer_screen = false;
-        finished_screen_until_ms = 0;
+        timer_cancel_now();
         print_timer_status(now);
     } else if (strcmp(line, "status") == 0) {
         print_timer_status(now);
@@ -71,6 +139,19 @@ static void handle_command(char *line) {
                dfplayer_busy() ? "LOW (playing)" : "HIGH (idle)",
                (unsigned)audio_queue.size,
                audio_queue_idle(&audio_queue) ? "yes" : "no");
+        printf("[AUDIO] volume=%u/30 sound=%s\n", (unsigned)volume, sound_enabled ? "ON" : "OFF");
+    } else if (strcmp(line, "sound") == 0) {
+        toggle_sound();
+    } else if (strncmp(line, "vol", 3) == 0 && isspace((unsigned char)line[3])) {
+        unsigned int requested = 0;
+        char extra = 0;
+        if (sscanf(line + 3, " %u %c", &requested, &extra) != 1 || requested > 30) {
+            puts("[AUDIO] Use vol <0..30>");
+        } else {
+            volume = (uint8_t)requested;
+            audio_queue_set_volume(&audio_queue, volume);
+            printf("[AUDIO] volume=%u/30\n", (unsigned)volume);
+        }
     } else if (strcmp(line, "pause") == 0) {
         audio_queue_clear(&audio_queue, true);
         puts("[AUDIO] Pause requested");
@@ -80,6 +161,8 @@ static void handle_command(char *line) {
         if (sscanf(line + 4, " %u %u %c", &folder, &track, &extra) != 2 ||
             folder < 1 || folder > 99 || track < 1 || track > 255) {
             puts("[AUDIO] Use play <folder 1..99> <track 1..255>");
+        } else if (!sound_enabled) {
+            puts("[AUDIO] Sound OFF; press volume button to enable");
         } else if (audio_queue_enqueue(&audio_queue, (uint8_t)folder, (uint8_t)track)) {
             printf("[AUDIO] Queued folder=%u track=%u\n", folder, track);
         } else {
@@ -133,6 +216,7 @@ static void on_control_event(const control_event_t *event, void *context) {
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (event->type == CONTROL_VOLUME_ROTATE) {
         printf("[INPUT] encoder VOLUME %s\n", event->direction > 0 ? "CW" : "CCW");
+        change_volume(event->direction);
     } else if (event->type == CONTROL_TIMER_ROTATE) {
         printf("[INPUT] encoder TIMER %s\n", event->direction > 0 ? "CW" : "CCW");
         // One minute per encoder event; don't edit a running timer.
@@ -149,15 +233,14 @@ static void on_control_event(const control_event_t *event, void *context) {
         printf("[INPUT] button %s %s\n",
                controls_button_name(event->button),
                event->type == CONTROL_BUTTON_PRESS ? "PRESS" : "RELEASE");
-        if (event->button == BUTTON_TIMER && event->type == CONTROL_BUTTON_PRESS) {
+        if (event->button == BUTTON_VOLUME && event->type == CONTROL_BUTTON_PRESS) {
+            toggle_sound();
+        } else if (event->button == BUTTON_TIMER && event->type == CONTROL_BUTTON_PRESS) {
             if (timer.running) {
-                countdown_cancel(&timer);
-                timer_screen = false;
+                timer_cancel_now();
                 puts("[TIMER] CANCELLED by button");
             } else {
-                countdown_start(&timer, now);
-                timer_screen = true;
-                finished_screen_until_ms = 0;
+                timer_start_now(now);
                 puts("[TIMER] STARTED by button");
                 print_timer_status(now);
             }
@@ -189,6 +272,7 @@ int main(void) {
     puts("[INPUT] GPIO controls initialized (2 encoders, 7 buttons)");
     dfplayer_init();
     audio_queue_init(&audio_queue);
+    audio_queue_set_volume(&audio_queue, volume);
     puts("[AUDIO] DFPlayer UART0 GP16/17 BUSY GP18; no auto playback");
     countdown_init(&timer);
     puts("[CMD] Serial timer ready. Type help + Enter");
@@ -206,6 +290,7 @@ int main(void) {
         countdown_service(&timer, now);
         if (countdown_consume_finished(&timer)) {
             puts("[TIMER] FINISHED");
+            timer_audio_finished();
             timer_screen = false;
             finished_screen_until_ms = now + 3000u;
         }
