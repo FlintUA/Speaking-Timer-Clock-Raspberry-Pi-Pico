@@ -131,3 +131,69 @@ bool ds1302_read_datetime(ds1302_datetime_t *out) {
     stats.consecutive_failures = 0;
     return true;
 }
+
+
+static bool leap_year(uint16_t y) {
+    return y % 4u == 0u && (y % 100u != 0u || y % 400u == 0u);
+}
+static uint8_t month_days(uint16_t y, uint8_t m) {
+    static const uint8_t days[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
+    if (m < 1u || m > 12u) return 0;
+    return (uint8_t)(days[m-1u] + (m == 2u && leap_year(y)));
+}
+bool ds1302_datetime_valid(const ds1302_datetime_t *d) {
+    return d && d->year >= 2000u && d->year <= 2099u &&
+           d->month >= 1u && d->month <= 12u &&
+           d->day >= 1u && d->day <= month_days(d->year,d->month) &&
+           d->weekday >= 1u && d->weekday <= 7u &&
+           d->hour <= 23u && d->minute <= 59u && d->second <= 59u;
+}
+static uint8_t dec_to_bcd(uint8_t v) {
+    return (uint8_t)(((v / 10u) << 4) | (v % 10u));
+}
+static void write_register(uint8_t address, uint8_t value) {
+    gpio_put(s_clk, 0);
+    gpio_put(s_ce, 1);
+    sleep_us(4);
+    write_byte(address & 0xfeu);
+    write_byte(value);
+    gpio_put(s_ce, 0);
+    gpio_set_dir(s_dio, GPIO_IN);
+    sleep_us(4);
+}
+bool ds1302_write_datetime(const ds1302_datetime_t *d) {
+    if (!ds1302_datetime_valid(d)) return false;
+
+    // DS1302 supports write-protect bit 7 of control register.
+    // Preserve its previous value; never permanently change the policy.
+    uint8_t previous_control = read_register(0x8e);
+    write_register(0x8e, 0u);
+
+    // Write burst order: seconds, minutes, hours, date, month, weekday,
+    // year, control. The final byte restores WP if originally set.
+    gpio_put(s_clk, 0);
+    gpio_put(s_ce, 1);
+    sleep_us(4);
+    write_byte(0xbe);
+    write_byte(dec_to_bcd(d->second)); // CH=0: running
+    write_byte(dec_to_bcd(d->minute));
+    write_byte(dec_to_bcd(d->hour)); // 24-hour mode
+    write_byte(dec_to_bcd(d->day));
+    write_byte(dec_to_bcd(d->month));
+    write_byte(dec_to_bcd(d->weekday));
+    write_byte(dec_to_bcd((uint8_t)(d->year - 2000u)));
+    write_byte(previous_control & 0x80u);
+    gpio_put(s_ce, 0);
+    gpio_set_dir(s_dio, GPIO_IN);
+    sleep_us(4);
+
+    ds1302_datetime_t verify = {0};
+    if (!ds1302_read_datetime(&verify)) return false;
+    // A read across a seconds boundary is permitted; check immutable
+    // fields and accept the seconds tick advancing at most one second.
+    bool date_match = verify.year == d->year && verify.month == d->month &&
+        verify.day == d->day && verify.weekday == d->weekday;
+    uint32_t actual = (uint32_t)verify.hour*3600u + (uint32_t)verify.minute*60u + verify.second;
+    uint32_t wanted = (uint32_t)d->hour*3600u + (uint32_t)d->minute*60u + d->second;
+    return date_match && actual >= wanted && actual <= wanted + 1u;
+}
