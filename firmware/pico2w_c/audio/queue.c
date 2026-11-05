@@ -1,5 +1,6 @@
 #include "queue.h"
 #include "dfplayer.h"
+#include <stdio.h>
 
 void audio_queue_init(audio_queue_t *q) {
     *q = (audio_queue_t){0};
@@ -63,6 +64,8 @@ void audio_queue_service(audio_queue_t *q, uint64_t now_ms) {
         audio_track_t t = q->items[q->head];
         q->head = (uint8_t)((q->head + 1u) % AUDIO_QUEUE_CAPACITY);
         --q->size;
+        printf("[AUDIO-TRACK] play folder=%02u track=%03u remaining=%u\n",
+               (unsigned)t.folder, (unsigned)t.track, (unsigned)q->size);
         dfplayer_play_folder_track(t.folder, t.track, now_ms);
         q->track_started = true;
         q->seen_busy = false;
