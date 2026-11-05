@@ -532,3 +532,45 @@ For comparison, repeat `flash-tail` after a simple power cycle
 suggests stable leftover data; a differing CRC32 indicates a change
 that should be investigated. Neither result alone proves its origin.
 Keep `save` unused until two storage slots are confirmed safe.
+
+
+## RP2350-E10 discovery - why the last 256 bytes are EF (2026-11-05)
+
+Physical test after erasing flash and reinstalling the C UF2:
+
+```text
+[FLASH] slot0=BLANK
+[FLASH] slot1=OCCUPIED
+[FLASH] 003fff00..003fffff = EF repeated 256 times
+[FLASH] tail_crc32=825d9e84
+```
+
+This exactly matches the standard RP2350-E10 UF2 boot-ROM workaround:
+a special RP2350 firmware image block can cause the last flash
+page to contain 256 copies of `0xEF`. It is not evidence of a
+MicroPython filesystem. See Raspberry Pi forum discussion
+https://forums.raspberrypi.com/viewtopic.php?t=387986 and picotool
+UF2 E10 block notes.
+
+**Layout corrected:** Do NOT use the final sector for settings;
+it is potentially modified by each UF2 firmware update.
+The two provisional settings slots are now:
+
+- slot0 = `0x003FC000` (4 KiB, from -16 KiB)
+- slot1 = `0x003FD000` (4 KiB, from -12 KiB)
+
+The final two sectors at `0x003FE000` and `0x003FF000`
+are intentionally excluded from storage. These offsets are based
+on the board's reported 4 MiB flash size, and remain protected
+by image-overlap checking and refusal to erase any nonblank
+unowned sector. This change only relocates the planned slots;
+it does not execute any flash writes.
+
+**Next hardware test:** after pulling and flashing the new build,
+send `flash-info`, then `flash-inspect`. Confirm both relocated
+slots are **BLANK** before doing anything with `save`.
+If either is `OCCUPIED`, stop - do not erase or force-write.
+If both are blank, storage can be tested in a later deliberate step.
+
+Earlier sections of this README discussing use of the last two sectors
+are historical and superseded by this corrected layout.
