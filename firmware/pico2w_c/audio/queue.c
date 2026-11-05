@@ -23,6 +23,11 @@ void audio_queue_clear(audio_queue_t *q, bool pause) {
     q->pause_pending = pause;
 }
 
+void audio_queue_set_volume(audio_queue_t *q, uint8_t volume) {
+    q->volume_value = volume > 30 ? 30 : volume;
+    q->volume_pending = true;
+}
+
 bool audio_queue_idle(const audio_queue_t *q) {
     return q->size == 0 && !q->track_started && !q->pause_pending;
 }
@@ -33,6 +38,11 @@ void audio_queue_service(audio_queue_t *q, uint64_t now_ms) {
             dfplayer_pause(now_ms);
             q->pause_pending = false;
         }
+        return;
+    }
+    if (q->volume_pending && dfplayer_command_ready(now_ms)) {
+        dfplayer_set_volume(q->volume_value, now_ms);
+        q->volume_pending = false;
         return;
     }
     if (q->track_started) {
