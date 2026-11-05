@@ -71,6 +71,19 @@ static bool sector_blank(unsigned slot) {
     return true;
 }
 
+static bool sector_owned(unsigned slot) {
+    // A valid header alone is insufficient: don't erase a sector containing
+    // unrelated data after our record page (e.g. a legacy filesystem).
+    settings_record_t r;
+    const uint8_t *bytes = slot_bytes(slot);
+    memcpy(&r, bytes, sizeof(r));
+    if (!record_valid(&r)) return false;
+    for (size_t i = sizeof(r); i < FLASH_SECTOR_SIZE; ++i) {
+        if (bytes[i] != 0xffu) return false;
+    }
+    return true;
+}
+
 bool settings_store_layout_safe(void) {
     // Runtime firmware image guard; leave a whole additional sector gap.
     // Never touch either sector if build output would collide with them.
@@ -84,7 +97,7 @@ static bool newest_valid(unsigned *slot, settings_record_t *result) {
     settings_record_t a, b;
     memcpy(&a, slot_bytes(0), sizeof(a));
     memcpy(&b, slot_bytes(1), sizeof(b));
-    bool va = record_valid(&a), vb = record_valid(&b);
+    bool va = sector_owned(0), vb = sector_owned(1);
     if (!va && !vb) return false;
     bool choose_b = vb && (!va || (int32_t)(b.sequence - a.sequence) > 0);
     *slot = choose_b ? 1u : 0u;
@@ -115,8 +128,8 @@ void settings_store_print_info(void) {
         settings_record_t r;
         memcpy(&r, slot_bytes(i), sizeof(r));
         printf("[FLASH] slot%u=%s sequence=%lu\n", i,
-               record_valid(&r) ? "VALID" : (sector_blank(i) ? "BLANK" : "OCCUPIED"),
-               record_valid(&r) ? (unsigned long)r.sequence : 0ul);
+               sector_owned(i) ? "VALID" : (sector_blank(i) ? "BLANK" : "OCCUPIED"),
+               sector_owned(i) ? (unsigned long)r.sequence : 0ul);
     }
 }
 
@@ -155,7 +168,7 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
     if (!sector_blank(dest)) {
         settings_record_t existing;
         memcpy(&existing, slot_bytes(dest), sizeof(existing));
-        if (!record_valid(&existing)) return SETTINGS_STORE_OCCUPIED;
+        if (!sector_owned(dest)) return SETTINGS_STORE_OCCUPIED;
     }
 
     flash_write_context_t context = {
@@ -179,7 +192,7 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
 
     settings_record_t verify;
     memcpy(&verify, slot_bytes(dest), sizeof(verify));
-    if (!record_valid(&verify) || verify.sequence != r.sequence ||
+    if (!sector_owned(dest) || verify.sequence != r.sequence ||
         memcmp(&verify, &r, sizeof(r)) != 0) return SETTINGS_STORE_VERIFY_ERROR;
     return SETTINGS_STORE_OK;
 }
