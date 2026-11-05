@@ -6,7 +6,7 @@ void audio_queue_init(audio_queue_t *q) {
 }
 
 bool audio_queue_enqueue(audio_queue_t *q, uint8_t folder, uint8_t track) {
-    if (q->size >= AUDIO_QUEUE_CAPACITY || folder < 1 || folder > 99 || track < 1) {
+    if (q->size >= AUDIO_QUEUE_CAPACITY || folder < 1 || folder > 99) {
         return false;
     }
     uint8_t tail = (uint8_t)((q->head + q->size) % AUDIO_QUEUE_CAPACITY);
