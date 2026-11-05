@@ -41,11 +41,15 @@ From `source/v3/music_player.py`:
 
 1. **Isolated portable alarm scheduler**: app/alarm_engine.h/.c,
    five defaults, validity and one-shot per minute, host test.
-   Completed as source only; not added to Pico CMake executable and
-   not yet hardware tested. The clock runtime is unchanged.
-2. Integrate read-only `alarm-status` / `alarm-test HH MM`
-   diagnostics using scheduler state without real audio or flash.
-   Start with all five alarms disabled. No unintended alarm on boot.
+   Completed; module compiled into the Pico executable but does not
+   run automatically and has no audio or flash access. Not hardware tested. The clock runtime is unchanged.
+2. **Read-only diagnostics integrated**: `alarm-status` prints all five
+   RAM-only disabled defaults. `alarm-test HH MM` simulates the existing
+   defaults. `alarm-test HH MM N` (N=1..5) virtually enables alarm N
+   at the supplied time, runs a disposable copy of the scheduler,
+   verifies a running alarm blocks a second, and prints a fired mask.
+   No actual alarm audio, RTC write, persistent change, or automatic
+   alarm is possible from these diagnostics.
 3. Add safe alarm audio state machine, manual cancel, and
    15-minute timeout, with automatic clock suppression.
    Prove one alarm end-to-end before enabling multiple slots.
@@ -69,5 +73,28 @@ cc -std=c11 -Wall -Wextra -Werror -Iapp app/alarm_engine.c tests/alarm_engine_ho
 ./alarm_engine_test
 ```
 
-Do NOT add `alarm_engine.c` to `speaking_clock_c` until the integration
-stage. The previous UF2 is unchanged by this source-only addition.
+`alarm_engine.c` is now linked into `speaking_clock_c` but is only
+called by serial diagnostics. Hardware behavior is otherwise unchanged.
+The updated UF2 needs to be built and verified on the Pico.
+
+## Diagnostic hardware smoke test
+
+After `git pull --ff-only` and rebuilding/flashing:
+
+```text
+alarm-status
+alarm-test 07 00
+alarm-test 07 00 1
+alarm-test 19 45 5
+flash-info
+auto-status
+```
+
+Expected: five disabled defaults at 07:00..11:00; first dry-run
+`first=0` (no alarm enabled); second `first=1` and
+`while_ringing=BLOCKED after_stop=0 fired_mask=0x01`;
+third `first=5`, mask `0x10`. No DFPlayer audio and no flash
+writes. The current RTC date is read for simulation but is never set.
+
+Compilation and hardware verification have not been performed by this
+commit; results must be checked on the physical device.
