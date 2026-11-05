@@ -816,3 +816,61 @@ slot. No flash nuke or manual migration is required.
 Do not change or erase flash sectors manually to test migration.
 If any slot becomes OCCUPIED or no settings load, stop and send
 the log before trying another write.
+
+
+## Automatic hourly speech and half-hour beep - opt-in milestone
+
+The C scheduler now follows \`source/v3/main.py::service_clock_auto\`
+for the supported **voice** clock mode. At minute \`00\` it queues
+the same RU/DE hour tracks as \`speech_enqueue_time\` (and the
+Exact-hour minute \`000\` when selected). At minute \`30\`, when
+the existing Half-hour beep setting is ON, it queues the confirmed
+language-neutral **folder 07, track 015** double-beep. It never
+changes or sets the DS1302 time.
+
+**Safety gate:** automatic playback defaults **OFF at every boot**,
+even when Half-hour beep is ON in persisted settings. It is enabled
+for the current power session only with serial \`auto on\`, and
+disabled with \`auto off\`. Neither command writes flash. This
+first milestone intentionally does *not* implement the alternative
+clock chime mode from MicroPython.
+
+Serial diagnostics (send each command on a separate line):
+
+- \`auto-status\` reports gate, quiet period, Half-hour beep, sound,
+  and session counters \`played\` and \`skipped\`.
+- \`auto-test 21 00\` simulates a 21:00 event without queuing sound,
+  writing flash or touching RTC. The runtime auto gate is ignored
+  for these dry runs, but sound/quiet/timer/menu/busy guards still
+  apply.
+- \`auto-test 21 30\` tests the half-hour event. Compare
+  \`auto-test 22 00\` against Quiet ON, 22-07.
+- \`auto on\` turns on real playback until power cycle or \`auto off\`.
+
+A boundary is processed at most once per date/hour/minute. If
+disabled, quiet, muted, the timer is running/recently finished,
+the settings menu is open, or DFPlayer is busy, the event is skipped
+rather than queued for later. Playback starts only in seconds
+\`00..05\` of the target minute so an RTC recovery or late startup
+does not play an old announcement. No audio is interrupted.
+Time/date write and manual \`say\` continue to work independently.
+
+### Hardware test plan
+
+1. Flash, open serial and run \`quiet-status\` and \`auto-status\`.
+   Expect \`auto_runtime=OFF\`. Previous flash v2 settings should load.
+2. With Quiet OFF and Half-hour beep ON, run \`auto-test 18 00\`,
+   \`auto-test 18 30\`, \`auto-test 18 15\`. Expected
+   \`HOURLY_VOICE\`, \`HALF_HOUR_BEEP\`, \`NO_EVENT\`.
+3. Set Quiet ON, 22-07, then test \`auto-test 23 00\` and
+   \`auto-test 08 00\`: expected \`QUIET_HOURS\` and
+   \`HOURLY_VOICE\`.
+4. If needed, enable real scheduling with \`auto on\` and observe
+   the next actual hour/half-hour. Unlike \`auto-test\`, this can
+   play DFPlayer audio. Run \`auto off\` to stop future events.
+   \`auto off\` does not stop audio already underway.
+5. Verify \`rtc-debug\` and timer start/finish still work.
+
+This implementation is not yet compiled or tested on the user's
+physical Pico 2 W. Do not assume audio playback is proven until
+serial and speaker observations are received.
