@@ -100,11 +100,11 @@ static void poll_serial(void) {
 static void on_control_event(const control_event_t *event, void *context) {
     (void)context;
     if (event->type == CONTROL_VOLUME_ROTATE) {
-        printf("[INPUT] encoder VOLUME %s\\n", event->direction > 0 ? "CW" : "CCW");
+        printf("[INPUT] encoder VOLUME %s\n", event->direction > 0 ? "CW" : "CCW");
     } else if (event->type == CONTROL_TIMER_ROTATE) {
-        printf("[INPUT] encoder TIMER %s\\n", event->direction > 0 ? "CW" : "CCW");
+        printf("[INPUT] encoder TIMER %s\n", event->direction > 0 ? "CW" : "CCW");
     } else {
-        printf("[INPUT] button %s %s\\n",
+        printf("[INPUT] button %s %s\n",
                controls_button_name(event->button),
                event->type == CONTROL_BUTTON_PRESS ? "PRESS" : "RELEASE");
     }
