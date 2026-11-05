@@ -33,6 +33,9 @@ static int detect_lcd_address(void) {
 static countdown_t timer;
 static char command_line[48];
 static size_t command_length;
+static bool timer_screen;
+static uint64_t finished_screen_until_ms;
+
 
 static void print_timer_status(uint64_t now_ms) {
     uint32_t remaining = countdown_remaining(&timer, now_ms);
@@ -50,9 +53,13 @@ static void handle_command(char *line) {
         puts("[CMD] t <seconds> (1..14400), start, cancel, status, help");
     } else if (strcmp(line, "start") == 0) {
         countdown_start(&timer, now);
+        timer_screen = true;
+        finished_screen_until_ms = 0;
         print_timer_status(now);
     } else if (strcmp(line, "cancel") == 0) {
         countdown_cancel(&timer);
+        timer_screen = false;
+        finished_screen_until_ms = 0;
         print_timer_status(now);
     } else if (strcmp(line, "status") == 0) {
         print_timer_status(now);
@@ -67,6 +74,8 @@ static void handle_command(char *line) {
             puts("[CMD] Invalid duration. Use: t 10 (1..14400 seconds)");
         } else {
             countdown_set_duration(&timer, (uint32_t)requested);
+            if (!timer.running) timer_screen = true;
+            finished_screen_until_ms = 0;
             printf("[TIMER] duration set to %lus (start to begin)\n", requested);
         }
     } else if (*line) {
@@ -99,14 +108,38 @@ static void poll_serial(void) {
 
 static void on_control_event(const control_event_t *event, void *context) {
     (void)context;
+    uint64_t now = to_ms_since_boot(get_absolute_time());
     if (event->type == CONTROL_VOLUME_ROTATE) {
         printf("[INPUT] encoder VOLUME %s\n", event->direction > 0 ? "CW" : "CCW");
     } else if (event->type == CONTROL_TIMER_ROTATE) {
         printf("[INPUT] encoder TIMER %s\n", event->direction > 0 ? "CW" : "CCW");
+        // One minute per encoder event; don't edit a running timer.
+        if (!timer.running) {
+            int32_t duration = (int32_t)timer.duration_seconds + (int32_t)event->direction * 60;
+            if (duration < 1) duration = 1;
+            if (duration > 14400) duration = 14400;
+            countdown_set_duration(&timer, (uint32_t)duration);
+            timer_screen = true;
+            finished_screen_until_ms = 0;
+            printf("[TIMER] selected=%lus\n", (unsigned long)timer.duration_seconds);
+        }
     } else {
         printf("[INPUT] button %s %s\n",
                controls_button_name(event->button),
                event->type == CONTROL_BUTTON_PRESS ? "PRESS" : "RELEASE");
+        if (event->button == BUTTON_TIMER && event->type == CONTROL_BUTTON_PRESS) {
+            if (timer.running) {
+                countdown_cancel(&timer);
+                timer_screen = false;
+                puts("[TIMER] CANCELLED by button");
+            } else {
+                countdown_start(&timer, now);
+                timer_screen = true;
+                finished_screen_until_ms = 0;
+                puts("[TIMER] STARTED by button");
+                print_timer_status(now);
+            }
+        }
     }
 }
 
@@ -136,6 +169,8 @@ int main(void) {
     puts("[CMD] Serial timer ready. Type help + Enter");
     char last_top[17] = {0};
     char last_bottom[17] = {0};
+    char rtc_top[17] = "RTC unavailable";
+    char rtc_bottom[17] = "Check GP2/5/4";
     uint64_t next_rtc_ms = 0;
     uint32_t previous_remaining = UINT32_MAX;
     while (true) {
@@ -145,6 +180,8 @@ int main(void) {
         countdown_service(&timer, now);
         if (countdown_consume_finished(&timer)) {
             puts("[TIMER] FINISHED");
+            timer_screen = false;
+            finished_screen_until_ms = now + 3000u;
         }
         if (timer.running) {
             uint32_t left = countdown_remaining(&timer, now);
@@ -155,32 +192,49 @@ int main(void) {
         } else {
             previous_remaining = UINT32_MAX;
         }
-        if (now < next_rtc_ms) {
-            sleep_ms(1);
-            continue;
+        if (now >= next_rtc_ms) {
+            next_rtc_ms = now + 1000u;
+            ds1302_datetime_t dt = {0};
+            if (ds1302_read_datetime(&dt)) {
+                snprintf(rtc_top, sizeof(rtc_top), "%02u:%02u:%02u",
+                         (unsigned)dt.hour, (unsigned)dt.minute, (unsigned)dt.second);
+                snprintf(rtc_bottom, sizeof(rtc_bottom), "%02u.%02u.%04u",
+                         (unsigned)dt.day, (unsigned)dt.month, (unsigned)dt.year);
+                printf("[RTC] %s %s\n", rtc_top, rtc_bottom);
+            } else {
+                snprintf(rtc_top, sizeof(rtc_top), "RTC unavailable");
+                snprintf(rtc_bottom, sizeof(rtc_bottom), "Check GP2/5/4");
+                // RTC is polled once a second, but missing RTC doesn't stop controls.
+                printf("[RTC] Invalid/unavailable (power, wiring, or oscillator)\n");
+            }
         }
-        next_rtc_ms = now + 1000u;
-        ds1302_datetime_t dt = {0};
-        bool valid = ds1302_read_datetime(&dt);
+
         char top[17], bottom[17];
-        if (valid) {
-            snprintf(top, sizeof(top), "%02u:%02u:%02u",
-                     (unsigned)dt.hour, (unsigned)dt.minute, (unsigned)dt.second);
-            snprintf(bottom, sizeof(bottom), "%02u.%02u.%04u",
-                     (unsigned)dt.day, (unsigned)dt.month, (unsigned)dt.year);
-            printf("[RTC] %s %s\n", top, bottom);
+        if (finished_screen_until_ms && now < finished_screen_until_ms) {
+            snprintf(top, sizeof(top), "TIMER FINISHED");
+            snprintf(bottom, sizeof(bottom), "Ready");
+        } else if (timer.running || timer_screen) {
+            uint32_t remaining = timer.running
+                ? countdown_remaining(&timer, now)
+                : timer.duration_seconds;
+            snprintf(top, sizeof(top), "%s", timer.running ? "TIMER RUNNING" : "TIMER SET");
+            snprintf(bottom, sizeof(bottom), "%02lu:%02lu:%02lu",
+                     (unsigned long)(remaining / 3600u),
+                     (unsigned long)((remaining / 60u) % 60u),
+                     (unsigned long)(remaining % 60u));
         } else {
-            snprintf(top, sizeof(top), "RTC unavailable");
-            snprintf(bottom, sizeof(bottom), "Check GP2/5/4");
-            printf("[RTC] Invalid/unavailable (power, wiring, or oscillator)\n");
+            snprintf(top, sizeof(top), "%s", rtc_top);
+            snprintf(bottom, sizeof(bottom), "%s", rtc_bottom);
         }
-        if (lcd_ok && __builtin_strcmp(top, last_top) != 0) {
+
+        if (lcd_ok && strcmp(top, last_top) != 0) {
             lcd1602_write_line(0, top);
             snprintf(last_top, sizeof(last_top), "%s", top);
         }
-        if (lcd_ok && __builtin_strcmp(bottom, last_bottom) != 0) {
+        if (lcd_ok && strcmp(bottom, last_bottom) != 0) {
             lcd1602_write_line(1, bottom);
             snprintf(last_bottom, sizeof(last_bottom), "%s", bottom);
         }
+        sleep_ms(1);
     }
 }
