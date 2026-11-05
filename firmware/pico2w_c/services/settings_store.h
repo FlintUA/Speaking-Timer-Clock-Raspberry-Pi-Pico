@@ -24,5 +24,7 @@ typedef enum {
 const char *settings_store_result_name(settings_store_result_t result);
 bool settings_store_layout_safe(void);
 void settings_store_print_info(void);
+// Read-only sector fingerprint, no flash program/erase operations.
+void settings_store_inspect(void);
 settings_store_result_t settings_store_load(clock_settings_t *out);
 settings_store_result_t settings_store_save(const clock_settings_t *settings);
