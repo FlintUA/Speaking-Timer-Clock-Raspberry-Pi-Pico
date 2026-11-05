@@ -98,3 +98,71 @@ writes. The current RTC date is read for simulation but is never set.
 
 Compilation and hardware verification have not been performed by this
 commit; results must be checked on the physical device.
+
+
+## Stage 3A - first real alarm (slot 1, opt-in RAM only)
+
+This stage is deliberately restricted to **alarm 1**. Other four alarm
+entries remain disabled and are available only to diagnostic dry runs.
+Nothing is saved to flash; resetting Pico disables all five alarms.
+No RTC register is written by the alarm commands.
+
+### Commands
+
+- \`alarm-status\` - show RAM configuration of all five and active alarm.
+- \`alarm-set HH MM signal\` - arm slot 1 at local DS1302 HH:MM,
+  with the final audio signal \`07/013\`.
+- \`alarm-set HH MM music TRACK\` - arm slot 1 with final track
+  \`08/TRACK\`, where TRACK is 1..45.
+- \`alarm-off\` - disarm slot 1; if already ringing, use \`alarm-stop\`.
+- \`alarm-stop\` - immediately stop current alarm audio.
+- Press **ALARM** button while ringing to stop the alarm.
+- Existing \`alarm-test\` remains a read-only simulation.
+
+An alarm schedules once per observed calendar minute and only within
+seconds 00..05, with suppression of stale starts. A matching alarm is
+consumed even if the timer is active or settings menu is open; no delayed
+alarm is allowed to start if those conditions clear later that minute.
+A successful alarm owns the clock minute, suppressing hourly chimes
+and half-hour beeps.
+
+Audio:
+- RU: \`07/001\` (alarm 1 number), speech of the current HH:MM,
+  then signal \`07/013\` or configured music in folder \`08\`.
+- DE: no unverified German alarm-number track is played;
+  German spoken time, then signal/music.
+- The audio queue preempts previous playback; completion waits for
+  both empty queue and inactive DFPlayer BUSY. ALARM button or
+  \`alarm-stop\` cancels the sequence. 15-minute failsafe stops it.
+- Running or just-finished timers take precedence over alarms.
+- While ringing, ordinary button actions other than ALARM/volume
+  are blocked; serial \`play\`, \`pause\`, \`say\` and timer start are
+  guarded. No claim yet about full alarm/music interaction.
+
+### Suggested physical test
+
+1. Flash the new UF2 and confirm no spontaneous alarm on boot:
+   \`alarm-status\` reports all OFF; \`flash-info\` remains valid v2.
+2. With real DS1302 time, run \`alarm-set HH MM signal\` choosing the
+   **next** minute, not the current minute. Example: at 20:42 use
+   \`alarm-set 20 43 signal\`. Do not set an hour/minute in the past.
+3. At HH:MM:00 look for:
+   \`[ALARM] 1 RINGING HH:MM sound=SIGNAL track=1 (RAM only)\`.
+   In RU expect \`[AUDIO-TRACK] ... folder=07 track=001\`, hour/minute
+   voice tracks, then \`folder=07 track=013\`. In DE expect only German
+   time voice and \`07/013\`.
+4. Verify it does not repeat in the same minute. Let the sequence
+   complete and check \`[ALARM] finished=AUDIO_COMPLETED\`.
+5. For manual stop, set alarm again at a future minute, and press
+   the physical ALARM button during audio. Look for
+   \`[ALARM] 1 stopped=BUTTON\`; verify sound stops.
+6. Test \`alarm-set HH MM music 1\` separately for final folder=08
+   track=001. Use \`alarm-stop\` if the track is long.
+7. \`alarm-off\`, then \`alarm-status\`. Power-cycle to confirm
+   alarms default OFF and flash sectors remain unchanged.
+8. Later regression: a timer running at the alarm minute should log
+   \`[ALARM] 1 skipped=TIMER_PRIORITY\` and no delayed playback.
+
+Notes: this is a **source change requiring local Pico SDK build and
+hardware validation**. Five-alarm editor, persistent flash format,
+music player and multi-alarm concurrency remain future stages.
