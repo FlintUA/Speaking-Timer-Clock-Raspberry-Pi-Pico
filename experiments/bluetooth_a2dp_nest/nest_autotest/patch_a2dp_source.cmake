@@ -17,6 +17,29 @@ set(_new_produce [=[
 /* Clock A2DP experiment: 300 ms tone followed by PCM silence. */
 static uint32_t clock_tone_samples_remaining;
 static bool clock_tone_finished_logged;
+static bool clock_a2dp_stream_running;
+
+// Called only from the BTstack event loop. No threads or blocking calls.
+bool clock_a2dp_play_tone(void){
+    if (!clock_a2dp_stream_running || !audio_generator_state.initialized) return false;
+    clock_tone_samples_remaining = ((uint32_t) current_sample_rate * 300u) / 1000u;
+    clock_tone_finished_logged = false;
+    printf("[TONE] Replay requested: 300 ms\\n");
+    return true;
+}
+
+void clock_a2dp_stop_tone(void){
+    clock_tone_samples_remaining = 0;
+    clock_tone_finished_logged = true;
+    printf("[TONE] Stopped; sending silence\\n");
+}
+
+void clock_a2dp_print_status(void){
+    printf("[INFO] A2DP stream: %s; audio: %s; sample rate: %d Hz; samples remaining: %lu\\n",
+           clock_a2dp_stream_running ? "ACTIVE" : "INACTIVE",
+           clock_tone_samples_remaining ? "TONE" : "SILENCE",
+           current_sample_rate, (unsigned long)clock_tone_samples_remaining);
+}
 
 static void produce_audio(int16_t * pcm_buffer, int num_samples){
     int tone_samples = num_samples;
@@ -63,6 +86,40 @@ if (_config_position EQUAL -1)
     message(FATAL_ERROR "BTstack audio-source initialization changed; review upstream before patching")
 endif()
 string(REPLACE "${_old_config}" "${_new_config}" _source "${_source}")
+
+
+# Keep our API's stream state consistent with Bluetooth events.
+set(_old_started [=[
+            a2dp_demo_timer_start(&media_tracker);
+            printf("A2DP Source: Stream started, a2dp_cid
+]=])
+set(_new_started [=[
+            clock_a2dp_stream_running = true;
+            a2dp_demo_timer_start(&media_tracker);
+            printf("A2DP Source: Stream started, a2dp_cid
+]=])
+string(FIND "${_source}" "${_old_started}" _started_at)
+if (_started_at EQUAL -1)
+    message(FATAL_ERROR "BTstack stream-start handler changed")
+endif()
+string(REPLACE "${_old_started}" "${_new_started}" _source "${_source}")
+
+set(_old_stop [=[
+            a2dp_demo_timer_stop(&media_tracker);
+            break;
+]=])
+set(_new_stop [=[
+            clock_a2dp_stream_running = false;
+            clock_tone_samples_remaining = 0;
+            a2dp_demo_timer_stop(&media_tracker);
+            break;
+]=])
+# Same exact block is present in both SUSPENDED and RELEASED handlers.
+string(FIND "${_source}" "${_old_stop}" _stop_at)
+if (_stop_at EQUAL -1)
+    message(FATAL_ERROR "BTstack stream-stop handler changed")
+endif()
+string(REPLACE "${_old_stop}" "${_new_stop}" _source "${_source}")
 
 file(WRITE "${PATCHED_SOURCE}" "${_source}")
 message(STATUS "Generated locally patched A2DP source: ${PATCHED_SOURCE}")
