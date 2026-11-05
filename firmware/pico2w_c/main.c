@@ -101,9 +101,13 @@ static uint64_t last_flash_write_ms;
 static bool autosave_attempted;
 static uint64_t last_autosave_attempt_ms;
 
-// Auto-announcement runtime gate. OFF on every boot until explicitly
-// enabled with "auto on"; does not alter flash v2 records.
-static bool auto_enabled;
+// Automatic clock events are enabled on boot, as in MicroPython v3.
+// 'auto off' temporarily disables them until next boot or 'auto on'.
+// This runtime switch is deliberately not persisted in flash.
+static bool auto_enabled = true;
+// Consume the first observed RTC boundary on boot. Otherwise a reboot
+// during second 0..5 of :00/:30 could replay an old automatic sound.
+static bool auto_boot_seeded;
 static bool auto_seen_key_valid;
 static uint64_t auto_seen_minute_key;
 static uint32_t auto_played, auto_skipped;
@@ -196,7 +200,22 @@ static void auto_test(uint8_t hour, uint8_t minute) {
 }
 
 static void auto_service_rtc(const ds1302_datetime_t *dt) {
-    if (!dt || (dt->minute != 0u && dt->minute != 30u)) return;
+    if (!dt) return;
+    // The first valid RTC reading establishes the current boundary without
+    // announcing it. Fresh 00/30 boundaries encountered later play normally.
+    if (!auto_boot_seeded) {
+        auto_boot_seeded = true;
+        if (dt->minute == 0u || dt->minute == 30u) {
+            auto_seen_key_valid = true;
+            auto_seen_minute_key = auto_minute_key(dt);
+            printf("[AUTO] boot: current %02u:%02u boundary consumed (no replay)\n",
+                   (unsigned)dt->hour, (unsigned)dt->minute);
+        } else {
+            puts("[AUTO] boot: scheduler armed for next boundary");
+        }
+        return;
+    }
+    if (dt->minute != 0u && dt->minute != 30u) return;
     uint64_t key = auto_minute_key(dt);
     if (auto_seen_key_valid && auto_seen_minute_key == key) return;
     auto_seen_minute_key = key;
@@ -1082,7 +1101,8 @@ int main(void) {
     audio_queue_init(&audio_queue);
     load_settings_at_boot();
     audio_queue_set_volume(&audio_queue, volume);
-    puts("[AUDIO] DFPlayer UART0 GP16/17 BUSY GP18; auto OFF until serial 'auto on'");
+    puts("[AUDIO] DFPlayer UART0 GP16/17 BUSY GP18");
+    puts("[AUTO] runtime=ON after boot; first observed RTC boundary will be consumed");
     countdown_init(&timer);
     puts("[CMD] Serial timer ready. Type help + Enter");
     char last_top[17] = {0};
