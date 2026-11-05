@@ -37,7 +37,7 @@ target_link_libraries(nest_a2dp_autotest PRIVATE
 
 target_include_directories(nest_a2dp_autotest PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}
-    ${PICO_EXAMPLES_PATH}/bluetooth/btstack_examples/config
+    ${PICO_EXAMPLES_PATH}/bluetooth/config
 )
 
 # Deliberately do NOT define HAVE_BTSTACK_STDIN or ENABLE_MODPLAYER.
