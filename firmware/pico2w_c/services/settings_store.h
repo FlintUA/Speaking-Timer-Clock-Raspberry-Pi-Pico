@@ -2,7 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// Reserved in the last TWO 4 KiB sectors of the Pico 2 W's onboard flash.
+// Two provisional 4 KiB sectors, excluding the final sector (RP2350-E10 UF2 workaround).
 // A/B records preserve a previous valid record when saving a new one.
 // The library refuses to erase any nonblank sector that is not one of our records.
 typedef struct {
