@@ -38,7 +38,7 @@ typedef struct {
 typedef struct {
     uint32_t magic, version, sequence;
     uint8_t language, volume, exact_hour, quiet_enabled;
-    uint8_t quiet_start, quiet_end, half_hour_enabled, reserved;
+    uint8_t quiet_start, quiet_end, half_hour_enabled, reserved; // v2 reserved: FF=legacy voice, 0=voice, 1=chime
     uint32_t crc32;
 } settings_record_t;
 
@@ -74,6 +74,7 @@ static bool record_valid(const settings_record_t *r) {
     if (r->version != RECORD_VERSION) return false;
     return r->quiet_enabled <= 1u && r->quiet_start <= 23u &&
            r->quiet_end <= 23u && r->half_hour_enabled <= 1u &&
+           (r->reserved == 0xffu || r->reserved <= 1u) &&
            r->crc32 == record_crc_bytes(r, offsetof(settings_record_t, crc32));
 }
 
@@ -233,6 +234,9 @@ settings_store_result_t settings_store_load(clock_settings_t *out) {
         out->quiet_end = r.version == RECORD_V1 ? 7u : r.quiet_end;
         out->half_hour_enabled = r.version == RECORD_V1 ? false :
                                  r.half_hour_enabled != 0u;
+        // v2 records before clock-mode support stored FF in reserved.
+        out->clock_mode = r.version == RECORD_V1 || r.reserved == 0xffu
+                              ? 0u : r.reserved;
     }
     return SETTINGS_STORE_OK;
 }
@@ -251,7 +255,8 @@ static void flash_write_callback(void *arg) {
 settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
     if (!settings_store_layout_safe()) return SETTINGS_STORE_IMAGE_OVERLAP;
     if (!cfg || cfg->language > 1u || cfg->volume > 30u ||
-        cfg->quiet_start > 23u || cfg->quiet_end > 23u)
+        cfg->quiet_start > 23u || cfg->quiet_end > 23u ||
+        cfg->clock_mode > 1u)
         return SETTINGS_STORE_UNSUPPORTED;
     unsigned active_slot;
     settings_record_t current;
@@ -279,7 +284,7 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
         .quiet_start = cfg->quiet_start,
         .quiet_end = cfg->quiet_end,
         .half_hour_enabled = cfg->half_hour_enabled ? 1u : 0u,
-        .reserved = 0xffu
+        .reserved = cfg->clock_mode
     };
     r.crc32 = record_crc_bytes(&r, offsetof(settings_record_t, crc32));
     memcpy(context.page, &r, sizeof(r));
