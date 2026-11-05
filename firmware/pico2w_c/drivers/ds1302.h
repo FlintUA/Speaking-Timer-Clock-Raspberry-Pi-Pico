@@ -40,3 +40,9 @@ typedef struct {
 
 void ds1302_get_diagnostics(ds1302_diagnostics_t *out);
 void ds1302_reset_diagnostics(void);
+
+
+// Explicit clock adjustment only. Never called by boot, polling or menus
+// before the user confirms the last editing field.
+bool ds1302_datetime_valid(const ds1302_datetime_t *value);
+bool ds1302_write_datetime(const ds1302_datetime_t *value);
