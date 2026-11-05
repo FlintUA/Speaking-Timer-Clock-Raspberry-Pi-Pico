@@ -1,3 +1,23 @@
+# Project status and firmware tracks
+
+The existing clock is running **MicroPython v3.10.0** on the Pico 2 W.
+The native **C / Pico SDK firmware is being developed in parallel** and
+is **not yet a replacement** for the working clock.
+
+| Directory | Purpose | State |
+| --- | --- | --- |
+| [`source/v3/`](source/v3/) | Working MicroPython clock, source of truth for behavior | Stable v3.10.0 |
+| [`experiments/bluetooth_a2dp_nest/`](experiments/bluetooth_a2dp_nest/) | SBC/A2DP Source proof of concept on spare Pico 2 W | Tested with Nest Audio |
+| [`firmware/pico2w_c/`](firmware/pico2w_c/) | Future integrated C clock | Preparing migration, not bootable yet |
+| [`doc/C_MIGRATION_PLAN.md`](doc/C_MIGRATION_PLAN.md) | Porting matrix, pin map, verification and rollback gates | Maintained |
+
+**Development safety:** do not flash the C experiment onto the working clock
+or remove any working MicroPython modules as part of housekeeping. The
+historical description below documents the original hardware and design;
+its feature limitations may not reflect the current v3.10.0 firmware.
+
+---
+
 # Speaking Timer-Clock on Raspberry Pi Pico
 Speaking Timer-Clock on Raspberry Pi Pico (H/W)
 
