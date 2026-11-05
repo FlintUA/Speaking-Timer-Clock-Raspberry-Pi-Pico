@@ -185,6 +185,14 @@ static void auto_test(uint8_t hour, uint8_t minute) {
     auto_decision_t d = auto_evaluate(hour, minute, 0u, false);
     printf("[AUTO-TEST] %02u:%02u => %s (simulation: no audio, no RTC write, auto gate ignored)\n",
            (unsigned)hour, (unsigned)minute, auto_reason(d));
+    if (d == AUTO_CHIME) {
+        unsigned strikes = (unsigned)(hour % 12u);
+        if (!strikes) strikes = 12u;
+        printf("[AUTO-TEST] CHIME would queue folder=18 track=%03u (%u strikes)\n",
+               strikes, strikes);
+    } else if (d == AUTO_HALF) {
+        puts("[AUTO-TEST] HALF would queue folder=07 track=015");
+    }
 }
 
 static void auto_service_rtc(const ds1302_datetime_t *dt) {
