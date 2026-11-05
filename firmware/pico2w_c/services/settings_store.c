@@ -133,6 +133,46 @@ void settings_store_print_info(void) {
     }
 }
 
+
+void settings_store_inspect(void) {
+    // Read-only sampling from the two reserved sectors. We do not try to
+    // interpret or mount prior MicroPython filesystem contents.
+    puts("[FLASH] Inspect is READ ONLY; hexadecimal samples are NOT proof of filesystem type.");
+    for (unsigned slot = 0u; slot < 2u; ++slot) {
+        const uint8_t *data = slot_bytes(slot);
+        size_t ff_count = 0, zero_count = 0, other_count = 0;
+        size_t first_non_ff = FLASH_SECTOR_SIZE;
+        size_t last_non_ff = FLASH_SECTOR_SIZE;
+        for (size_t i = 0; i < FLASH_SECTOR_SIZE; ++i) {
+            uint8_t b = data[i];
+            if (b == 0xffu) {
+                ++ff_count;
+            } else {
+                if (first_non_ff == FLASH_SECTOR_SIZE) first_non_ff = i;
+                last_non_ff = i;
+                if (b == 0u) ++zero_count;
+                else ++other_count;
+            }
+        }
+        printf("[FLASH] slot%u offset=0x%08lx status=%s ff=%lu zero=%lu other=%lu\n",
+               slot, (unsigned long)(slot ? SLOT1_OFFSET : SLOT0_OFFSET),
+               sector_owned(slot) ? "VALID" : (sector_blank(slot) ? "BLANK" : "OCCUPIED"),
+               (unsigned long)ff_count, (unsigned long)zero_count,
+               (unsigned long)other_count);
+        if (first_non_ff != FLASH_SECTOR_SIZE) {
+            printf("[FLASH] slot%u first_non_ff=0x%03lx last_non_ff=0x%03lx\n",
+                   slot, (unsigned long)first_non_ff, (unsigned long)last_non_ff);
+        }
+        // Print 16 bytes only, never dump full content that may include private
+        // configuration files. This is only a signature hint, not a diagnosis.
+        printf("[FLASH] slot%u head16=", slot);
+        for (unsigned j = 0; j < 16u; ++j) {
+            printf("%02x", (unsigned)data[j]);
+        }
+        putchar('\n');
+    }
+}
+
 settings_store_result_t settings_store_load(clock_settings_t *out) {
     if (!settings_store_layout_safe()) return SETTINGS_STORE_IMAGE_OVERLAP;
     unsigned slot;
