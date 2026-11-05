@@ -322,8 +322,11 @@ static void autosave_service(uint64_t now_ms) {
         now_ms - last_flash_write_ms < AUTOSAVE_MIN_WRITE_INTERVAL_MS) return;
     if (autosave_attempted &&
         now_ms - last_autosave_attempt_ms < AUTOSAVE_ERROR_RETRY_MS) return;
-    // Avoid interrupting live countdown and queued DFPlayer speech.
-    if (timer.running || menu_state != MENU_CLOSED || !audio_queue_idle(&audio_queue)) return;
+    // Handle timer FINISHED first. Block flash through the final display
+    // window, queued audio and physical DFPlayer BUSY (even for clones).
+    if (timer.running || menu_state != MENU_CLOSED ||
+        (finished_screen_until_ms && now_ms < finished_screen_until_ms) ||
+        !audio_queue_idle(&audio_queue) || dfplayer_busy()) return;
 
     clock_settings_t cfg = settings_snapshot();
     if (settings_equal(cfg, last_persisted_settings)) {
@@ -717,7 +720,7 @@ static void load_settings_at_boot(void) {
                speech_language_name(language), (unsigned)volume,
                exact_hour_phrase ? "ON" : "OFF",
                quiet_enabled ? "ON" : "OFF", (unsigned)quiet_start,
-               (unsigned)quiet_end, half_hour_enabled ? "ON" : "OFF", auto_enabled ? "ON" : "OFF");
+               (unsigned)quiet_end, half_hour_enabled ? "ON" : "OFF");
     } else {
         printf("[FLASH] load=%s; using defaults (RU, volume=10)\n",
                settings_store_result_name(result));
@@ -817,7 +820,8 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "quiet-status") == 0) {
         printf("[QUIET] enabled=%s start=%02u end=%02u half_hour=%s auto_runtime=%s\n",
                quiet_enabled ? "ON" : "OFF", (unsigned)quiet_start,
-               (unsigned)quiet_end, half_hour_enabled ? "ON" : "OFF");
+               (unsigned)quiet_end, half_hour_enabled ? "ON" : "OFF",
+                auto_enabled ? "ON" : "OFF");
     } else if (strcmp(line, "menu") == 0) {
         if (menu_state != MENU_CLOSED) menu_close();
         else menu_open(now);
@@ -1046,18 +1050,20 @@ int main(void) {
         controls_poll(to_ms_since_boot(get_absolute_time()), on_control_event, NULL);
         uint64_t now = to_ms_since_boot(get_absolute_time());
         countdown_service(&timer, now);
-        autosave_service(now);
-        if (menu_state != MENU_CLOSED &&
-            now - menu_last_input_ms >= SETTINGS_MENU_TIMEOUT_MS) {
-            puts("[MENU] Timeout (20s); unsaved edit discarded");
-            menu_close();
-        }
+        // countdown_service clears timer.running at zero; the finish
+        // event and its audio must take priority over flash writes.
         if (countdown_consume_finished(&timer)) {
             puts("[TIMER] FINISHED");
             timer_audio_finished();
             timer_screen = false;
             finished_screen_until_ms = now + 3000u;
         }
+        if (menu_state != MENU_CLOSED &&
+            now - menu_last_input_ms >= SETTINGS_MENU_TIMEOUT_MS) {
+            puts("[MENU] Timeout (20s); unsaved edit discarded");
+            menu_close();
+        }
+        autosave_service(now);
         if (timer.running) {
             uint32_t left = countdown_remaining(&timer, now);
             if (left != previous_remaining) {
