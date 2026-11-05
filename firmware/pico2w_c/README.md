@@ -574,3 +574,59 @@ If both are blank, storage can be tested in a later deliberate step.
 
 Earlier sections of this README discussing use of the last two sectors
 are historical and superseded by this corrected layout.
+
+
+## Automatic settings persistence (hardware test pending)
+
+After the A/B flash test passed on the assembled Pico 2 W, autosave was
+added for these three parameters only:
+
+- Language RU/DE, after pressing the TIMER encoder button to confirm in the
+  SETTINGS language menu; cancelling the menu does not change the value.
+- DFPlayer volume 0..30 when adjusted by the volume encoder or \`vol N\`.
+- Exact-hour phrase option when changed using \`exact on\` / \`exact off\`.
+
+A change only marks RAM dirty. The main loop writes the latest complete
+settings snapshot when all conditions are met:
+
+1. At least **5 seconds** after the *last* actual settings change.
+2. At least **60 seconds** after the previous successful flash save in
+   this boot session, whether manual or automatic.
+3. No actively running countdown, open language-selection menu, or queued
+   DFPlayer playback.
+4. The new settings differ from the latest successfully persisted snapshot.
+
+If a write fails, it retries no more frequently than every 60 seconds
+and logs the error. The existing flash protections, A/B slots and CRC32
+checks remain unchanged. No write occurs just because the Pico boots.
+The timer duration and sound mute state are NOT persisted in this stage.
+
+Serial monitor diagnostics:
+
+| Command | Action |
+| --- | --- |
+| \`autosave-status\` | Current values, pending flag, remaining debounce, cooldown, error retry time |
+| \`flash-info\` | Sector ownership and record sequence |
+| \`save\` | Force manual save (still available for diagnosis) |
+
+**Hardware validation (do not use \`save\` in the first test):**
+
+1. After a successful build, flash the UF2 and read \`flash-info\`.
+   Verify existing valid slots (sequence 1 and 2 from previous test).
+2. Change volume by **one** encoder detent; run \`autosave-status\`
+   immediately and expect \`pending=yes\`.
+3. Let the clock run without changes for more than 5 s. If a countdown
+   or sound is playing, let it finish first. Expect a single
+   \`[FLASH] autosave=OK ...\` line. Read \`flash-info\` again; one slot
+   should now have the next sequence number (3).
+4. Change the language with SETTINGS -> TIMER turn -> TIMER button.
+   Within the 60 s cooldown the new choice remains active in RAM;
+   \`autosave-status\` shows the remaining cooldown. After it expires,
+   expect the next autosave to succeed.
+5. Power-cycle without reflashing. Check the boot
+   \`[FLASH] loaded lang=... volume=... exact=...\` line.
+
+Do **not** change the volume dozens of times merely to test wear limits.
+The timing guards reduce write frequency, but flash endurance remains finite.
+If autosave fails with OCCUPIED or IMAGE_OVERLAP, stop and report the log.
+Earlier sections referring to manual-only saving document previous milestones.
