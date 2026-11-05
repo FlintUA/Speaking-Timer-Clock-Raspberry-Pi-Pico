@@ -669,3 +669,45 @@ Test with the assembled clock:
 
 Do not confuse a rejected read with proven RTC power failure: invalid
 BCD/range can be caused by one sampled bit or electrical interference.
+
+
+## Three-item LCD settings menu (hardware verification pending)
+
+This milestone expands the previous one-item language shortcut to a two-level
+menu following the proven MicroPython settings navigation concept. It exposes
+**Language**, **Volume** and **Exact-hour word**, reusing the existing settings
+snapshot and protected autosave. No flash record format changes and no
+changes to RTC/DFPlayer drivers.
+
+With the countdown stopped:
+
+1. Press **SETTINGS** (GP27) to open a list, initially \`SETTINGS 1/3\`
+   and \`Language\`.
+2. Turn the **TIMER encoder** (GP11/10) to choose among Language, Volume,
+   Exact-hour word (list wraps).
+3. Press **TIMER encoder button** (GP19) or **SETTINGS** to enter edit.
+4. Turn the same TIMER encoder to change the candidate: RU/DE, 0..30
+   (clamped), or OFF/ON.
+5. Press TIMER button or SETTINGS to **commit** and return to the list.
+   A changed value uses the existing automatic flash save after 5s idle
+   and the 60s write cooldown.
+6. Press **MINUS** (GP26) while editing to **discard** unconfirmed changes
+   and return to the list. Press MINUS again from the list to exit.
+   Unconfirmed changes also discard on the 20-second timeout.
+
+Volume encoder (left) continues adjusting the real volume directly.
+In the Volume editor, the timer encoder changes only the candidate
+until confirmation, so cancelling does not change the DFPlayer volume.
+Timer duration is not modified while the menu is open. Long MODE still
+announces RTC time as before.
+
+Suggested regression test: verify all three list entries, change language
+RU/DE and hear with long MODE, change volume by one step and confirm with
+\`audio\`, toggle Exact-hour word and verify \`autosave-status\`. Open
+the editor a second time, change a candidate and press MINUS to confirm
+that its original value remains unchanged. Run \`rtc-debug\` after the
+test if any RTC validation error occurs.
+
+**Compatibility note:** SETTINGS no longer immediately opens the language
+editor. It opens the list first. In this stage only the three items are
+available; time/date/quiet/chime/alarms are not yet implemented in C.
