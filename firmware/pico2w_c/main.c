@@ -110,6 +110,8 @@ static bool auto_enabled = true;
 static bool auto_boot_seeded;
 static bool auto_seen_key_valid;
 static uint64_t auto_seen_minute_key;
+static bool auto_last_observed_valid;
+static uint64_t auto_last_observed_minute_key;
 // Diagnostic only: emit at most one duplicate-key note per boundary minute.
 static bool auto_duplicate_logged_valid;
 static uint64_t auto_duplicate_logged_key;
@@ -234,6 +236,11 @@ static void auto_test(uint8_t hour, uint8_t minute) {
 
 static void auto_service_rtc(const ds1302_datetime_t *dt) {
     if (!dt) return;
+    uint64_t observed_key = auto_minute_key(dt);
+    bool reentered_minute = auto_last_observed_valid &&
+                             auto_last_observed_minute_key != observed_key;
+    auto_last_observed_valid = true;
+    auto_last_observed_minute_key = observed_key;
     // The first valid RTC reading establishes the current boundary without
     // announcing it. Fresh 00/30 boundaries encountered later play normally.
     if (!auto_boot_seeded) {
@@ -251,10 +258,11 @@ static void auto_service_rtc(const ds1302_datetime_t *dt) {
     if (dt->minute != 0u && dt->minute != 30u) return;
     uint64_t key = auto_minute_key(dt);
     if (auto_seen_key_valid && auto_seen_minute_key == key) {
-        // Normally silent deduplication; report once if the RTC enters a
-        // previously consumed minute again, e.g. after a manual RTC edit.
-        // Avoid printing on each one-second poll in the same minute.
-        if (!auto_duplicate_logged_valid || auto_duplicate_logged_key != key) {
+        // Normally silent deduplication. Report only on a real RTC
+        // transition BACK into an already-processed boundary minute,
+        // not on the ordinary subsequent seconds of the same minute.
+        if (reentered_minute &&
+            (!auto_duplicate_logged_valid || auto_duplicate_logged_key != key)) {
             auto_duplicate_logged_valid = true;
             auto_duplicate_logged_key = key;
             printf("[AUTO-DEBUG] %02u:%02u suppressed=ALREADY_PROCESSED key=%llu\n",
