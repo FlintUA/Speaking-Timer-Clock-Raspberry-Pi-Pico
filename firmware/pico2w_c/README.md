@@ -904,3 +904,30 @@ flash-write cooldown are unchanged. This does not change the
    \`[FLASH] autosave=OK\` (possibly delayed by a write cooldown).
    Verify \`flash-info\` and retained volume after a power cycle.
 5. \`quiet-status\` now includes \`auto_runtime=ON/OFF\`.
+
+
+## German timer-finish MP3 fallback
+
+Hardware checks on 2026-11-05 showed explicit \`play 17 11\` spoke
+"Timer deaktiviert" and \`play 17 13\` spoke "Timer eingestellt"
+instead of the expected finish phrase and long signal. The checked-in
+\`sound/_sdcard/17/\` contains only \`007.mp3\`, \`008.mp3\`,
+\`009.mp3\`, \`014.mp3\`, and \`015.mp3\`; there are no files
+\`011.mp3\` or \`013.mp3\` in that German service folder.
+The documented track labels are in
+\`sound/_sdcard/описание папок.txt\`. The user's physical SD-card
+contents have not yet been independently inventoried.
+
+As a temporary nonverbal German fallback,
+\`speech_enqueue_timer_finish\` now queues only \`07/013\`
+(the long timer signal in the Russian service folder). Russian
+timer-finish playback continues to queue \`07/011\` + \`07/013\`.
+This avoids requesting missing German tracks without guessing their
+new SD-card positions. Later, if the German finish voice is added,
+it should be restored deliberately and tested.
+
+Hardware regression: first run \`play 7 13\` and confirm a long
+signal; then run a short German countdown to completion. Expect
+\`[AUDIO-TRACK] play folder=07 track=013\` and **no**
+\`folder=17 track=011/013\`. Check audibility and logs before
+changing any MP3 files.
