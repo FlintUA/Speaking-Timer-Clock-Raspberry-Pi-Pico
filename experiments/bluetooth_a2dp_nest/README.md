@@ -1,83 +1,132 @@
 # Pico 2 W -> Google Nest Audio Bluetooth A2DP experiment
 
-This experiment deliberately does not modify the MicroPython clock firmware.
+This experiment belongs to the main Speaking Timer-Clock project but is intentionally isolated from the production MicroPython firmware in `source/v3`.
 
-Goal:
+## Verified baseline
 
-1. Build the official Raspberry Pi / BTstack A2DP Source demo for Raspberry Pi Pico 2 W.
-2. Put Google Nest Audio (Nest) into Bluetooth pairing mode.
-3. Let Pico 2 W scan for a Bluetooth speaker and connect.
-4. Start the demo sine-wave stream.
-5. Capture the USB serial output so pairing / A2DP behavior can be reviewed before integration.
+Hardware test completed successfully on Raspberry Pi Pico 2 W:
 
-## Why the official demo first
+- Pico SDK 2.3.1
+- RP2350 ARM build
+- BTstack Classic enabled
+- A2DP Source connected to Google Nest Audio named `Nest`
+- SSP pairing completed
+- SBC stereo stream at 44.1 kHz negotiated
+- AVRCP connected
+- audio was heard from the Nest speaker
+- USB CDC serial logging worked after enabling USB stdio
 
-Raspberry Pi pico-examples includes an a2dp_source_demo for Bluetooth-capable Pico boards.
-It uses BTstack Classic + SBC encoder, scans for Bluetooth audio speakers, and handles SSP numeric confirmation.
-No Wi-Fi connection is required for the A2DP audio path.
+This is the known-good baseline for all further Bluetooth work.
 
-## Requirements on Windows
+## Current architecture
 
-You need CMake, Ninja, an Arm GNU toolchain supported by Pico SDK, Git, pico-sdk, pico-examples and pico-extras.
-The easiest supported setup is the Raspberry Pi Pico VS Code extension / Pico SDK toolchain.
+```text
+Pico 2 W
+  -> Bluetooth Classic
+  -> A2DP Source
+  -> SBC
+  -> Google Nest Audio
+```
 
-If the SDK is already installed, set these environment variables in PowerShell:
+Wi-Fi is not required for the A2DP audio path.
 
-~~~powershell
-$env:PICO_SDK_PATH = "C:\\path\\to\\pico-sdk"
-$env:PICO_EXAMPLES_PATH = "C:\\path\\to\\pico-examples"
-$env:PICO_EXTRAS_PATH = "C:\\path\\to\\pico-extras"
-~~~
+## Project rule
 
-Initialize submodules:
+Do not modify `source/v3` while experimenting with A2DP.
 
-~~~powershell
-git -C $env:PICO_SDK_PATH submodule update --init
-git -C $env:PICO_EXAMPLES_PATH submodule update --init
-git -C $env:PICO_EXTRAS_PATH submodule update --init
-~~~
+The production clock remains the stable MicroPython implementation.
+All Bluetooth experiments stay under:
 
-## Build
+```text
+experiments/bluetooth_a2dp_nest/
+```
 
-From the clock repository root:
+until the architecture is mature enough for integration.
 
-~~~powershell
+## Development stages
+
+1. Reproduce the known-good official A2DP Source demo from this repository.
+2. Automatically discover the speaker named `Nest`.
+3. Automatically reconnect to the bonded Nest after restart.
+4. Remove the MOD demo music.
+5. Stream a generated short PCM test tone.
+6. Stream WAV data.
+7. Research practical MP3 decoding on RP2350.
+8. Decide how Bluetooth audio should integrate with the MicroPython clock.
+
+## Known-good upstream demo
+
+The working baseline uses the official Raspberry Pi / BTstack source:
+
+```text
+<PICO_SDK_PATH>/lib/btstack/example/a2dp_source_demo.c
+```
+
+and the Raspberry Pi `pico-examples` CMake target:
+
+```text
+bluetooth/btstack_examples/a2dp_source_demo
+```
+
+USB serial must be enabled for this target:
+
+```cmake
+pico_enable_stdio_usb(a2dp_source_demo 1)
+pico_enable_stdio_uart(a2dp_source_demo 0)
+```
+
+## Windows environment used in the successful test
+
+The Raspberry Pi Pico VS Code extension installed the toolchain under:
+
+```text
+C:\Users\Flint123\.pico-sdk
+```
+
+The successful test used:
+
+```text
+SDK:      .pico-sdk\sdk\2.3.1
+pioasm:   .pico-sdk\tools\2.3.1\pioasm\pioasm.exe
+picotool: .pico-sdk\picotool\2.3.1\picotool\picotool.exe
+ninja:    .pico-sdk\ninja\v1.13.2\ninja.exe
+cmake:    .pico-sdk\cmake\v4.3.4\bin\cmake.exe
+```
+
+These paths are examples from the verified machine. The build script tries to locate the installed tools automatically.
+
+## Build the official baseline
+
+From the main repository root:
+
+```powershell
 powershell -ExecutionPolicy Bypass -File .\experiments\bluetooth_a2dp_nest\build_official_a2dp_source.ps1
-~~~
+```
 
-The script configures for PICO_BOARD=pico2_w, PICO_PLATFORM=rp2350 and BTSTACK_EXAMPLES_ALL=1.
-It prints the exact a2dp_source_demo.uf2 path when successful.
+The script locates the Pico SDK installation, locates or clones pico-examples, enables USB stdio for the A2DP target, configures Pico 2 W / RP2350 ARM, builds `a2dp_source_demo`, and prints the UF2 path.
 
 ## Test procedure
 
-Important: this UF2 temporarily replaces MicroPython in flash. It does not alter the project files on the PC.
+1. Put Nest Audio into Bluetooth pairing mode.
+2. Flash the generated `a2dp_source_demo.uf2` to a spare Pico 2 W.
+3. Open its USB COM port at 115200.
+4. Send `a` in the BTstack console to scan and connect.
+5. Confirm that `Nest` is discovered and A2DP/AVRCP connect.
+6. Start a test stream if needed from the BTstack console.
 
-1. Put Nest Audio into Bluetooth pairing mode in Google Home.
-2. Keep other nearby Bluetooth speakers out of pairing mode for the cleanest first test.
-3. Hold BOOTSEL while connecting Pico 2 W by USB.
-4. Copy a2dp_source_demo.uf2 to the RP2350 boot drive.
-5. Open the Pico USB serial console.
-6. Watch for discovery, SSP and A2DP messages.
+The spare Pico 2 W is preferred for Bluetooth development so the working clock remains untouched.
 
-Typical useful output includes:
+## Next development target
 
-~~~text
-Start scanning...
-Device found: xx:xx:xx:xx:xx:xx ... name 'Nest'
-Bluetooth speaker detected, trying to connect...
-SSP User Confirmation Request ...
-~~~
+The next custom build should remove dependence on interactive console commands and perform:
 
-The upstream demo automatically accepts SSP numeric confirmation.
-The interactive upstream demo also provides command x to start its generated sine stream.
-If stdin is not available in the selected build, the first run still confirms discovery/pairing/A2DP and we will then add a tiny auto-start wrapper.
+```text
+boot
+ -> initialize BTstack
+ -> find bonded Nest / scan for "Nest"
+ -> connect A2DP
+ -> connect AVRCP
+ -> stream a short generated PCM tone
+```
 
-## What to send back
-
-Send the complete USB serial log starting from Start scanning....
-Especially useful are Device found, name, COD, SSP/PIN, A2DP connection, codec configuration and stream-state lines.
-
-## Rollback
-
-The production clock remains source/v3/main.py and is not modified by this experiment.
-To restore the clock: flash the official Pico 2 W MicroPython UF2, copy the current runtime files back to the Pico and keep the local wifi_secrets.py.
+No MOD music should be started in the custom test.
