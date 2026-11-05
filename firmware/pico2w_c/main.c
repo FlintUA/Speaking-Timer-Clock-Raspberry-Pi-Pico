@@ -36,9 +36,14 @@ static int detect_lcd_address(void) {
 }
 
 static countdown_t timer;
-// Diagnostic-only alarm configuration: default OFF, RAM only. Not active
-// in the RTC scheduler and not written to flash in this migration stage.
+// First real alarm (slot 1 only) is opt-in via serial and RAM-only.
+// All five defaults remain OFF on boot. Flash v2 remains unchanged.
 static alarm_entry_t alarms[CLOCK_ALARM_COUNT];
+static alarm_scheduler_t alarm_scheduler;
+static int alarm_active_index = -1;
+static uint64_t alarm_deadline_ms;
+static bool alarm_audio_armed;
+#define ALARM_SAFETY_TIMEOUT_MS (15u * 60u * 1000u)
 static char command_line[48];
 static size_t command_length;
 static bool timer_screen;
@@ -172,6 +177,7 @@ static auto_decision_t auto_evaluate(uint8_t hour, uint8_t minute,
     if (require_enabled && !auto_enabled) return AUTO_DISABLED;
     if (!sound_enabled) return AUTO_SOUND_OFF;
     if (auto_quiet_at(hour)) return AUTO_QUIET;
+    if (alarm_active_index >= 0) return AUTO_BUSY;
     if (timer.running ||
         (finished_screen_until_ms &&
          to_ms_since_boot(get_absolute_time()) < finished_screen_until_ms))
@@ -422,7 +428,7 @@ static void autosave_service(uint64_t now_ms) {
         now_ms - last_autosave_attempt_ms < AUTOSAVE_ERROR_RETRY_MS) return;
     // Handle timer FINISHED first. Block flash through the final display
     // window, queued audio and physical DFPlayer BUSY (even for clones).
-    if (timer.running || menu_state != MENU_CLOSED ||
+    if (timer.running || alarm_active_index >= 0 || menu_state != MENU_CLOSED ||
         (finished_screen_until_ms && now_ms < finished_screen_until_ms) ||
         !audio_queue_idle(&audio_queue) || dfplayer_busy()) return;
 
@@ -887,7 +893,8 @@ static void print_rtc_debug(void) {
 }
 
 static void alarm_status(void) {
-    puts("[ALARM] diagnostic-only configuration (RAM, all OFF; no alarm playback)");
+    printf("[ALARM] runtime RAM-only; slot1 opt-in; active=%d (0=none)\n",
+           alarm_active_index + 1);
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
         const alarm_entry_t *a = &alarms[i];
         printf("[ALARM] %u enabled=%s time=%02u:%02u sound=%s track=%u valid=%s\n",
@@ -896,6 +903,122 @@ static void alarm_status(void) {
                a->sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL",
                (unsigned)a->track, alarm_entry_valid(a) ? "YES" : "NO");
     }
+}
+
+static void alarm_stop(const char *reason) {
+    if (alarm_active_index < 0) {
+        puts("[ALARM] no active alarm");
+        return;
+    }
+    int number = alarm_active_index + 1;
+    audio_queue_clear(&audio_queue, true);
+    alarm_active_index = -1;
+    alarm_audio_armed = false;
+    alarm_deadline_ms = 0u;
+    printf("[ALARM] %d stopped=%s\n", number, reason);
+}
+
+static void alarm_service_playback(uint64_t now) {
+    if (alarm_active_index < 0) return;
+    if (now >= alarm_deadline_ms) {
+        alarm_stop("SAFETY_TIMEOUT");
+        return;
+    }
+    // Do not assume playback is complete before the queued DFPlayer
+    // command actually starts; BUSY must also return inactive.
+    if (alarm_audio_armed && audio_queue_idle(&audio_queue) && !dfplayer_busy()) {
+        alarm_active_index = -1;
+        alarm_audio_armed = false;
+        alarm_deadline_ms = 0u;
+        puts("[ALARM] finished=AUDIO_COMPLETED");
+    }
+}
+
+static void alarm_service_rtc(const ds1302_datetime_t *dt, uint64_t now) {
+    if (!dt || dt->second > 5u || alarm_active_index >= 0) return;
+    // Do not steal audio from an active timer or freshly completed timer.
+    if (timer.running || (finished_screen_until_ms &&
+        now < finished_screen_until_ms) || menu_state != MENU_CLOSED) return;
+    // A single alarm slot is unlocked for real hardware regression.
+    int index = alarm_scheduler_pick(&alarm_scheduler, alarms, dt->year,
+                            dt->month, dt->day, dt->hour, dt->minute, false);
+    if (index < 0) return;
+    // Slot 1 only. Ignore other slots until explicit multi-alarm integration.
+    if (index != 0) return;
+    // An alarm owns its minute: prevent normal xx:00/xx:30 announcements.
+    if (dt->minute == 0u || dt->minute == 30u) {
+        auto_seen_key_valid = true;
+        auto_seen_minute_key = auto_minute_key(dt);
+    }
+    if (!sound_enabled) {
+        printf("[ALARM] %d skipped=SOUND_OFF\n", index + 1);
+        return;
+    }
+    audio_queue_clear(&audio_queue, true);
+    bool queued = true;
+    if (language == SPEECH_RU) {
+        queued = audio_queue_enqueue(&audio_queue, 7u, (uint8_t)(index + 1));
+    } else {
+        puts("[ALARM] DE number phrase unavailable; skipping RU number");
+    }
+    if (queued) {
+        queued = speech_enqueue_time(&audio_queue, language, dt->hour,
+                                     dt->minute, exact_hour_phrase);
+    }
+    if (queued) {
+        if (alarms[index].sound == ALARM_SOUND_MUSIC) {
+            queued = audio_queue_enqueue(&audio_queue, 8u, alarms[index].track);
+        } else {
+            queued = audio_queue_enqueue(&audio_queue, 7u, 13u);
+        }
+    }
+    if (!queued) {
+        audio_queue_clear(&audio_queue, true);
+        puts("[ALARM] skipped=QUEUE_FULL");
+        return;
+    }
+    alarm_active_index = index;
+    alarm_deadline_ms = now + ALARM_SAFETY_TIMEOUT_MS;
+    alarm_audio_armed = true;
+    printf("[ALARM] %d RINGING %02u:%02u sound=%s track=%u (RAM only)\n",
+           index + 1, (unsigned)dt->hour, (unsigned)dt->minute,
+           alarms[index].sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL",
+           (unsigned)alarms[index].track);
+}
+
+static void alarm_set(char *args) {
+    unsigned hh = 0u, mm = 0u, track = 1u;
+    char kind[12] = {0};
+    char extra = 0;
+    int fields = sscanf(args, " %u %u %11s %u %c",
+                        &hh, &mm, kind, &track, &extra);
+    bool signal = fields == 3 && strcmp(kind, "signal") == 0;
+    bool music = fields == 4 && strcmp(kind, "music") == 0 &&
+                 track >= 1u && track <= CLOCK_ALARM_MAX_TRACK;
+    if (hh > 23u || mm > 59u || (!signal && !music)) {
+        puts("[ALARM] Use alarm-set HH MM signal OR alarm-set HH MM music TRACK(1..45)");
+        return;
+    }
+    if (alarm_active_index >= 0) {
+        puts("[ALARM] Stop ringing alarm before changing its configuration");
+        return;
+    }
+    alarms[0].enabled = true;
+    alarms[0].hour = (uint8_t)hh;
+    alarms[0].minute = (uint8_t)mm;
+    alarms[0].sound = music ? ALARM_SOUND_MUSIC : ALARM_SOUND_SIGNAL;
+    alarms[0].track = music ? (uint8_t)track : 1u;
+    // Reset one-shot state for a newly configured test alarm;
+    // never replay an already active current minute immediately.
+    alarm_scheduler_init(&alarm_scheduler);
+    ds1302_datetime_t current = {0};
+    if (ds1302_read_datetime(&current)) {
+        (void)alarm_scheduler_pick(&alarm_scheduler, alarms,
+                   current.year, current.month, current.day,
+                   current.hour, current.minute, false);
+    }
+    printf("[ALARM] 1 enabled=ON time=%02u:%02u sound=%s track=%u (RAM only)\n",
+           hh, mm, music ? "MUSIC" : "SIGNAL", music ? track : 1u);
 }
 
 static void alarm_test(char *args) {
@@ -946,7 +1069,7 @@ static void handle_command(char *line) {
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
+        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
     } else if (strcmp(line, "rtc-debug") == 0) {
         print_rtc_debug();
     } else if (strcmp(line, "rtc-reset-stats") == 0) {
@@ -966,6 +1089,13 @@ static void handle_command(char *line) {
         auto_status();
     } else if (strcmp(line, "alarm-status") == 0) {
         alarm_status();
+    } else if (strcmp(line, "alarm-off") == 0) {
+        alarms[0].enabled = false;
+        puts("[ALARM] 1 enabled=OFF (RAM only)");
+    } else if (strcmp(line, "alarm-stop") == 0) {
+        alarm_stop("SERIAL");
+    } else if (strncmp(line, "alarm-set ", 10) == 0) {
+        alarm_set(line + 10);
     } else if (strncmp(line, "alarm-test", 10) == 0 &&
                (line[10] == ' ' || line[10] == '\0')) {
         alarm_test(line + 10);
@@ -1144,6 +1274,11 @@ static void on_control_event(const control_event_t *event, void *context) {
         printf("[INPUT] button %s %s\n",
                controls_button_name(event->button),
                event->type == CONTROL_BUTTON_PRESS ? "PRESS" : "RELEASE");
+        if (event->type == CONTROL_BUTTON_PRESS &&
+            event->button == BUTTON_ALARM && alarm_active_index >= 0) {
+            alarm_stop("BUTTON");
+            return;
+        }
         if (event->type == CONTROL_BUTTON_PRESS && event->button == BUTTON_SETTINGS) {
             if (menu_state == MENU_CLOSED) menu_open(now);
             else if (menu_state == MENU_LIST) menu_begin_edit(now);
@@ -1223,7 +1358,8 @@ int main(void) {
     puts("[AUTO] runtime=ON after boot; first observed RTC boundary will be consumed");
     countdown_init(&timer);
     alarm_defaults(alarms);
-    puts("[ALARM] diagnostics ready: 5 disabled alarms; RTC scheduler and audio unchanged");
+    alarm_scheduler_init(&alarm_scheduler);
+    puts("[ALARM] 5 slots OFF at boot; slot1 can be armed by alarm-set (RAM only)");
     puts("[CMD] Serial timer ready. Type help + Enter");
     char last_top[17] = {0};
     char last_bottom[17] = {0};
@@ -1250,6 +1386,7 @@ int main(void) {
             puts("[MENU] Timeout (20s); unsaved edit discarded");
             menu_close();
         }
+        alarm_service_playback(now);
         autosave_service(now);
         if (timer.running) {
             uint32_t left = countdown_remaining(&timer, now);
@@ -1269,6 +1406,7 @@ int main(void) {
                 snprintf(rtc_bottom, sizeof(rtc_bottom), "%02u.%02u.%04u",
                          (unsigned)dt.day, (unsigned)dt.month, (unsigned)dt.year);
                 printf("[RTC] %s %s\n", rtc_top, rtc_bottom);
+                alarm_service_rtc(&dt, now);
                 auto_service_rtc(&dt);
             } else {
                 snprintf(rtc_top, sizeof(rtc_top), "RTC unavailable");
@@ -1325,6 +1463,9 @@ int main(void) {
             snprintf(top, sizeof(top), "EXACT HOUR WORD");
             snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
                      menu_exact_choice ? "ON" : "OFF");
+        } else if (alarm_active_index >= 0) {
+            snprintf(top, sizeof(top), "ALARM %d RINGING", alarm_active_index + 1);
+            snprintf(bottom, sizeof(bottom), "ALARM BTN=STOP");
         } else if (mode_overlay_until_ms && now < mode_overlay_until_ms) {
             snprintf(top, sizeof(top), "CLOCK MODE");
             snprintf(bottom, sizeof(bottom), "%s", clock_mode ? "CHIME" : "VOICE");
