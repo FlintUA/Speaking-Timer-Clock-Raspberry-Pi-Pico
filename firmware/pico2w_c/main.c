@@ -10,6 +10,7 @@
 #include "ds1302.h"
 #include "lcd1602_i2c.h"
 #include "countdown.h"
+#include "alarm_engine.h"
 #include "controls.h"
 #include "dfplayer.h"
 #include "queue.h"
@@ -35,6 +36,9 @@ static int detect_lcd_address(void) {
 }
 
 static countdown_t timer;
+// Diagnostic-only alarm configuration: default OFF, RAM only. Not active
+// in the RTC scheduler and not written to flash in this migration stage.
+static alarm_entry_t alarms[CLOCK_ALARM_COUNT];
 static char command_line[48];
 static size_t command_length;
 static bool timer_screen;
@@ -882,13 +886,67 @@ static void print_rtc_debug(void) {
     putchar('\n');
 }
 
+static void alarm_status(void) {
+    puts("[ALARM] diagnostic-only configuration (RAM, all OFF; no alarm playback)");
+    for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
+        const alarm_entry_t *a = &alarms[i];
+        printf("[ALARM] %u enabled=%s time=%02u:%02u sound=%s track=%u valid=%s\n",
+               i + 1u, a->enabled ? "ON" : "OFF",
+               (unsigned)a->hour, (unsigned)a->minute,
+               a->sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL",
+               (unsigned)a->track, alarm_entry_valid(a) ? "YES" : "NO");
+    }
+}
+
+static void alarm_test(char *args) {
+    unsigned hh = 0u, mm = 0u, slot = 0u;
+    char extra = 0;
+    int fields = sscanf(args, " %u %u %u %c", &hh, &mm, &slot, &extra);
+    if ((fields != 2 && fields != 3) || hh > 23u || mm > 59u ||
+        (fields == 3 && (slot < 1u || slot > CLOCK_ALARM_COUNT))) {
+        puts("[ALARM-TEST] Usage: alarm-test HH MM [slot 1..5]");
+        puts("[ALARM-TEST] Optional slot simulates enabling that alarm at HH:MM; RAM/flash/RTC unchanged");
+        return;
+    }
+    alarm_entry_t simulated[CLOCK_ALARM_COUNT];
+    memcpy(simulated, alarms, sizeof(simulated));
+    if (fields == 3) {
+        simulated[slot - 1u].enabled = true;
+        simulated[slot - 1u].hour = (uint8_t)hh;
+        simulated[slot - 1u].minute = (uint8_t)mm;
+    }
+    ds1302_datetime_t dt = {0};
+    if (!ds1302_read_datetime(&dt)) {
+        puts("[ALARM-TEST] RTC unavailable; no state altered");
+        return;
+    }
+    alarm_scheduler_t snapshot;
+    alarm_scheduler_init(&snapshot);
+    int selected = alarm_scheduler_pick(&snapshot, simulated, dt.year, dt.month,
+                                        dt.day, (uint8_t)hh, (uint8_t)mm, false);
+    printf("[ALARM-TEST] %02u:%02u virtual_slot=%u first=%d (dry-run: no playback/no writes)\n",
+           hh, mm, fields == 3 ? slot : 0u,
+           selected < 0 ? 0 : selected + 1);
+    if (selected >= 0) {
+        int blocked = alarm_scheduler_pick(&snapshot, simulated, dt.year, dt.month,
+                                           dt.day, (uint8_t)hh, (uint8_t)mm, true);
+        // With an active alarm, no second alarm can be scheduled.
+        int following = alarm_scheduler_pick(&snapshot, simulated, dt.year, dt.month,
+                                             dt.day, (uint8_t)hh, (uint8_t)mm, false);
+        printf("[ALARM-TEST] while_ringing=%s after_stop=%d fired_mask=0x%02x\n",
+               blocked < 0 ? "BLOCKED" : "ERROR",
+               following < 0 ? 0 : following + 1,
+               (unsigned)snapshot.fired_mask);
+    }
+}
+
 static void handle_command(char *line) {
     while (isspace((unsigned char)*line)) ++line;
     size_t len = strlen(line);
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
+        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
     } else if (strcmp(line, "rtc-debug") == 0) {
         print_rtc_debug();
     } else if (strcmp(line, "rtc-reset-stats") == 0) {
@@ -906,6 +964,11 @@ static void handle_command(char *line) {
         print_autosave_status(now);
     } else if (strcmp(line, "auto-status") == 0) {
         auto_status();
+    } else if (strcmp(line, "alarm-status") == 0) {
+        alarm_status();
+    } else if (strncmp(line, "alarm-test", 10) == 0 &&
+               (line[10] == ' ' || line[10] == '\0')) {
+        alarm_test(line + 10);
     } else if (strcmp(line, "auto-debug") == 0) {
         auto_debug();
     } else if (strcmp(line, "mode-status") == 0) {
@@ -1159,6 +1222,8 @@ int main(void) {
     puts("[AUDIO] DFPlayer UART0 GP16/17 BUSY GP18");
     puts("[AUTO] runtime=ON after boot; first observed RTC boundary will be consumed");
     countdown_init(&timer);
+    alarm_defaults(alarms);
+    puts("[ALARM] diagnostics ready: 5 disabled alarms; RTC scheduler and audio unchanged");
     puts("[CMD] Serial timer ready. Type help + Enter");
     char last_top[17] = {0};
     char last_bottom[17] = {0};
