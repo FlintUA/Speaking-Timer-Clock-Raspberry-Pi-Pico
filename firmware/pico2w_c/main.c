@@ -11,6 +11,8 @@
 #include "lcd1602_i2c.h"
 #include "countdown.h"
 #include "controls.h"
+#include "dfplayer.h"
+#include "queue.h"
 
 #define LCD_SDA_GPIO 0
 #define LCD_SCL_GPIO 1
@@ -34,6 +36,7 @@ static countdown_t timer;
 static char command_line[48];
 static size_t command_length;
 static bool timer_screen;
+static audio_queue_t audio_queue;
 static uint64_t finished_screen_until_ms;
 
 
@@ -50,7 +53,7 @@ static void handle_command(char *line) {
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds> (1..14400), start, cancel, status, help");
+        puts("[CMD] t <seconds>, start, cancel, status, play <folder> <track>, pause, audio, help");
     } else if (strcmp(line, "start") == 0) {
         countdown_start(&timer, now);
         timer_screen = true;
@@ -63,6 +66,25 @@ static void handle_command(char *line) {
         print_timer_status(now);
     } else if (strcmp(line, "status") == 0) {
         print_timer_status(now);
+    } else if (strcmp(line, "audio") == 0) {
+        printf("[AUDIO] DFPlayer BUSY=%s queue=%u idle=%s\\n",
+               dfplayer_busy() ? "LOW (playing)" : "HIGH (idle)",
+               (unsigned)audio_queue.size,
+               audio_queue_idle(&audio_queue) ? "yes" : "no");
+    } else if (strcmp(line, "pause") == 0) {
+        audio_queue_clear(&audio_queue, true);
+        puts("[AUDIO] Pause requested");
+    } else if (strncmp(line, "play", 4) == 0 && isspace((unsigned char)line[4])) {
+        unsigned int folder = 0, track = 0;
+        char extra = 0;
+        if (sscanf(line + 4, " %u %u %c", &folder, &track, &extra) != 2 ||
+            folder < 1 || folder > 99 || track < 1 || track > 255) {
+            puts("[AUDIO] Use play <folder 1..99> <track 1..255>");
+        } else if (audio_queue_enqueue(&audio_queue, (uint8_t)folder, (uint8_t)track)) {
+            printf("[AUDIO] Queued folder=%u track=%u\\n", folder, track);
+        } else {
+            puts("[AUDIO] Queue full");
+        }
     } else if (line[0] == 't' && isspace((unsigned char)line[1])) {
         char *arg = line + 2;
         while (isspace((unsigned char)*arg)) ++arg;
@@ -165,6 +187,9 @@ int main(void) {
 
     controls_init();
     puts("[INPUT] GPIO controls initialized (2 encoders, 7 buttons)");
+    dfplayer_init();
+    audio_queue_init(&audio_queue);
+    puts("[AUDIO] DFPlayer UART0 GP16/17 BUSY GP18; no auto playback");
     countdown_init(&timer);
     puts("[CMD] Serial timer ready. Type help + Enter");
     char last_top[17] = {0};
@@ -175,6 +200,7 @@ int main(void) {
     uint32_t previous_remaining = UINT32_MAX;
     while (true) {
         poll_serial();
+        audio_queue_service(&audio_queue, to_ms_since_boot(get_absolute_time()));
         controls_poll(to_ms_since_boot(get_absolute_time()), on_control_event, NULL);
         uint64_t now = to_ms_since_boot(get_absolute_time());
         countdown_service(&timer, now);
