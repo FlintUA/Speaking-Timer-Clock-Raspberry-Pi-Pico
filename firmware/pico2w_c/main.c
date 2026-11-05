@@ -99,6 +99,113 @@ static uint64_t last_flash_write_ms;
 static bool autosave_attempted;
 static uint64_t last_autosave_attempt_ms;
 
+// Auto-announcement runtime gate. OFF on every boot until explicitly
+// enabled with "auto on"; does not alter flash v2 records.
+static bool auto_enabled;
+static bool auto_seen_key_valid;
+static uint64_t auto_seen_minute_key;
+static uint32_t auto_played, auto_skipped;
+
+typedef enum {
+    AUTO_NONE,
+    AUTO_HOUR,
+    AUTO_HALF,
+    AUTO_DISABLED,
+    AUTO_QUIET,
+    AUTO_SOUND_OFF,
+    AUTO_TIMER,
+    AUTO_MENU,
+    AUTO_BUSY,
+    AUTO_LATE
+} auto_decision_t;
+
+static const char *auto_reason(auto_decision_t d) {
+    switch (d) {
+        case AUTO_HOUR: return "HOURLY_VOICE";
+        case AUTO_HALF: return "HALF_HOUR_BEEP";
+        case AUTO_DISABLED: return "AUTO_DISABLED";
+        case AUTO_QUIET: return "QUIET_HOURS";
+        case AUTO_SOUND_OFF: return "SOUND_OFF";
+        case AUTO_TIMER: return "TIMER_PRIORITY";
+        case AUTO_MENU: return "MENU_OPEN";
+        case AUTO_BUSY: return "AUDIO_BUSY";
+        case AUTO_LATE: return "MISSED_WINDOW";
+        default: return "NO_EVENT";
+    }
+}
+
+// Use year, month, day and hour-minute; does not depend on milliseconds,
+// and does not reset on RTC errors. A given minute is processed once.
+static uint64_t auto_minute_key(const ds1302_datetime_t *dt) {
+    return (((((uint64_t)dt->year * 13u + dt->month) * 32u + dt->day) *
+               24u + dt->hour) * 60u + dt->minute);
+}
+
+static bool auto_quiet_at(uint8_t hour) {
+    if (!quiet_enabled) return false;
+    if (quiet_start < quiet_end) return hour >= quiet_start && hour < quiet_end;
+    // Equal start/end means quiet all day (matches source/v3/main.py).
+    return hour >= quiet_start || hour < quiet_end;
+}
+
+static auto_decision_t auto_evaluate(uint8_t hour, uint8_t minute,
+                                      uint8_t second, bool require_enabled) {
+    if (minute != 0u && minute != 30u) return AUTO_NONE;
+    if (minute == 30u && !half_hour_enabled) return AUTO_NONE;
+    if (require_enabled && !auto_enabled) return AUTO_DISABLED;
+    if (!sound_enabled) return AUTO_SOUND_OFF;
+    if (auto_quiet_at(hour)) return AUTO_QUIET;
+    if (timer.running || finished_screen_until_ms) return AUTO_TIMER;
+    if (menu_state != MENU_CLOSED) return AUTO_MENU;
+    if (!audio_queue_idle(&audio_queue) || dfplayer_busy()) return AUTO_BUSY;
+    // If boot/RTC recovers in the middle of an hour/half-hour minute,
+    // do not announce stale time. A 5-second window is deliberate.
+    if (second > 5u) return AUTO_LATE;
+    return minute == 0u ? AUTO_HOUR : AUTO_HALF;
+}
+
+static void auto_status(void) {
+    printf("[AUTO] enabled=%s quiet=%s %02u-%02u half_hour=%s sound=%s played=%lu skipped=%lu\n",
+           auto_enabled ? "ON" : "OFF", quiet_enabled ? "ON" : "OFF",
+           (unsigned)quiet_start, (unsigned)quiet_end,
+           half_hour_enabled ? "ON" : "OFF", sound_enabled ? "ON" : "OFF",
+           (unsigned long)auto_played, (unsigned long)auto_skipped);
+    puts("[AUTO] Mode=voice on the hour; no chime clock-mode selector in C yet");
+}
+
+static void auto_test(uint8_t hour, uint8_t minute) {
+    auto_decision_t d = auto_evaluate(hour, minute, 0u, false);
+    printf("[AUTO-TEST] %02u:%02u => %s (simulation: no audio, no RTC write, auto gate ignored)\n",
+           (unsigned)hour, (unsigned)minute, auto_reason(d));
+}
+
+static void auto_service_rtc(const ds1302_datetime_t *dt) {
+    if (!dt || (dt->minute != 0u && dt->minute != 30u)) return;
+    uint64_t key = auto_minute_key(dt);
+    if (auto_seen_key_valid && auto_seen_minute_key == key) return;
+    auto_seen_minute_key = key;
+    auto_seen_key_valid = true;
+    auto_decision_t d = auto_evaluate(dt->hour, dt->minute, dt->second, true);
+    if (d != AUTO_HOUR && d != AUTO_HALF) {
+        ++auto_skipped;
+        printf("[AUTO] %02u:%02u skipped=%s\n",
+               (unsigned)dt->hour, (unsigned)dt->minute, auto_reason(d));
+        return;
+    }
+    bool queued = d == AUTO_HALF
+        ? audio_queue_enqueue(&audio_queue, 7u, 15u)
+        : speech_enqueue_time(&audio_queue, language, dt->hour, 0u, exact_hour_phrase);
+    if (queued) {
+        ++auto_played;
+        printf("[AUTO] %02u:%02u queued=%s\n",
+               (unsigned)dt->hour, (unsigned)dt->minute, auto_reason(d));
+    } else {
+        ++auto_skipped;
+        puts("[AUTO] skipped=QUEUE_FULL");
+    }
+}
+
+
 
 static void print_timer_status(uint64_t now_ms) {
     uint32_t remaining = countdown_remaining(&timer, now_ms);
@@ -665,7 +772,7 @@ static void handle_command(char *line) {
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, rtc-debug, rtc-reset-stats, save, help");
+        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, auto-status, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
     } else if (strcmp(line, "rtc-debug") == 0) {
         print_rtc_debug();
     } else if (strcmp(line, "rtc-reset-stats") == 0) {
@@ -681,6 +788,29 @@ static void handle_command(char *line) {
         save_settings_now();
     } else if (strcmp(line, "autosave-status") == 0) {
         print_autosave_status(now);
+    } else if (strcmp(line, "auto-status") == 0) {
+        auto_status();
+    } else if (strcmp(line, "auto on") == 0 || strcmp(line, "auto off") == 0) {
+        auto_enabled = strcmp(line, "auto on") == 0;
+        // Do not replay the current boundary after toggling: a fresh
+        // event is eligible only at the next 00/30-minute boundary.
+        ds1302_datetime_t current = {0};
+        if (ds1302_read_datetime(&current) &&
+            (current.minute == 0u || current.minute == 30u)) {
+            auto_seen_key_valid = true;
+            auto_seen_minute_key = auto_minute_key(&current);
+        }
+        printf("[AUTO] runtime=%s (not stored in flash; next boundary only)\n",
+               auto_enabled ? "ON" : "OFF");
+    } else if (strncmp(line, "auto-test", 9) == 0) {
+        unsigned int hour = 0, minute = 0;
+        char extra = 0;
+        if (sscanf(line + 9, " %u %u %c", &hour, &minute, &extra) != 2 ||
+            hour > 23u || minute > 59u) {
+            puts("[AUTO-TEST] Use auto-test <hour 0..23> <minute 0..59>");
+        } else {
+            auto_test((uint8_t)hour, (uint8_t)minute);
+        }
     } else if (strcmp(line, "quiet-status") == 0) {
         printf("[QUIET] enabled=%s start=%02u end=%02u half_hour=%s (automatic playback disabled)\n",
                quiet_enabled ? "ON" : "OFF", (unsigned)quiet_start,
@@ -898,7 +1028,7 @@ int main(void) {
     audio_queue_init(&audio_queue);
     load_settings_at_boot();
     audio_queue_set_volume(&audio_queue, volume);
-    puts("[AUDIO] DFPlayer UART0 GP16/17 BUSY GP18; no auto playback");
+    puts("[AUDIO] DFPlayer UART0 GP16/17 BUSY GP18; auto OFF until serial 'auto on'");
     countdown_init(&timer);
     puts("[CMD] Serial timer ready. Type help + Enter");
     char last_top[17] = {0};
@@ -943,6 +1073,7 @@ int main(void) {
                 snprintf(rtc_bottom, sizeof(rtc_bottom), "%02u.%02u.%04u",
                          (unsigned)dt.day, (unsigned)dt.month, (unsigned)dt.year);
                 printf("[RTC] %s %s\n", rtc_top, rtc_bottom);
+                auto_service_rtc(&dt);
             } else {
                 snprintf(rtc_top, sizeof(rtc_top), "RTC unavailable");
                 snprintf(rtc_bottom, sizeof(rtc_bottom), "Check GP2/5/4");
