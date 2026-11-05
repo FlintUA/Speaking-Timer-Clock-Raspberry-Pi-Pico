@@ -24,18 +24,18 @@ bool clock_a2dp_play_tone(void){
     if (!clock_a2dp_stream_running || !audio_generator_state.initialized) return false;
     clock_tone_samples_remaining = ((uint32_t) current_sample_rate * 300u) / 1000u;
     clock_tone_finished_logged = false;
-    printf("[TONE] Replay requested: 300 ms\\n");
+    printf("[TONE] Replay requested: 300 ms\n");
     return true;
 }
 
 void clock_a2dp_stop_tone(void){
     clock_tone_samples_remaining = 0;
     clock_tone_finished_logged = true;
-    printf("[TONE] Stopped; sending silence\\n");
+    printf("[TONE] Stopped; sending silence\n");
 }
 
 void clock_a2dp_print_status(void){
-    printf("[INFO] A2DP stream: %s; audio: %s; sample rate: %d Hz; samples remaining: %lu\\n",
+    printf("[INFO] A2DP stream: %s; audio: %s; sample rate: %d Hz; samples remaining: %lu\n",
            clock_a2dp_stream_running ? "ACTIVE" : "INACTIVE",
            clock_tone_samples_remaining ? "TONE" : "SILENCE",
            current_sample_rate, (unsigned long)clock_tone_samples_remaining);
