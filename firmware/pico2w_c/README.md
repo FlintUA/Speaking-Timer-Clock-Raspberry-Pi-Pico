@@ -508,3 +508,27 @@ If the slots remain occupied, simply leave persistent saving
 disabled; all clock, timer and audio features still run using RAM
 settings. A later migration can place settings in an independently
 verified spare region or preserve a backed-up legacy filesystem.
+
+
+## Flash tail diagnostic (read-only)
+
+After an attempted erase, slot0 was BLANK but the last 256 bytes
+of slot1 at flash offset `0x003FFF00` remained occupied.
+The `flash-tail` serial command prints all 256 bytes in 16 rows
+of hexadecimal and the IEEE CRC32 of those bytes:
+
+```text
+flash-tail
+```
+
+This command only reads from XIP flash. It performs no erase or write,
+does not change the bootloader or settings, and does not send secret
+data to external services. **However, the hex dump could contain
+previously stored configuration or credentials**; inspect/redact such
+data before sharing the output in public.
+
+For comparison, repeat `flash-tail` after a simple power cycle
+(without installing another firmware in between). An identical CRC32
+suggests stable leftover data; a differing CRC32 indicates a change
+that should be investigated. Neither result alone proves its origin.
+Keep `save` unused until two storage slots are confirmed safe.
