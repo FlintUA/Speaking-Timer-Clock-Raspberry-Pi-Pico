@@ -67,7 +67,7 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "status") == 0) {
         print_timer_status(now);
     } else if (strcmp(line, "audio") == 0) {
-        printf("[AUDIO] DFPlayer BUSY=%s queue=%u idle=%s\\n",
+        printf("[AUDIO] DFPlayer BUSY=%s queue=%u idle=%s\n",
                dfplayer_busy() ? "LOW (playing)" : "HIGH (idle)",
                (unsigned)audio_queue.size,
                audio_queue_idle(&audio_queue) ? "yes" : "no");
@@ -81,7 +81,7 @@ static void handle_command(char *line) {
             folder < 1 || folder > 99 || track < 1 || track > 255) {
             puts("[AUDIO] Use play <folder 1..99> <track 1..255>");
         } else if (audio_queue_enqueue(&audio_queue, (uint8_t)folder, (uint8_t)track)) {
-            printf("[AUDIO] Queued folder=%u track=%u\\n", folder, track);
+            printf("[AUDIO] Queued folder=%u track=%u\n", folder, track);
         } else {
             puts("[AUDIO] Queue full");
         }
