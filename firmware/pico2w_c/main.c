@@ -155,7 +155,10 @@ static auto_decision_t auto_evaluate(uint8_t hour, uint8_t minute,
     if (require_enabled && !auto_enabled) return AUTO_DISABLED;
     if (!sound_enabled) return AUTO_SOUND_OFF;
     if (auto_quiet_at(hour)) return AUTO_QUIET;
-    if (timer.running || finished_screen_until_ms) return AUTO_TIMER;
+    if (timer.running ||
+        (finished_screen_until_ms &&
+         to_ms_since_boot(get_absolute_time()) < finished_screen_until_ms))
+        return AUTO_TIMER;
     if (menu_state != MENU_CLOSED) return AUTO_MENU;
     if (!audio_queue_idle(&audio_queue) || dfplayer_busy()) return AUTO_BUSY;
     // If boot/RTC recovers in the middle of an hour/half-hour minute,
