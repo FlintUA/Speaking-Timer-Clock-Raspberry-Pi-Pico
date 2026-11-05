@@ -91,12 +91,10 @@ string(REPLACE "${_old_config}" "${_new_config}" _source "${_source}")
 # Keep our API's stream state consistent with Bluetooth events.
 set(_old_started [=[
             a2dp_demo_timer_start(&media_tracker);
-            printf("A2DP Source: Stream started, a2dp_cid
 ]=])
 set(_new_started [=[
             clock_a2dp_stream_running = true;
             a2dp_demo_timer_start(&media_tracker);
-            printf("A2DP Source: Stream started, a2dp_cid
 ]=])
 string(FIND "${_source}" "${_old_started}" _started_at)
 if (_started_at EQUAL -1)
