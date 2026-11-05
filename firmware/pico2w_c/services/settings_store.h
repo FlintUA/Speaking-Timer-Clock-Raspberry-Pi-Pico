@@ -9,6 +9,10 @@ typedef struct {
     uint8_t language;  // 0=RU, 1=DE
     uint8_t volume;    // 0..30
     bool exact_hour;
+    bool quiet_enabled;
+    uint8_t quiet_start; // 0..23
+    uint8_t quiet_end;   // 0..23
+    bool half_hour_enabled;
 } clock_settings_t;
 
 typedef enum {
