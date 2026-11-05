@@ -47,6 +47,12 @@ typedef enum {
     MENU_CLOSED = 0,
     MENU_LIST,
     MENU_EDIT_LANGUAGE,
+    MENU_EDIT_TIME_H,
+    MENU_EDIT_TIME_M,
+    MENU_EDIT_TIME_S,
+    MENU_EDIT_DATE_D,
+    MENU_EDIT_DATE_M,
+    MENU_EDIT_DATE_Y,
     MENU_EDIT_VOLUME,
     MENU_EDIT_EXACT
 } menu_state_t;
@@ -55,9 +61,10 @@ static uint8_t menu_index;
 static speech_language_t menu_language_choice;
 static uint8_t menu_volume_choice;
 static bool menu_exact_choice;
+static ds1302_datetime_t menu_rtc_choice;
 static uint64_t menu_last_input_ms;
 #define SETTINGS_MENU_TIMEOUT_MS 20000u
-#define SETTINGS_MENU_ITEMS 3u
+#define SETTINGS_MENU_ITEMS 5u
 static bool exact_hour_phrase;
 static uint64_t mode_pressed_at_ms;
 static bool mode_press_active;
@@ -248,9 +255,70 @@ static void toggle_sound(void) {
     printf("[AUDIO] sound=%s\n", sound_enabled ? "ON" : "OFF");
 }
 
+static uint8_t menu_month_days(uint16_t y, uint8_t m) {
+    static const uint8_t md[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
+    if (m < 1u || m > 12u) return 0u;
+    bool leap = y % 4u == 0u && (y % 100u != 0u || y % 400u == 0u);
+    return (uint8_t)(md[m - 1u] + (m == 2u && leap));
+}
+
+static uint8_t menu_weekday(uint16_t year, uint8_t month, uint8_t day) {
+    // Sakamoto, Sunday=0; convert to Monday=1..Sunday=7.
+    static const int offsets[12] = {0,3,2,5,0,3,5,1,4,6,2,4};
+    int y = year - (month < 3u ? 1 : 0);
+    int sun0 = (y + y/4 - y/100 + y/400 +
+                offsets[month - 1u] + day) % 7;
+    return sun0 == 0 ? 7u : (uint8_t)sun0;
+}
+
+static uint8_t wrap_u8(uint8_t v, uint8_t low, uint8_t high, int direction) {
+    if (direction > 0) return v >= high ? low : (uint8_t)(v + 1u);
+    return v <= low ? high : (uint8_t)(v - 1u);
+}
+
+static bool menu_is_time_edit(void) {
+    return menu_state >= MENU_EDIT_TIME_H && menu_state <= MENU_EDIT_TIME_S;
+}
+
+static bool menu_is_date_edit(void) {
+    return menu_state >= MENU_EDIT_DATE_D && menu_state <= MENU_EDIT_DATE_Y;
+}
+
+static bool menu_write_rtc(bool date_only) {
+    ds1302_datetime_t fresh = {0};
+    if (!ds1302_read_datetime(&fresh)) {
+        puts("[RTC] Save refused: RTC read invalid; no registers written");
+        return false;
+    }
+    if (date_only) {
+        fresh.year = menu_rtc_choice.year;
+        fresh.month = menu_rtc_choice.month;
+        fresh.day = menu_rtc_choice.day;
+        fresh.weekday = menu_weekday(fresh.year, fresh.month, fresh.day);
+    } else {
+        fresh.hour = menu_rtc_choice.hour;
+        fresh.minute = menu_rtc_choice.minute;
+        fresh.second = menu_rtc_choice.second;
+    }
+    if (!ds1302_datetime_valid(&fresh)) {
+        puts("[RTC] Save refused: invalid datetime");
+        return false;
+    }
+    if (!ds1302_write_datetime(&fresh)) {
+        puts("[RTC] RTC write/readback failed; inspect rtc-debug");
+        return false;
+    }
+    printf("[RTC] %s saved %02u.%02u.%04u %02u:%02u:%02u weekday=%u\n",
+           date_only ? "DATE" : "TIME",
+           (unsigned)fresh.day, (unsigned)fresh.month, (unsigned)fresh.year,
+           (unsigned)fresh.hour, (unsigned)fresh.minute, (unsigned)fresh.second,
+           (unsigned)fresh.weekday);
+    return true;
+}
+
 static const char *menu_item_name(unsigned index) {
     static const char *names[SETTINGS_MENU_ITEMS] = {
-        "Language", "Volume", "Exact-hour word"
+        "Language", "Time", "Date", "Volume", "Exact-hour word"
     };
     return index < SETTINGS_MENU_ITEMS ? names[index] : "?";
 }
@@ -282,13 +350,23 @@ static void menu_begin_edit(uint64_t now) {
             menu_state = MENU_EDIT_LANGUAGE;
             break;
         case 1:
+        case 2:
+            if (!ds1302_read_datetime(&menu_rtc_choice)) {
+                puts("[MENU] Cannot edit time/date: RTC read failed");
+                return;
+            }
+            menu_state = menu_index == 1u ? MENU_EDIT_TIME_H : MENU_EDIT_DATE_D;
+            break;
+        case 3:
             menu_volume_choice = volume;
             menu_state = MENU_EDIT_VOLUME;
             break;
-        default:
+        case 4:
             menu_exact_choice = exact_hour_phrase;
             menu_state = MENU_EDIT_EXACT;
             break;
+        default:
+            return;
     }
     printf("[MENU] Edit %s\n", menu_item_name(menu_index));
 }
@@ -310,6 +388,28 @@ static void menu_commit(uint64_t now) {
                 settings_mark_changed();
             }
             printf("[MENU] Volume selected: %u/30\n", (unsigned)volume);
+            break;
+        case MENU_EDIT_TIME_H:
+            menu_state = MENU_EDIT_TIME_M;
+            puts("[MENU] Set minutes");
+            return;
+        case MENU_EDIT_TIME_M:
+            menu_state = MENU_EDIT_TIME_S;
+            puts("[MENU] Set seconds");
+            return;
+        case MENU_EDIT_TIME_S:
+            if (!menu_write_rtc(false)) return;
+            break;
+        case MENU_EDIT_DATE_D:
+            menu_state = MENU_EDIT_DATE_M;
+            puts("[MENU] Set month");
+            return;
+        case MENU_EDIT_DATE_M:
+            menu_state = MENU_EDIT_DATE_Y;
+            puts("[MENU] Set year");
+            return;
+        case MENU_EDIT_DATE_Y:
+            if (!menu_write_rtc(true)) return;
             break;
         case MENU_EDIT_EXACT:
             if (exact_hour_phrase != menu_exact_choice) {
@@ -350,6 +450,31 @@ static void menu_rotate(int direction, uint64_t now) {
             menu_language_choice = menu_language_choice == SPEECH_RU ? SPEECH_DE : SPEECH_RU;
             printf("[MENU] Language candidate: %s\n", speech_language_name(menu_language_choice));
             break;
+        case MENU_EDIT_TIME_H:
+            menu_rtc_choice.hour = wrap_u8(menu_rtc_choice.hour, 0, 23, direction);
+            break;
+        case MENU_EDIT_TIME_M:
+            menu_rtc_choice.minute = wrap_u8(menu_rtc_choice.minute, 0, 59, direction);
+            break;
+        case MENU_EDIT_TIME_S:
+            menu_rtc_choice.second = wrap_u8(menu_rtc_choice.second, 0, 59, direction);
+            break;
+        case MENU_EDIT_DATE_D:
+            menu_rtc_choice.day = wrap_u8(menu_rtc_choice.day, 1,
+                menu_month_days(menu_rtc_choice.year, menu_rtc_choice.month), direction);
+            break;
+        case MENU_EDIT_DATE_M:
+            menu_rtc_choice.month = wrap_u8(menu_rtc_choice.month, 1, 12, direction);
+            if (menu_rtc_choice.day > menu_month_days(menu_rtc_choice.year, menu_rtc_choice.month))
+                menu_rtc_choice.day = menu_month_days(menu_rtc_choice.year, menu_rtc_choice.month);
+            break;
+        case MENU_EDIT_DATE_Y:
+            menu_rtc_choice.year = direction > 0 ?
+                (menu_rtc_choice.year >= 2099u ? 2000u : menu_rtc_choice.year + 1u) :
+                (menu_rtc_choice.year <= 2000u ? 2099u : menu_rtc_choice.year - 1u);
+            if (menu_rtc_choice.day > menu_month_days(menu_rtc_choice.year, menu_rtc_choice.month))
+                menu_rtc_choice.day = menu_month_days(menu_rtc_choice.year, menu_rtc_choice.month);
+            break;
         case MENU_EDIT_VOLUME: {
             int choice = (int)menu_volume_choice + direction;
             if (choice < 0) choice = 0;
@@ -364,6 +489,15 @@ static void menu_rotate(int direction, uint64_t now) {
             break;
         default:
             break;
+    }
+    if (menu_is_time_edit()) {
+        printf("[MENU] Time candidate %02u:%02u:%02u\n",
+               (unsigned)menu_rtc_choice.hour, (unsigned)menu_rtc_choice.minute,
+               (unsigned)menu_rtc_choice.second);
+    } else if (menu_is_date_edit()) {
+        printf("[MENU] Date candidate %02u.%02u.%04u\n",
+               (unsigned)menu_rtc_choice.day, (unsigned)menu_rtc_choice.month,
+               (unsigned)menu_rtc_choice.year);
     }
 }
 
@@ -656,7 +790,7 @@ int main(void) {
     stdio_init_all();
     sleep_ms(3000); // Give VS Code Serial Monitor time to attach.
     printf("\n[BOOT] Speaking Clock C bring-up 0.1 (Pico 2 W)\n");
-    printf("[BOOT] Read-only DS1302; LCD1602 scan; no Bluetooth in this target\n");
+    printf("[BOOT] DS1302 manual datetime writes only; LCD1602 scan; no Bluetooth\n");
 
     i2c_init(i2c0, 400 * 1000);
     gpio_set_function(LCD_SDA_GPIO, GPIO_FUNC_I2C);
@@ -740,6 +874,20 @@ int main(void) {
             snprintf(top, sizeof(top), "LANGUAGE SETTING");
             snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
                      menu_language_choice == SPEECH_RU ? "RU" : "DE");
+        } else if (menu_is_time_edit()) {
+            snprintf(top, sizeof(top), "TIME SET %s",
+                     menu_state == MENU_EDIT_TIME_H ? "HOUR" :
+                     menu_state == MENU_EDIT_TIME_M ? "MIN" : "SEC");
+            snprintf(bottom, sizeof(bottom), "%02u:%02u:%02u",
+                     (unsigned)menu_rtc_choice.hour, (unsigned)menu_rtc_choice.minute,
+                     (unsigned)menu_rtc_choice.second);
+        } else if (menu_is_date_edit()) {
+            snprintf(top, sizeof(top), "DATE SET %s",
+                     menu_state == MENU_EDIT_DATE_D ? "DAY" :
+                     menu_state == MENU_EDIT_DATE_M ? "MONTH" : "YEAR");
+            snprintf(bottom, sizeof(bottom), "%02u.%02u.%04u",
+                     (unsigned)menu_rtc_choice.day, (unsigned)menu_rtc_choice.month,
+                     (unsigned)menu_rtc_choice.year);
         } else if (menu_state == MENU_EDIT_VOLUME) {
             snprintf(top, sizeof(top), "SET VOLUME");
             snprintf(bottom, sizeof(bottom), "%u / 30 PRESS=OK",
