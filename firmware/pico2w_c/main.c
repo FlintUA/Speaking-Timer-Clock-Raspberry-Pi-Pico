@@ -1,5 +1,5 @@
-// Minimal *read-only* hardware bring-up for the C firmware migration.
-// Does not touch RTC registers, DFPlayer, settings, flash or Bluetooth.
+// Speaking-clock C firmware with protected flash settings (no Bluetooth yet).
+// DS1302 RTC is read-only.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,10 +39,10 @@ static char command_line[48];
 static size_t command_length;
 static bool timer_screen;
 static audio_queue_t audio_queue;
-static uint8_t volume = 10; // MicroPython config.py default; persistence not migrated yet.
+static uint8_t volume = 10; // Default; overridden by saved flash settings.
 static bool sound_enabled = true;
 static speech_language_t language = SPEECH_RU;
-// First settings slice is RAM-only: no RP2350 flash writes.
+// UI selection updates RAM, and schedules a delayed flash save.
 static bool language_menu_open;
 static speech_language_t language_menu_choice;
 static uint64_t language_menu_last_input_ms;
@@ -56,6 +56,18 @@ static uint64_t volume_overlay_until_ms;
 #define VOLUME_OVERLAY_MS 1800u
 
 static uint64_t finished_screen_until_ms;
+
+#define AUTOSAVE_DEBOUNCE_MS 5000u
+#define AUTOSAVE_MIN_WRITE_INTERVAL_MS 60000u
+#define AUTOSAVE_ERROR_RETRY_MS 60000u
+
+static clock_settings_t last_persisted_settings;
+static bool autosave_pending;
+static uint64_t last_settings_change_ms;
+static bool flash_written_this_boot;
+static uint64_t last_flash_write_ms;
+static bool autosave_attempted;
+static uint64_t last_autosave_attempt_ms;
 
 
 static void print_timer_status(uint64_t now_ms) {
@@ -128,12 +140,90 @@ static void timer_cancel_now(void) {
     timer_audio_cancel();
 }
 
+
+static clock_settings_t settings_snapshot(void) {
+    clock_settings_t cfg = {
+        .language = (uint8_t)language,
+        .volume = volume,
+        .exact_hour = exact_hour_phrase
+    };
+    return cfg;
+}
+
+static bool settings_equal(clock_settings_t a, clock_settings_t b) {
+    // Compare fields explicitly, not struct padding.
+    return a.language == b.language && a.volume == b.volume &&
+           a.exact_hour == b.exact_hour;
+}
+
+static void settings_mark_changed(void) {
+    clock_settings_t current = settings_snapshot();
+    autosave_pending = !settings_equal(current, last_persisted_settings);
+    last_settings_change_ms = to_ms_since_boot(get_absolute_time());
+    if (autosave_pending) {
+        puts("[FLASH] settings changed; autosave pending after 5s");
+    } else {
+        puts("[FLASH] settings match saved values; no write needed");
+    }
+}
+
+static void autosave_service(uint64_t now_ms) {
+    if (!autosave_pending) return;
+    if (now_ms - last_settings_change_ms < AUTOSAVE_DEBOUNCE_MS) return;
+    if (flash_written_this_boot &&
+        now_ms - last_flash_write_ms < AUTOSAVE_MIN_WRITE_INTERVAL_MS) return;
+    if (autosave_attempted &&
+        now_ms - last_autosave_attempt_ms < AUTOSAVE_ERROR_RETRY_MS) return;
+    // Avoid interrupting live countdown and queued DFPlayer speech.
+    if (timer.running || language_menu_open || !audio_queue_idle(&audio_queue)) return;
+
+    clock_settings_t cfg = settings_snapshot();
+    if (settings_equal(cfg, last_persisted_settings)) {
+        autosave_pending = false;
+        return;
+    }
+    autosave_attempted = true;
+    last_autosave_attempt_ms = now_ms;
+    settings_store_result_t result = settings_store_save(&cfg);
+    printf("[FLASH] autosave=%s lang=%s volume=%u exact=%s\n",
+           settings_store_result_name(result),
+           cfg.language ? "de" : "ru",
+           (unsigned)cfg.volume, cfg.exact_hour ? "ON" : "OFF");
+    if (result == SETTINGS_STORE_OK) {
+        last_persisted_settings = cfg;
+        autosave_pending = false;
+        flash_written_this_boot = true;
+        last_flash_write_ms = to_ms_since_boot(get_absolute_time());
+        autosave_attempted = false;
+    } else {
+        puts("[FLASH] autosave failed; retry no sooner than 60s");
+    }
+}
+
+static void print_autosave_status(uint64_t now_ms) {
+    clock_settings_t cfg = settings_snapshot();
+    uint64_t debounce = autosave_pending &&
+        now_ms - last_settings_change_ms < AUTOSAVE_DEBOUNCE_MS
+        ? AUTOSAVE_DEBOUNCE_MS - (now_ms - last_settings_change_ms) : 0u;
+    uint64_t cooldown = flash_written_this_boot &&
+        now_ms - last_flash_write_ms < AUTOSAVE_MIN_WRITE_INTERVAL_MS
+        ? AUTOSAVE_MIN_WRITE_INTERVAL_MS - (now_ms - last_flash_write_ms) : 0u;
+    uint64_t retry = autosave_attempted &&
+        now_ms - last_autosave_attempt_ms < AUTOSAVE_ERROR_RETRY_MS
+        ? AUTOSAVE_ERROR_RETRY_MS - (now_ms - last_autosave_attempt_ms) : 0u;
+    printf("[FLASH] autosave pending=%s current=%s,%u,%s debounce=%lums cooldown=%lums retry=%lums\n",
+           autosave_pending ? "yes" : "no", cfg.language ? "de" : "ru",
+           (unsigned)cfg.volume, cfg.exact_hour ? "ON" : "OFF",
+           (unsigned long)debounce, (unsigned long)cooldown, (unsigned long)retry);
+}
+
 static void change_volume(int direction) {
     int requested = (int)volume + direction;
     if (requested < 0) requested = 0;
     if (requested > 30) requested = 30;
     if (requested == volume) return;
     volume = (uint8_t)requested;
+    settings_mark_changed();
     audio_queue_set_volume(&audio_queue, volume);
     volume_overlay_until_ms = to_ms_since_boot(get_absolute_time()) + VOLUME_OVERLAY_MS;
     printf("[AUDIO] volume=%u/30 sound=%s\n", (unsigned)volume,
@@ -150,8 +240,10 @@ static void toggle_sound(void) {
 static void close_language_menu(bool commit) {
     if (!language_menu_open) return;
     if (commit) {
+        speech_language_t previous = language;
         language = language_menu_choice;
-        printf("[MENU] Language saved to RAM: %s (not flash)\n",
+        if (previous != language) settings_mark_changed();
+        printf("[MENU] Language selected: %s (autosave if changed)\n",
                speech_language_name(language));
     } else {
         printf("[MENU] Language selection cancelled; remains %s\n",
@@ -174,15 +266,17 @@ static void open_language_menu(uint64_t now_ms) {
 }
 
 static void save_settings_now(void) {
-    clock_settings_t cfg = {
-        .language = (uint8_t)language,
-        .volume = volume,
-        .exact_hour = exact_hour_phrase
-    };
+    clock_settings_t cfg = settings_snapshot();
     settings_store_result_t result = settings_store_save(&cfg);
     printf("[FLASH] save=%s\n", settings_store_result_name(result));
-    if (result == SETTINGS_STORE_OCCUPIED) {
-        puts("[FLASH] Refusing to erase unknown contents; backup MicroPython FS first.");
+    if (result == SETTINGS_STORE_OK) {
+        last_persisted_settings = cfg;
+        autosave_pending = false;
+        flash_written_this_boot = true;
+        last_flash_write_ms = to_ms_since_boot(get_absolute_time());
+        autosave_attempted = false;
+    } else if (result == SETTINGS_STORE_OCCUPIED) {
+        puts("[FLASH] Refusing to erase unknown flash contents.");
     }
 }
 
@@ -200,6 +294,9 @@ static void load_settings_at_boot(void) {
         printf("[FLASH] load=%s; using defaults (RU, volume=10)\n",
                settings_store_result_name(result));
     }
+    // Boot never triggers a write just because records are absent.
+    last_persisted_settings = settings_snapshot();
+    autosave_pending = false;
 }
 
 static void handle_command(char *line) {
@@ -208,7 +305,7 @@ static void handle_command(char *line) {
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, save, help");
+        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, save, help");
     } else if (strcmp(line, "flash-info") == 0) {
         settings_store_print_info();
     } else if (strcmp(line, "flash-inspect") == 0) {
@@ -217,6 +314,8 @@ static void handle_command(char *line) {
         settings_store_dump_tail();
     } else if (strcmp(line, "save") == 0) {
         save_settings_now();
+    } else if (strcmp(line, "autosave-status") == 0) {
+        print_autosave_status(now);
     } else if (strcmp(line, "menu") == 0) {
         if (language_menu_open) close_language_menu(false);
         else open_language_menu(now);
@@ -251,22 +350,29 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "lang") == 0) {
         printf("[SPEECH] language=%s\n", speech_language_name(language));
     } else if (strcmp(line, "lang ru") == 0 || strcmp(line, "lang de") == 0) {
+        speech_language_t previous = language;
         language = line[5] == 'd' ? SPEECH_DE : SPEECH_RU;
+        if (previous != language) settings_mark_changed();
         if (language_menu_open) {
             language_menu_choice = language;
             language_menu_last_input_ms = now;
         }
-        printf("[SPEECH] language=%s (RAM only)\n", speech_language_name(language));
+        printf("[SPEECH] language=%s\n", speech_language_name(language));
     } else if (strcmp(line, "exact on") == 0 || strcmp(line, "exact off") == 0) {
+        bool previous = exact_hour_phrase;
         exact_hour_phrase = line[6] == 'o' && line[7] == 'n';
-        printf("[SPEECH] exact_hour=%s (RAM only)\n", exact_hour_phrase ? "ON" : "OFF");
+        if (previous != exact_hour_phrase) settings_mark_changed();
+        printf("[SPEECH] exact_hour=%s\n", exact_hour_phrase ? "ON" : "OFF");
     } else if (strncmp(line, "vol", 3) == 0 && isspace((unsigned char)line[3])) {
         unsigned int requested = 0;
         char extra = 0;
         if (sscanf(line + 3, " %u %c", &requested, &extra) != 1 || requested > 30) {
             puts("[AUDIO] Use vol <0..30>");
         } else {
-            volume = (uint8_t)requested;
+            if (volume != (uint8_t)requested) {
+                volume = (uint8_t)requested;
+                settings_mark_changed();
+            }
             audio_queue_set_volume(&audio_queue, volume);
             volume_overlay_until_ms = now + VOLUME_OVERLAY_MS;
             printf("[AUDIO] volume=%u/30\n", (unsigned)volume);
@@ -440,6 +546,7 @@ int main(void) {
         controls_poll(to_ms_since_boot(get_absolute_time()), on_control_event, NULL);
         uint64_t now = to_ms_since_boot(get_absolute_time());
         countdown_service(&timer, now);
+        autosave_service(now);
         if (language_menu_open &&
             now - language_menu_last_input_ms >= LANGUAGE_MENU_TIMEOUT_MS) {
             puts("[MENU] Timeout (20s); discarding unconfirmed choice");
