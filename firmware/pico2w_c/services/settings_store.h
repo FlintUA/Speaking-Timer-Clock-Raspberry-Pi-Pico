@@ -1,6 +1,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include "alarm_engine.h"
 
 // Two provisional 4 KiB sectors, excluding the final sector (RP2350-E10 UF2 workaround).
 // A/B records preserve a previous valid record when saving a new one.
@@ -14,6 +15,7 @@ typedef struct {
     uint8_t quiet_end;   // 0..23
     bool half_hour_enabled;
     uint8_t clock_mode; // 0=VOICE, 1=CHIME (v2 reserved byte, FF=legacy VOICE)
+    alarm_entry_t alarms[CLOCK_ALARM_COUNT]; // v3 only; old v1/v2 load as defaults OFF
 } clock_settings_t;
 
 typedef enum {
@@ -34,4 +36,7 @@ void settings_store_inspect(void);
 // Print the final 256 bytes of flash as hex and their CRC32; read-only.
 void settings_store_dump_tail(void);
 settings_store_result_t settings_store_load(clock_settings_t *out);
+// The current v3 implementation writes only when explicitly called by the app.
+// Loading v1/v2 never causes automatic migration.
+// The app should use settings_store_save for a deliberate v3 update only.
 settings_store_result_t settings_store_save(const clock_settings_t *settings);
