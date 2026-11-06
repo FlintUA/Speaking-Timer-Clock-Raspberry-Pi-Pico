@@ -234,3 +234,16 @@ The user ran the experimental clock firmware on assembled **Pico 2 W COM8** and 
 This proves FAT32 directory traversal and first MP3 sector access but **not full-file reading, decoding, or routing audio from SD into JBL**.
 
 To protect against loud playback during initial A2DP tests, the experimental BTstack source-generation patch was updated to multiply the output by 0.1 (integer PCM samples divided by 10) for both the short tone and PCM test clip, before SBC encoding. This is **not** an AVRCP/absolute-volume adjustment on the JBL speaker itself, and does not change the DFPlayer local amplifier. User should additionally set JBL hardware volume low before testing. Compile and hardware effect of the new attenuation are not yet verified.
+
+
+## Incremental full-file FAT32 read diagnostics staged (2026-11-06, pending hardware test)
+
+After user confirmed JBL output with conservative 10% PCM gain and successful COM8 `sd-list`/`sd-file`/`bt-status`, introduced an experimental bounded *whole-file* test:
+
+- `sd-stream 07/001.mp3` - opens an 8.3-named file and reads it incrementally, **one 512-byte sector per main loop iteration**, including FAT32 next-cluster traversal. Emits final `[SD-STREAM] PASS bytes=<...> clusters=<...> crc32=<8 hex digits>`.
+- `sd-stop` cancels the read. Invalid or premature FAT chains and sector read errors report FAIL. The diagnostic is **read-only** and refuses to start while timer/alarm/music/queued DFPlayer audio is active.
+- A strict maximum file size of 2 MiB protects the live clock from unexpectedly huge test inputs.
+- This is a **CRC32 transfer test**, not MP3 decoding, playback, or proof of correct bytes without a separately computed reference CRC32. The CRC can later be compared to a host-side `Get-FileHash` alternative or Python `zlib.crc32`.
+- Code added in `firmware/pico2w_c/drivers/sd_fat32.c/.h` and `main.c`; no writes to SD, changes to Flash settings, or DFPlayer modifications.
+- Test only on the assembled Pico 2 W COM8 after `git pull --ff-only` and `powershell -ExecutionPolicy Bypass -File .\update-pico.ps1 -Build -Bluetooth`. Close serial monitor first. Then `sd-test`, `sd-stream 07/001.mp3`; watch for `PASS bytes=53103`; follow with `bt-status`, `flash-info`, `alarm-status`.
+- Compilation, CRC results, uninterrupted Bluetooth playback and RTC responsiveness **not verified yet**. Keep firmware rollback option. Helix/MP3 decoder integration is a later step.
