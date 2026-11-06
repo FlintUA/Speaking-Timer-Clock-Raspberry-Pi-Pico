@@ -6,6 +6,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include "pico/stdlib.h"
+#include "pico/bootrom.h"
 #include "hardware/i2c.h"
 #include "ds1302.h"
 #include "lcd1602_i2c.h"
@@ -47,6 +48,10 @@ static bool alarm_audio_armed;
 #define ALARM_SAFETY_TIMEOUT_MS (15u * 60u * 1000u)
 static char command_line[48];
 static size_t command_length;
+// BOOTSEL is intentionally a two-step, time-limited serial operation.
+#define BOOTSEL_CONFIRM_WINDOW_MS 15000u
+static bool bootsel_armed;
+static uint64_t bootsel_armed_ms;
 static bool timer_screen;
 static audio_queue_t audio_queue;
 static uint8_t volume = 10; // Default; overridden by saved flash settings.
@@ -1455,14 +1460,73 @@ static void alarm_test(char *args) {
     }
 }
 
+static bool bootsel_safe(uint64_t now) {
+    if (alarm_active_index >= 0 || timer.running ||
+        (finished_screen_until_ms && now < finished_screen_until_ms) ||
+        menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED ||
+        music_ui_open || alarm_preview_active || music_ui_playing) {
+        puts("[BOOTSEL] REFUSED: timer, alarm, menu, or music is active");
+        return false;
+    }
+    if (autosave_pending || autosave_attempted) {
+        puts("[BOOTSEL] REFUSED: flash settings save pending/retrying; wait for autosave=OK");
+        return false;
+    }
+    if (!audio_queue_idle(&audio_queue) || dfplayer_busy()) {
+        puts("[BOOTSEL] REFUSED: DFPlayer/queue is busy");
+        return false;
+    }
+    return true;
+}
+
+static void bootsel_command(const char *args, uint64_t now) {
+    if (strcmp(args, "arm") == 0) {
+        bootsel_armed = false;
+        if (!bootsel_safe(now)) return;
+        bootsel_armed = true;
+        bootsel_armed_ms = now;
+        puts("[BOOTSEL] ARMED for 15s; send: bootsel confirm");
+        return;
+    }
+    if (strcmp(args, "cancel") == 0) {
+        bootsel_armed = false;
+        puts("[BOOTSEL] CANCELLED");
+        return;
+    }
+    if (strcmp(args, "confirm") == 0) {
+        if (!bootsel_armed || now - bootsel_armed_ms > BOOTSEL_CONFIRM_WINDOW_MS) {
+            bootsel_armed = false;
+            puts("[BOOTSEL] NOT ARMED or EXPIRED; send: bootsel arm");
+            return;
+        }
+        bootsel_armed = false;
+        if (!bootsel_safe(now)) return;
+        puts("[BOOTSEL] ENTERING USB BOOTSEL; COM port will disconnect.");
+        puts("[BOOTSEL] Copy speaking_clock_c.uf2 to RPI-RP2; existing flash settings normally remain.");
+        fflush(stdout);
+        sleep_ms(250u); // Give the USB serial host time to receive diagnostics.
+        rom_reset_usb_boot(0u, 0u); // Both USB mass-storage and PICOBOOT enabled.
+    }
+    puts("[BOOTSEL] Usage: bootsel arm | bootsel confirm | bootsel cancel");
+}
+
 static void handle_command(char *line) {
     while (isspace((unsigned char)*line)) ++line;
     size_t len = strlen(line);
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
-    if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
+    if (strcmp(line, "bootsel arm") == 0) {
+        bootsel_command("arm", now);
+    } else if (strcmp(line, "bootsel confirm") == 0) {
+        bootsel_command("confirm", now);
+    } else if (strcmp(line, "bootsel cancel") == 0) {
+        bootsel_command("cancel", now);
+    } else if (strcmp(line, "bootsel") == 0) {
+        puts("[BOOTSEL] Usage: bootsel arm | bootsel confirm | bootsel cancel");
+    } else if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
+        puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
     } else if (strcmp(line, "rtc-debug") == 0) {
         print_rtc_debug();
     } else if (strcmp(line, "rtc-reset-stats") == 0) {
@@ -1846,6 +1910,12 @@ int main(void) {
     uint32_t previous_remaining = UINT32_MAX;
     while (true) {
         poll_serial();
+        if (bootsel_armed &&
+            to_ms_since_boot(get_absolute_time()) - bootsel_armed_ms >
+                BOOTSEL_CONFIRM_WINDOW_MS) {
+            bootsel_armed = false;
+            puts("[BOOTSEL] confirmation window expired");
+        }
         audio_queue_service(&audio_queue, to_ms_since_boot(get_absolute_time()));
         controls_poll(to_ms_since_boot(get_absolute_time()), on_control_event, NULL);
         uint64_t now = to_ms_since_boot(get_absolute_time());
