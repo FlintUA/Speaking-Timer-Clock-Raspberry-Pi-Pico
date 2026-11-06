@@ -83,6 +83,20 @@ static ds1302_datetime_t menu_rtc_choice;
 static uint64_t menu_last_input_ms;
 #define SETTINGS_MENU_TIMEOUT_MS 20000u
 #define SETTINGS_MENU_ITEMS 7u
+// Alarm editor is separate from settings; changes stay in draft until DONE.
+typedef enum {
+    ALARM_UI_CLOSED = 0,
+    ALARM_UI_LIST,
+    ALARM_UI_ENABLED,
+    ALARM_UI_HOUR,
+    ALARM_UI_MINUTE,
+    ALARM_UI_SOUND,
+    ALARM_UI_TRACK
+} alarm_ui_state_t;
+static alarm_ui_state_t alarm_ui_state;
+static uint8_t alarm_ui_index;
+static alarm_entry_t alarm_ui_draft;
+static uint64_t alarm_ui_last_input_ms;
 static bool exact_hour_phrase;
 static bool quiet_enabled = true;
 static uint8_t quiet_start = 22;
@@ -444,6 +458,7 @@ static void autosave_service(uint64_t now_ms) {
     // Handle timer FINISHED first. Block flash through the final display
     // window, queued audio and physical DFPlayer BUSY (even for clones).
     if (timer.running || alarm_active_index >= 0 || menu_state != MENU_CLOSED ||
+        alarm_ui_state != ALARM_UI_CLOSED ||
         (finished_screen_until_ms && now_ms < finished_screen_until_ms) ||
         !audio_queue_idle(&audio_queue) || dfplayer_busy()) return;
 
@@ -489,8 +504,9 @@ static void print_autosave_status(uint64_t now_ms) {
 
 static void set_clock_mode(uint8_t requested, uint64_t now) {
     if (requested > 1u) return;
-    if (timer.running || alarm_active_index >= 0 || menu_state != MENU_CLOSED) {
-        puts("[MODE] Change blocked: timer/alarm active or settings open");
+    if (timer.running || alarm_active_index >= 0 || menu_state != MENU_CLOSED ||
+        alarm_ui_state != ALARM_UI_CLOSED) {
+        puts("[MODE] Change blocked: timer/alarm active or menu open");
         return;
     }
     if (clock_mode != requested) {
@@ -580,6 +596,149 @@ static bool menu_write_rtc(bool date_only) {
            (unsigned)fresh.hour, (unsigned)fresh.minute, (unsigned)fresh.second,
            (unsigned)fresh.weekday);
     return true;
+}
+
+static void alarm_ui_close(const char *reason) {
+    if (alarm_ui_state == ALARM_UI_CLOSED) return;
+    alarm_ui_state = ALARM_UI_CLOSED;
+    timer_screen = false;
+    printf("[ALARM-UI] closed=%s\n", reason);
+}
+
+static void alarm_ui_open(uint64_t now) {
+    if (timer.running || alarm_active_index >= 0 ||
+        menu_state != MENU_CLOSED) {
+        puts("[ALARM-UI] busy: timer/alarm/settings active");
+        return;
+    }
+    alarm_ui_index = 0u;
+    alarm_ui_state = ALARM_UI_LIST;
+    alarm_ui_last_input_ms = now;
+    timer_screen = false;
+    puts("[ALARM-UI] list opened; encoder=select TIMER=edit MINUS=exit");
+}
+
+static void alarm_ui_begin_edit(uint64_t now) {
+    if (alarm_ui_state != ALARM_UI_LIST) return;
+    alarm_ui_draft = alarms[alarm_ui_index];
+    alarm_ui_state = ALARM_UI_ENABLED;
+    alarm_ui_last_input_ms = now;
+    printf("[ALARM-UI] editing alarm %u (draft; no flash write)\n",
+           (unsigned)(alarm_ui_index + 1u));
+}
+
+static void alarm_ui_next(uint64_t now) {
+    if (alarm_ui_state == ALARM_UI_CLOSED) return;
+    alarm_ui_last_input_ms = now;
+    if (alarm_ui_state == ALARM_UI_LIST) {
+        alarm_ui_begin_edit(now);
+        return;
+    }
+    switch (alarm_ui_state) {
+        case ALARM_UI_ENABLED: alarm_ui_state = ALARM_UI_HOUR; break;
+        case ALARM_UI_HOUR: alarm_ui_state = ALARM_UI_MINUTE; break;
+        case ALARM_UI_MINUTE: alarm_ui_state = ALARM_UI_SOUND; break;
+        case ALARM_UI_SOUND:
+            if (alarm_ui_draft.sound == ALARM_SOUND_MUSIC) {
+                alarm_ui_state = ALARM_UI_TRACK;
+                break;
+            }
+            // Signal has no track editing; commit on next press.
+            goto commit;
+        case ALARM_UI_TRACK:
+commit:
+            if (!alarm_entry_valid(&alarm_ui_draft)) {
+                puts("[ALARM-UI] invalid draft; refused to save");
+                return;
+            }
+            {
+                alarm_entry_t *saved = &alarms[alarm_ui_index];
+                bool changed = saved->enabled != alarm_ui_draft.enabled ||
+                               saved->hour != alarm_ui_draft.hour ||
+                               saved->minute != alarm_ui_draft.minute ||
+                               saved->sound != alarm_ui_draft.sound ||
+                               saved->track != alarm_ui_draft.track;
+                *saved = alarm_ui_draft;
+                if (changed) {
+                    // Consume current minute if this alarm was just
+                    // enabled or edited for the current RTC minute.
+                    ds1302_datetime_t dt = {0};
+                    if (saved->enabled && ds1302_read_datetime(&dt) &&
+                        dt.hour == saved->hour && dt.minute == saved->minute) {
+                        uint64_t key = auto_minute_key(&dt);
+                        if (!alarm_scheduler.minute_valid ||
+                            alarm_scheduler.minute_key != key) {
+                            alarm_scheduler.minute_valid = true;
+                            alarm_scheduler.minute_key = key;
+                            alarm_scheduler.fired_mask = 0u;
+                        }
+                        alarm_scheduler.fired_mask |=
+                            (uint8_t)(1u << alarm_ui_index);
+                    }
+                    settings_mark_changed();
+                }
+                printf("[ALARM-UI] saved #%u %s %02u:%02u %s track=%u changed=%s\n",
+                       (unsigned)(alarm_ui_index + 1u),
+                       saved->enabled ? "ON" : "OFF",
+                       (unsigned)saved->hour, (unsigned)saved->minute,
+                       saved->sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL",
+                       (unsigned)saved->track, changed ? "YES" : "NO");
+            }
+            alarm_ui_state = ALARM_UI_LIST;
+            return;
+        default: return;
+    }
+    printf("[ALARM-UI] field=%u\n", (unsigned)alarm_ui_state);
+}
+
+static void alarm_ui_rotate(int direction, uint64_t now) {
+    if (alarm_ui_state == ALARM_UI_CLOSED) return;
+    alarm_ui_last_input_ms = now;
+    switch (alarm_ui_state) {
+        case ALARM_UI_LIST:
+            alarm_ui_index = wrap_u8(alarm_ui_index, 0u,
+                                     CLOCK_ALARM_COUNT - 1u, direction);
+            printf("[ALARM-UI] selected #%u\n", (unsigned)(alarm_ui_index + 1u));
+            return;
+        case ALARM_UI_ENABLED:
+            alarm_ui_draft.enabled = !alarm_ui_draft.enabled;
+            break;
+        case ALARM_UI_HOUR:
+            alarm_ui_draft.hour = wrap_u8(alarm_ui_draft.hour, 0u, 23u, direction);
+            break;
+        case ALARM_UI_MINUTE:
+            alarm_ui_draft.minute = wrap_u8(alarm_ui_draft.minute, 0u, 59u, direction);
+            break;
+        case ALARM_UI_SOUND:
+            alarm_ui_draft.sound =
+                alarm_ui_draft.sound == ALARM_SOUND_SIGNAL ?
+                ALARM_SOUND_MUSIC : ALARM_SOUND_SIGNAL;
+            break;
+        case ALARM_UI_TRACK:
+            alarm_ui_draft.track = wrap_u8(alarm_ui_draft.track, 1u,
+                                            CLOCK_ALARM_MAX_TRACK, direction);
+            break;
+        default: return;
+    }
+    printf("[ALARM-UI] draft #%u %s %02u:%02u %s track=%u\n",
+           (unsigned)(alarm_ui_index + 1u),
+           alarm_ui_draft.enabled ? "ON" : "OFF",
+           (unsigned)alarm_ui_draft.hour, (unsigned)alarm_ui_draft.minute,
+           alarm_ui_draft.sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL",
+           (unsigned)alarm_ui_draft.track);
+}
+
+static void alarm_ui_back(uint64_t now) {
+    if (alarm_ui_state == ALARM_UI_CLOSED) return;
+    alarm_ui_last_input_ms = now;
+    if (alarm_ui_state == ALARM_UI_LIST) {
+        alarm_ui_close("MINUS");
+    } else {
+        // Never apply an incomplete draft.
+        alarm_ui_state = ALARM_UI_LIST;
+        printf("[ALARM-UI] edit cancelled #%u (RAM/flash unchanged)\n",
+               (unsigned)(alarm_ui_index + 1u));
+    }
 }
 
 static const char *menu_item_name(unsigned index) {
@@ -982,7 +1141,7 @@ static void alarm_service_rtc(const ds1302_datetime_t *dt, uint64_t now) {
         printf("[ALARM] %d skipped=TIMER_PRIORITY\n", index + 1);
         return;
     }
-    if (menu_state != MENU_CLOSED) {
+    if (menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED) {
         printf("[ALARM] %d skipped=MENU_OPEN\n", index + 1);
         return;
     }
@@ -1040,8 +1199,8 @@ static void alarm_set(char *args) {
         puts("[ALARM] Use alarm-set HH MM signal OR alarm-set HH MM music TRACK(1..45)");
         return;
     }
-    if (alarm_active_index >= 0) {
-        puts("[ALARM] Stop ringing alarm before changing its configuration");
+    if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED) {
+        puts("[ALARM] Stop ringing alarm or close editor before configuration");
         return;
     }
     alarms[0].enabled = true;
@@ -1077,8 +1236,8 @@ static void alarm_config(char *args) {
         puts("[ALARM] Use alarm-config N HH MM signal OR alarm-config N HH MM music TRACK");
         return;
     }
-    if (alarm_active_index >= 0) {
-        puts("[ALARM] config blocked: an alarm is ringing");
+    if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED) {
+        puts("[ALARM] config blocked: alarm ringing or alarm editor open");
         return;
     }
     alarm_entry_t *a = &alarms[slot - 1u];
@@ -1113,8 +1272,9 @@ static void alarm_enable(char *args) {
         puts("[ALARM] Use alarm-enable N on|off (N=1..5)");
         return;
     }
-    if (alarm_active_index >= 0 && (unsigned)(alarm_active_index + 1) == slot) {
-        puts("[ALARM] first stop ringing alarm with alarm-stop");
+    if (alarm_ui_state != ALARM_UI_CLOSED ||
+        (alarm_active_index >= 0 && (unsigned)(alarm_active_index + 1) == slot)) {
+        puts("[ALARM] close alarm editor or stop ringing alarm first");
         return;
     }
     alarm_entry_t *a = &alarms[slot - 1u];
@@ -1253,8 +1413,8 @@ static void handle_command(char *line) {
                (unsigned)quiet_end, half_hour_enabled ? "ON" : "OFF",
                 auto_enabled ? "ON" : "OFF");
     } else if (strcmp(line, "menu") == 0) {
-        if (alarm_active_index >= 0) {
-            puts("[MENU] blocked: alarm ringing");
+        if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED) {
+            puts("[MENU] blocked: alarm ringing or alarm editor open");
         } else if (menu_state != MENU_CLOSED) menu_close();
         else menu_open(now);
     } else if (strcmp(line, "start") == 0) {
@@ -1389,6 +1549,10 @@ static void on_control_event(const control_event_t *event, void *context) {
         change_volume(event->direction);
     } else if (event->type == CONTROL_TIMER_ROTATE) {
         printf("[INPUT] encoder TIMER %s\n", event->direction > 0 ? "CW" : "CCW");
+        if (alarm_ui_state != ALARM_UI_CLOSED) {
+            alarm_ui_rotate(event->direction, now);
+            return;
+        }
         if (menu_state != MENU_CLOSED) {
             menu_rotate(event->direction, now);
             return;
@@ -1412,9 +1576,24 @@ static void on_control_event(const control_event_t *event, void *context) {
             alarm_stop("BUTTON");
             return;
         }
-        // While the first alarm rings, only ALARM (stop) and VOLUME
-        // remain interactive. Other button actions must not clear audio.
+        // During ringing, ALARM stops playback; volume remains available.
         if (alarm_active_index >= 0) return;
+        if (event->type == CONTROL_BUTTON_PRESS && event->button == BUTTON_ALARM) {
+            if (alarm_ui_state == ALARM_UI_CLOSED) {
+                if (menu_state == MENU_CLOSED) alarm_ui_open(now);
+            } else {
+                alarm_ui_close("ALARM");
+            }
+            return;
+        }
+        if (alarm_ui_state != ALARM_UI_CLOSED) {
+            if (event->type == CONTROL_BUTTON_PRESS) {
+                if (event->button == BUTTON_TIMER ||
+                    event->button == BUTTON_SETTINGS) alarm_ui_next(now);
+                else if (event->button == BUTTON_MINUS) alarm_ui_back(now);
+            }
+            return;
+        }
         if (event->type == CONTROL_BUTTON_PRESS && event->button == BUTTON_SETTINGS) {
             if (menu_state == MENU_CLOSED) menu_open(now);
             else if (menu_state == MENU_LIST) menu_begin_edit(now);
@@ -1522,6 +1701,10 @@ int main(void) {
             puts("[MENU] Timeout (20s); unsaved edit discarded");
             menu_close();
         }
+        if (alarm_ui_state != ALARM_UI_CLOSED &&
+            now - alarm_ui_last_input_ms >= SETTINGS_MENU_TIMEOUT_MS) {
+            alarm_ui_close("TIMEOUT: draft discarded");
+        }
         alarm_service_playback(now);
         autosave_service(now);
         if (timer.running) {
@@ -1553,7 +1736,35 @@ int main(void) {
         }
 
         char top[17], bottom[17];
-        if (menu_state == MENU_LIST) {
+        if (alarm_ui_state == ALARM_UI_LIST) {
+            const alarm_entry_t *a = &alarms[alarm_ui_index];
+            snprintf(top, sizeof(top), "ALARM %u/5 %s",
+                     (unsigned)(alarm_ui_index + 1u), a->enabled ? "ON" : "OFF");
+            snprintf(bottom, sizeof(bottom), "%02u:%02u %s",
+                     (unsigned)a->hour, (unsigned)a->minute,
+                     a->sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL");
+        } else if (alarm_ui_state != ALARM_UI_CLOSED) {
+            const char *field = alarm_ui_state == ALARM_UI_ENABLED ? "ON/OFF" :
+                                alarm_ui_state == ALARM_UI_HOUR ? "HOUR" :
+                                alarm_ui_state == ALARM_UI_MINUTE ? "MINUTE" :
+                                alarm_ui_state == ALARM_UI_SOUND ? "SOUND" : "TRACK";
+            snprintf(top, sizeof(top), "ALARM %u %s",
+                     (unsigned)(alarm_ui_index + 1u), field);
+            if (alarm_ui_state == ALARM_UI_ENABLED)
+                snprintf(bottom, sizeof(bottom), "%s PRESS=NEXT",
+                         alarm_ui_draft.enabled ? "ON" : "OFF");
+            else if (alarm_ui_state == ALARM_UI_HOUR ||
+                     alarm_ui_state == ALARM_UI_MINUTE)
+                snprintf(bottom, sizeof(bottom), "%02u:%02u PRESS=NEXT",
+                         (unsigned)alarm_ui_draft.hour,
+                         (unsigned)alarm_ui_draft.minute);
+            else if (alarm_ui_state == ALARM_UI_SOUND)
+                snprintf(bottom, sizeof(bottom), "%s NEXT",
+                         alarm_ui_draft.sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL");
+            else
+                snprintf(bottom, sizeof(bottom), "%u PRESS=SAVE",
+                         (unsigned)alarm_ui_draft.track);
+        } else if (menu_state == MENU_LIST) {
             snprintf(top, sizeof(top), "SETTINGS %u/%u",
                      (unsigned)(menu_index + 1u), (unsigned)SETTINGS_MENU_ITEMS);
             snprintf(bottom, sizeof(bottom), "%s", menu_item_name(menu_index));
