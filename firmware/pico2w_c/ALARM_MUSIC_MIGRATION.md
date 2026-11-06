@@ -376,3 +376,49 @@ and physical DFPlayer/LCD test. No flash record or settings schema changes.**
 **Known unverified conditions:** behaviour on actual DFPlayer BUSY
 transitions, host C compilation, settings restoration after new editor
 interactions. Music-player long ALARM-press feature remains separate.
+
+
+## Stage 5C - standalone music player (needs physical Pico validation)
+
+The C firmware now distinguishes short and long presses of ALARM:
+- **Short ALARM (< 900 ms)** on release opens/closes the existing five-alarm editor.
+- **Long ALARM (>= 900 ms)** on release opens the standalone music player,
+  unless alarm editor, timer, settings menu, ringing alarm or other audio is active.
+- While the player is open: **TIMER encoder** selects tracks 1..45 from
+  folder 08; **TIMER button** or **SETTINGS button** toggles play/stop;
+  **MINUS** or **ALARM** closes and stops; VOLUME encoder remains available.
+- The LCD shows `MUSIC PLAYER` / `T05 PLAY` or `T05 STOP`.
+  There is no 20-second menu timeout for the player; tracks play until
+  their natural end or an explicit stop.
+- Only one selection is played at a time, and changing selection stops
+  the previous track. No auto-start on rotary events.
+- The scheduled alarm retains priority and interrupts and closes
+  the player before queuing its own audio. Countdown and menu edits
+  remain blocked while the player is open. Normal hourly announcements
+  are suppressed while the player is open.
+- ALARM PRESS while an actual alarm is ringing still stops immediately.
+  The corresponding ALARM RELEASE is consumed and must not open a menu.
+- No persistent player state and **no changes to flash v3 schema**.
+  Serial `alarm-status` and `flash-info` remain available.
+
+### Physical smoke test
+1. Build and flash; confirm `alarm-status` values are unchanged.
+   Note: after previous collision test, alarms #4/#5 may still be
+   temporarily configured to the same future time - restore them
+   when convenient.
+2. Quickly press and release ALARM (<900 ms); verify normal
+   five-alarm list. Press ALARM again to close.
+3. Hold ALARM for at least 1 second and release; expect
+   `[MUSIC-UI] opened track=1 ...`.
+4. Rotate TIMER to track 05, press TIMER to start; listen for real
+   music. Press TIMER to stop. Press TIMER to start again.
+5. Rotate one click while playing; expect
+   `[MUSIC-UI] stopped=TRACK_CHANGED` and a selected track log.
+6. Press MINUS to close. Check `flash-info` has unchanged sequences
+   and `alarm-status` is unchanged.
+7. Optionally create an alarm for the next minute while music is
+   playing and confirm alarm-priority interruption. Do not run this
+   near a real alarm you need to hear.
+
+This stage was committed to GitHub but has not been compiled with the
+Pico SDK or validated on the actual LCD/DFPlayer yet.
