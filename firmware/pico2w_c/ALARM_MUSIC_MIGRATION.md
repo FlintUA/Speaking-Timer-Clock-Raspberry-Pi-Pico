@@ -166,3 +166,81 @@ Audio:
 Notes: this is a **source change requiring local Pico SDK build and
 hardware validation**. Five-alarm editor, persistent flash format,
 music player and multi-alarm concurrency remain future stages.
+
+
+## Stage 4A - five-alarm v3 flash layout and serial configuration
+
+**Source code implemented; hardware build and flash migration NOT verified yet.**
+
+- Settings record v3 is 52 bytes, CRC32 at byte offset 48.
+- Previous record formats v1 (20 bytes) and v2 (24 bytes) remain
+  recognized by CRC and included in sector ownership checks.
+- The existing 4 KiB A/B slots and flash image-overlap guard are
+  unchanged. Unknown nonblank sectors are still refused for erase.
+- Old v1/v2 records load five disabled alarms with defaults at
+  07:00, 08:00, 09:00, 10:00 and 11:00. **Boot does not
+  automatically rewrite v1/v2 to v3.**
+- Each v3 alarm has exactly five stored bytes: enabled, hour, minute,
+  sound (0=signal, 1=music), music track (1..45), validated before
+  saving and when loading. No MCU ABI padding is stored.
+- All alarms are now loaded from v3 at power-on and participate in RTC
+  matching. The initial observed RTC minute is consumed on boot to
+  prevent stale alarm playback.
+- Alarm changes use the existing settings autosave (5 s idle debounce,
+  at most one flash write per 60 s within a boot), and are also
+  written by the existing `save` command. Flash writes remain blocked
+  during running timers/alarms, menu or audio output.
+- Newly introduced commands:
+  - `alarm-config N HH MM signal`
+  - `alarm-config N HH MM music TRACK`
+  - `alarm-enable N on|off`
+  - `alarm-status`
+  where N is 1..5, hour 0..23, minute 0..59, TRACK 1..45.
+  The legacy `alarm-set HH MM signal|music [TRACK]` and
+  `alarm-off` still address alarm 1. `alarm-stop` stops the currently
+  ringing alarm.
+- Audio, DFPlayer BUSY completion, button ALARM stop, 15 minute
+  timeout and automatic-chime suppression reuse the validated alarm-1
+  path. At this stage simultaneous alarms set to the same minute are
+  **not guaranteed** to sound sequentially; test different minutes.
+- LCD editor and alarms conflict/coincidence behavior are remaining
+  stages, not implemented by this change.
+
+### Physical migration test - start with flash inspection
+
+1. Before installing the new UF2, save a copy of current COM8 output
+   from `flash-info`, `flash-inspect`, `alarm-status` and
+   `autosave-status`. Confirm v2 A/B records are valid.
+2. Build/flash v3, then run `flash-info` and `alarm-status`.
+   It should read the existing v2 settings, both slots should still
+   report version 2, and all five alarms should be OFF. Do not change
+   other settings during this check.
+3. To deliberately exercise migration, configure just alarm 2 for a
+   time sufficiently in the future:
+   `alarm-config 2 09 14 signal`.
+   Verify `alarm-status`, allow autosave or issue `save` when audio
+   idle, and inspect `flash-info`. The newly written slot should
+   now report version 3, while the other slot remains the previous
+   v2 safety copy.
+4. Reboot; `alarm-status` must show alarm 2 enabled at 09:14, with
+   all the other defaults still OFF.
+5. Toggle alarm 2 OFF with `alarm-enable 2 off`, wait for autosave,
+   inspect both slots and reboot again. Expect stored OFF state.
+6. Finally test one alarm with signal and another with music at
+   **different** minutes (do not choose a time already passed).
+   Check manually that the alarm number and sound match their slot.
+
+### Compatibility caveat for rollback
+
+Although **new firmware reads v1, v2 and v3**, the older firmware only
+knows v1/v2. After two saves have replaced both A/B records with v3,
+flashing the old UF2 alone will not read the newer settings. Keep a
+backup of the previous settings/log before the first v3 write.
+Do not erase flash blindly to downgrade.
+
+### Limitations
+
+This implementation was inspected through repository source updates.
+It has **not** been compiled with the user's Pico SDK or verified on
+Pico 2 W. No claim of successful flash migration can be made until
+the physical tests above pass.
