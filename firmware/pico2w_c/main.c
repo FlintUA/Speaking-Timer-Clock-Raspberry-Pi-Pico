@@ -1641,11 +1641,21 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "bt-silence") == 0) {
         clock_a2dp_stop_tone();
 #endif
+    } else if (strcmp(line, "audio-select local") == 0) {
+        audio_router_select(&audio_router, AUDIO_OUTPUT_LOCAL);
+        puts("[AUDIO-ROUTE] Requested LOCAL (RAM only; DFPlayer remains physical output)");
+#ifdef CLOCK_ENABLE_A2DP
+    } else if (strcmp(line, "audio-select jbl") == 0) {
+        audio_router_select(&audio_router, AUDIO_OUTPUT_BT_JBL);
+        audio_router_bluetooth_state(&audio_router, clock_a2dp_stream_active());
+        puts("[AUDIO-ROUTE] Requested BT_JBL (readiness test only; audio queue still uses DFPlayer)");
+#endif
     } else if (strcmp(line, "audio-route") == 0) {
         printf("[AUDIO-ROUTE] requested=%s effective=%s bluetooth=%s\n",
                audio_router_name(audio_router.requested),
                audio_router_name(audio_router.effective),
-               audio_router.bt_connected ? "CONNECTED" : "OFFLINE");
+               audio_router.bt_connected ? "STREAM_ACTIVE" : "OFFLINE");
+        puts("[AUDIO-ROUTE] NOTE: logical readiness only; speech/music/alarms still play via DFPlayer");
     } else if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
@@ -2045,6 +2055,18 @@ int main(void) {
     uint64_t next_rtc_ms = 0;
     uint32_t previous_remaining = UINT32_MAX;
     while (true) {
+#ifdef CLOCK_ENABLE_A2DP
+        // Synchronize with actual media-stream status, including reconnect and loss.
+        // Only the configured JBL test endpoint is supported in this stage.
+        bool bt_ready = clock_a2dp_stream_active();
+        if (audio_router.requested == AUDIO_OUTPUT_BT_JBL &&
+            audio_router.bt_connected != bt_ready) {
+            audio_router_bluetooth_state(&audio_router, bt_ready);
+            printf("[AUDIO-ROUTE] bluetooth=%s effective=%s (no PCM routing yet)\n",
+                   bt_ready ? "STREAM_ACTIVE" : "OFFLINE",
+                   audio_router_name(audio_router.effective));
+        }
+#endif
         poll_serial();
         if (bootsel_armed &&
             to_ms_since_boot(get_absolute_time()) - bootsel_armed_ms >
