@@ -127,3 +127,12 @@ Next required tasks:
 - [ ] Bench-test encoder, display, DFPlayer, RTC, SPI SD and A2DP together before production migration.
 
 **Critical**: As of this decision, this is a *planned pin reservation*, not a claim that either current firmware supports the new GPIO mapping.
+
+
+### Hardware clarification: SD 3.3 V and separate display illumination (2026-11-06)
+
+The user confirmed that the **external SPI microSD module is a 3.3 V module**. Plan its VCC from Pico **3V3(OUT), physical pin 36**, and GND from common ground. All SPI signals GP8/GP9/GP10/GP11 must remain at **3.3 V logic**. The module's stated supply rating does not by itself confirm its exact breakout circuitry or current draw; verify markings/pinout and check power headroom before final connection.
+
+The installed **LCD1602 has no built-in backlight**. Consequently, GP6 (physical pin 9) is reserved for PWM drive of a **separate external LED used to illuminate the display**, rather than the LCD A/K backlight terminals or PCF8574 backpack's backlight control. Use GP6 -> approximately 1 kOhm base resistor -> NPN transistor (e.g. BC547/2N2222), emitter -> GND, collector -> LED cathode, LED anode -> LED current-limiting resistor -> appropriate supply. The previously proposed example uses VBUS 5 V through 220 Ohm for an LED with roughly 3 V forward drop, approximately 9 mA; confirm actual LED ratings and resistor/transistor pinout. Keep common ground; do not drive the LED directly from GPIO. VBUS 5 V is present only with suitable USB-derived power, so check the final clock power wiring before relying on it.
+
+Three planned operating modes remain **OFF, ON, AUTO** (day/night dimming), but PWM driver, scheduling, electrical connections and firmware implementation are **not yet completed**. This clarification does not change the agreed timer encoder relocation GP11->GP12 (DT) and GP10->GP13 (CLK), or planned microSD SPI1 pinout.
