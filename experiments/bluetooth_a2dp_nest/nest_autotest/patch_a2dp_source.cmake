@@ -27,7 +27,7 @@ static bool clock_a2dp_connect_address(const char *text){
                   (text[i] >= 'A' && text[i] <= 'F'))) return false;
         }
     }
-    if (media_tracker.a2dp_cid != 0 || clock_a2dp_stream_running){
+    if (media_tracker.a2dp_cid != 0){
         printf("[BT] Already connected or establishing; disconnect first\n");
         return false;
     }
