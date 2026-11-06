@@ -36,8 +36,8 @@ static int detect_lcd_address(void) {
 }
 
 static countdown_t timer;
-// First real alarm (slot 1 only) is opt-in via serial and RAM-only.
-// All five defaults remain OFF on boot. Flash v2 remains unchanged.
+// Five daily alarms; legacy v1/v2 loads disabled defaults.
+// v3 persists alarm entries alongside existing settings.
 static alarm_entry_t alarms[CLOCK_ALARM_COUNT];
 static alarm_scheduler_t alarm_scheduler;
 static int alarm_active_index = -1;
@@ -908,7 +908,7 @@ static void print_rtc_debug(void) {
 }
 
 static void alarm_status(void) {
-    printf("[ALARM] runtime RAM-only; slot1 opt-in; active=%d (0=none)\n",
+    printf("[ALARM] flash v3 capable; active=%d (0=none)\n",
            alarm_active_index + 1);
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
         const alarm_entry_t *a = &alarms[i];
@@ -956,14 +956,14 @@ static void alarm_service_rtc(const ds1302_datetime_t *dt, uint64_t now) {
     // a delayed alarm at second 01..05.
     int index = alarm_scheduler_pick(&alarm_scheduler, alarms, dt->year,
                             dt->month, dt->day, dt->hour, dt->minute, false);
-    if (index != 0) return; // Slot 1 alone is enabled for real playback.
+    if (index < 0) return;
     if (timer.running || (finished_screen_until_ms &&
         now < finished_screen_until_ms)) {
-        puts("[ALARM] 1 skipped=TIMER_PRIORITY");
+        printf("[ALARM] %d skipped=TIMER_PRIORITY\n", index + 1);
         return;
     }
     if (menu_state != MENU_CLOSED) {
-        puts("[ALARM] 1 skipped=MENU_OPEN");
+        printf("[ALARM] %d skipped=MENU_OPEN\n", index + 1);
         return;
     }
     // An alarm owns its minute: prevent normal xx:00/xx:30 announcements.
@@ -1001,7 +1001,7 @@ static void alarm_service_rtc(const ds1302_datetime_t *dt, uint64_t now) {
     alarm_active_index = index;
     alarm_deadline_ms = now + ALARM_SAFETY_TIMEOUT_MS;
     alarm_audio_armed = true;
-    printf("[ALARM] %d RINGING %02u:%02u sound=%s track=%u (RAM only)\n",
+    printf("[ALARM] %d RINGING %02u:%02u sound=%s track=%u\n",
            index + 1, (unsigned)dt->hour, (unsigned)dt->minute,
            alarms[index].sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL",
            (unsigned)alarms[index].track);
@@ -1038,7 +1038,8 @@ static void alarm_set(char *args) {
                    current.year, current.month, current.day,
                    current.hour, current.minute, false);
     }
-    printf("[ALARM] 1 enabled=ON time=%02u:%02u sound=%s track=%u (RAM only)\n",
+    settings_mark_changed();
+    printf("[ALARM] 1 enabled=ON time=%02u:%02u sound=%s track=%u\n",
            hh, mm, music ? "MUSIC" : "SIGNAL", music ? track : 1u);
 }
 
@@ -1112,7 +1113,8 @@ static void handle_command(char *line) {
         alarm_status();
     } else if (strcmp(line, "alarm-off") == 0) {
         alarms[0].enabled = false;
-        puts("[ALARM] 1 enabled=OFF (RAM only)");
+        settings_mark_changed();
+        puts("[ALARM] 1 enabled=OFF");
     } else if (strcmp(line, "alarm-stop") == 0) {
         alarm_stop("SERIAL");
     } else if (strncmp(line, "alarm-set ", 10) == 0) {
