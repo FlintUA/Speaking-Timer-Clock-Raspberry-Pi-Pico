@@ -131,3 +131,15 @@ New UART diagnostics:
 Bench acceptance: build/flash spare Pico; observe A2DP ACTIVE; send `audio-select jbl` and `audio-route` -> requested=BT_JBL/effective=BT_JBL/STREAM_ACTIVE. Turn JBL off without resetting Pico -> effective=LOCAL/OFFLINE. Turn JBL on, await reconnect -> effective=BT_JBL/STREAM_ACTIVE. Send `audio-select local` -> effective=LOCAL. Confirm `bt-clip` remains operational.
 
 Next task: design actual digital audio-source and safe scheduling backend before tying audio_queue to remote route. For alarm safety, LOCAL remains effective when remote unavailable.
+
+
+## Hardware verified: Audio Router live status / JBL reconnect (2026-11-06)
+
+User hardware log on bare spare Pico 2 W confirmed:
+- `audio-select jbl` accepted and `audio-route` returned `requested=BT_JBL effective=BT_JBL bluetooth=STREAM_ACTIVE`.
+- On speaker disconnect, A2DP stream and signaling were released, 5s reconnect scheduled and `[AUDIO-ROUTE] bluetooth=OFFLINE effective=LOCAL` logged.
+- First retry yielded A2DP HCI status `0x04`; second scheduled retry (10s) successfully established a new signaling CID `0x03` and streaming.
+- Live route promoted back to `[AUDIO-ROUTE] bluetooth=STREAM_ACTIVE effective=BT_JBL`.
+- Existing UART PCM clip played successfully before the disconnect. Logs do not demonstrate real clock voice/timer/alarm/music routing and do not demonstrate `audio-select local` test.
+
+**Decision for next gate:** Keep a single logical sound API but do not implement a misleading DFPlayer-to-Bluetooth "switch". DFPlayer's UART-based MP3 decoder does not provide PCM to the Pico. Before activating physical route change, evaluate audio asset/PCM storage and decode method, and implement a self-contained source or sampled PCM track playback through A2DP. All critical alarms must remain audible via LOCAL during incomplete integration, and no flash layout migration yet.
