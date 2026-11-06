@@ -1073,3 +1073,21 @@ once-per-minute behavior and flash record format are unchanged.
    one-event-per-calendar-minute deduplication path.
 
 This diagnostics change has not yet been compiled or hardware-tested.
+
+## Reserved expansion pin map - SPI1 microSD + LCD backlight PWM (planned, 2026-11-06)
+
+This is a **documented future wiring change**, not the active GPIO mapping in `drivers/controls.c`. The user has Dupont connectors and approved moving two timer-encoder wires.
+
+| Peripheral | Planned GPIO (physical Pico 2 W pin) |
+| --- | --- |
+| Timer encoder DT | **GP12 (pin 16)**; currently GP11 |
+| Timer encoder CLK | **GP13 (pin 17)**; currently GP10 |
+| SPI1 SD MISO / DO | **GP8 (pin 11)** |
+| SPI1 SD CS | **GP9 (pin 12)** |
+| SPI1 SD SCK / CLK | **GP10 (pin 14)** |
+| SPI1 SD MOSI / DI | **GP11 (pin 15)** |
+| LCD1602 backlight control | **GP6 PWM (pin 9)** via transistor driver |
+
+Do not connect SPI1 signals to GP10/GP11 until the timer encoder has been relocated and `drivers/controls.c` plus any active firmware have matching pin assignments. Avoid simultaneously changing pins on the production clock before the new firmware has been built and checked. The new Pico-side SD card is independent of the DFPlayer Mini's SD card. MP3 decoder, SPI+FAT32 driver, PWM control, and backlight switching hardware are **not yet implemented or tested**. Power the SD breakout according to its particular design (3.3V-safe logic mandatory); inspect LCD backpack's A/K backlight wiring before selecting a keying transistor.
+
+The detailed wiring checklist and hardware/firmware rollout sequence live in `doc/C_MIGRATION_PLAN.md`.
