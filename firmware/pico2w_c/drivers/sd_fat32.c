@@ -369,3 +369,110 @@ void sd_fat32_stream_service(void) {
         stream.sector_index = 0;
     }
 }
+
+
+// A separate seekable, read-only cursor for software MP3 decoding.
+// Unlike sd-stream CRC32 diagnostics, this supports arbitrary offsets.
+// Only one open file is supported and callers must not run concurrently
+// with other SD diagnostics. Single shared 512-byte sector scratch buffer.
+typedef struct {
+    bool open;
+    uint32_t first_cluster;
+    uint32_t cluster;
+    uint32_t size;
+    uint32_t position;
+    uint32_t cache_lba;
+    bool cached;
+} sd_file_cursor_t;
+static sd_file_cursor_t file_cursor;
+
+void sd_fat32_close_read(void) {
+    memset(&file_cursor, 0, sizeof(file_cursor));
+}
+uint32_t sd_fat32_size(void) {
+    return file_cursor.open ? file_cursor.size : 0u;
+}
+bool sd_fat32_open_read(const char *path) {
+    sd_fat32_close_read();
+    if (sd_fat32_stream_active()) {
+        puts("[SD-MP3] Cannot open during sd-stream CRC test");
+        return false;
+    }
+    if (!mount_volume() || !path) return false;
+    if (*path == '/') ++path;
+    const char *slash = strchr(path, '/');
+    char directory[13] = {0};
+    const char *file = path;
+    if (slash) {
+        size_t len = (size_t)(slash - path);
+        if (!len || len >= sizeof(directory)) return false;
+        memcpy(directory, path, len);
+        file = slash + 1;
+    }
+    uint8_t short_name[11];
+    if (!make_short_name(file, short_name)) return false;
+    uint32_t parent_cluster;
+    if (!resolve_directory(directory, &parent_cluster)) return false;
+    fat32_entry_t entry;
+    if (!walk_directory(parent_cluster, short_name, &entry, false) ||
+        entry.directory || !entry.size || !valid_cluster(entry.cluster)) return false;
+    file_cursor.first_cluster = entry.cluster;
+    file_cursor.cluster = entry.cluster;
+    file_cursor.size = entry.size;
+    file_cursor.open = true;
+    return true;
+}
+bool sd_fat32_seek(uint32_t offset) {
+    if (!file_cursor.open || offset > file_cursor.size) return false;
+    // Seek-to-end is legal and never requests a data cluster.
+    uint32_t bytes_per_cluster = volume.sectors_per_cluster * SECTOR_BYTES;
+    uint32_t hops = offset == file_cursor.size && offset ?
+        (offset - 1u) / bytes_per_cluster : offset / bytes_per_cluster;
+    if (hops >= volume.cluster_count) return false;
+    uint32_t cluster = file_cursor.first_cluster;
+    for (uint32_t i = 0; i < hops; ++i) {
+        uint32_t next;
+        if (!next_cluster(cluster, &next) || !valid_cluster(next) ||
+            next == cluster) return false;
+        cluster = next;
+    }
+    file_cursor.cluster = cluster;
+    file_cursor.position = offset;
+    file_cursor.cached = false;
+    return true;
+}
+size_t sd_fat32_read(void *destination, size_t count) {
+    if (!file_cursor.open || !destination || !count) return 0;
+    uint8_t *out = (uint8_t *)destination;
+    size_t read_total = 0;
+    uint32_t bytes_per_cluster = volume.sectors_per_cluster * SECTOR_BYTES;
+    while (read_total < count && file_cursor.position < file_cursor.size) {
+        uint32_t cluster_pos = file_cursor.position % bytes_per_cluster;
+        uint32_t sector_index = cluster_pos / SECTOR_BYTES;
+        uint32_t offset = cluster_pos % SECTOR_BYTES;
+        uint32_t first_lba;
+        if (!cluster_to_lba(file_cursor.cluster, &first_lba)) break;
+        uint32_t lba = first_lba + sector_index;
+        if (!file_cursor.cached || file_cursor.cache_lba != lba) {
+            if (!sd_spi_read_sector(lba, sector)) break;
+            file_cursor.cached = true;
+            file_cursor.cache_lba = lba;
+        }
+        size_t available = SECTOR_BYTES - offset;
+        uint32_t left = file_cursor.size - file_cursor.position;
+        if (available > left) available = left;
+        if (available > count - read_total) available = count - read_total;
+        memcpy(out + read_total, sector + offset, available);
+        read_total += available;
+        file_cursor.position += (uint32_t)available;
+        if (file_cursor.position < file_cursor.size &&
+            file_cursor.position % bytes_per_cluster == 0u) {
+            uint32_t next;
+            file_cursor.cached = false;
+            if (!next_cluster(file_cursor.cluster, &next) ||
+                !valid_cluster(next) || next == file_cursor.cluster) break;
+            file_cursor.cluster = next;
+        }
+    }
+    return read_total;
+}
