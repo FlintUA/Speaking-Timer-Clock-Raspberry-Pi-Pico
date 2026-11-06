@@ -12,3 +12,15 @@ bool sd_fat32_stream_start(const char *path);
 void sd_fat32_stream_service(void); // Call once per main loop, reads max 512 bytes.
 void sd_fat32_stream_stop(void);
 bool sd_fat32_stream_active(void);
+
+#include <stddef.h>
+#include <stdint.h>
+
+// Separate seekable file cursor for optional MP3 software decoder.
+// Not reentrant; use only in diagnostics, never in a BTstack callback.
+// Reader is read-only and supports short DOS 8.3 names.
+bool sd_fat32_open_read(const char *path);
+void sd_fat32_close_read(void);
+size_t sd_fat32_read(void *dst, size_t count);
+bool sd_fat32_seek(uint32_t offset);
+uint32_t sd_fat32_size(void);
