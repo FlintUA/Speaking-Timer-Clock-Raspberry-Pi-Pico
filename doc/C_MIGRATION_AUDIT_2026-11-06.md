@@ -192,3 +192,15 @@ Observed live serial transcript:
 Verified: SD initialization, SPI sector read, recognizable FAT32 volume geometry, continuing RTC activity. FAT cluster size = 4096 bytes (8 × 512). This does **not** yet prove file traversal, opening/reading MP3 files, software MP3 decoding, A2DP streaming from SD, or encoder functionality on relocated GPIO. SD remains read-only. Preserve DFPlayer fallback and existing audio setup.
 
 Next gate: add read-only FAT32 root/subdirectory traversal and diagnostic listing/opening of an exact file (e.g. `/07/001.mp3`), then a bounded sequential-read test before integrating a decoder.
+
+
+## FAT32 directory / file read diagnostics implemented (2026-11-06)
+
+After successful live SPI1 `sd-test` on the **assembled main clock COM8**, new experimental C firmware provides read-only FAT32 8.3 directory and file inspection:
+- `sd-test` must run first to initialize SPI1 and probe FAT32.
+- `sd-list` lists root entries; `sd-list 07` lists short names in folder 07 (up to 64 entries). Long filename entries are skipped, only DOS 8.3 names are shown.
+- `sd-file 07/001.mp3` resolves first-level subdirectory 07 and exact short file name, prints length, first cluster, and first 16 bytes read from first data sector. This does **not** decode or play MP3.
+- New `drivers/sd_fat32.c/.h`, linked via CMake; bounded directory FAT-chain scan (64 clusters), 512-byte read-only buffer. No writes and no flash settings migrations.
+- Encoder **already confirmed by user** to be functioning after GP12/13 relocation. Volume push/button GP20 was also verified functioning: `toggle_sound()` logs ON/OFF and LCD displays ON/OFF. **No button firmware change needed**.
+- Before flashing the main clock, save `flash-info` and alarms and ensure new image preserves reserved flash config region. Test build first, and keep rollback UF2 available.
+- **Pending**: local compile, hardware FAT32 listing, exact file read, and SD+Bluetooth simultaneous test.
