@@ -7,6 +7,7 @@ param(
     [string]$Uf2 = '',
     [switch]$Build,
     [switch]$Bluetooth,
+    [switch]$Mp3,
     [string]$JblAddress = '04:21:44:FA:A9:0E',
     [switch]$VerifyOnly,
     [int]$TimeoutSeconds = 45,
@@ -105,6 +106,9 @@ function Test-PicoFirmware([string]$PortName, [bool]$IncludeAlarms) {
     }
 }
 
+if ($Mp3 -and -not $Bluetooth) {
+    throw '-Mp3 requires -Bluetooth for the experimental A2DP clock build.'
+}
 if ($Bluetooth -and -not $Build -and -not $VerifyOnly) {
     Write-Host '[UPDATE] Bluetooth selected: using existing build-bt UF2 (no build requested).'
 }
@@ -126,7 +130,7 @@ if ($Build) {
             throw "Bluetooth build script missing: $buildBt"
         }
         Write-Host '[UPDATE] Building Bluetooth A2DP firmware (build-bt) ...'
-        & $buildBt -JblAddress $JblAddress
+        & $buildBt -JblAddress $JblAddress -Mp3:$Mp3
         if (-not $?) { throw 'Bluetooth build failed. Nothing was flashed.' }
     } else {
         if (-not (Test-Path -LiteralPath $Cmake -PathType Leaf)) {
