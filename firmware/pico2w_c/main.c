@@ -197,7 +197,8 @@ static auto_decision_t auto_evaluate(uint8_t hour, uint8_t minute,
         (finished_screen_until_ms &&
          to_ms_since_boot(get_absolute_time()) < finished_screen_until_ms))
         return AUTO_TIMER;
-    if (menu_state != MENU_CLOSED) return AUTO_MENU;
+    if (menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED)
+        return AUTO_MENU;
     if (!audio_queue_idle(&audio_queue) || dfplayer_busy()) return AUTO_BUSY;
     // If boot/RTC recovers in the middle of an hour/half-hour minute,
     // do not announce stale time. A 5-second window is deliberate.
