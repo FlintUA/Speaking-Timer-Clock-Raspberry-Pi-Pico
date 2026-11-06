@@ -21,8 +21,9 @@
 #define SLOT0_OFFSET (PICO_FLASH_SIZE_BYTES - 4u * FLASH_SECTOR_SIZE)
 #define SLOT1_OFFSET (PICO_FLASH_SIZE_BYTES - 3u * FLASH_SECTOR_SIZE)
 #define RECORD_MAGIC 0x53434c4bu /* SCLK */
-#define RECORD_VERSION 2u
+#define RECORD_VERSION 3u
 #define RECORD_V1 1u
+#define RECORD_V2 2u
 #define IMAGE_SAFETY_MARGIN FLASH_SECTOR_SIZE
 
 extern uint8_t __flash_binary_end;
@@ -40,11 +41,26 @@ typedef struct {
     uint8_t language, volume, exact_hour, quiet_enabled;
     uint8_t quiet_start, quiet_end, half_hour_enabled, reserved; // v2 reserved: FF=legacy voice, 0=voice, 1=chime
     uint32_t crc32;
+} settings_record_v2_t;
+
+// Explicit compact on-flash layout, independent of alarm_entry_t ABI padding.
+// v3 keeps all v2 setting bytes in the same locations. Each alarm occupies
+// five bytes: enabled, hour, minute, sound, track. Three FF reserved bytes
+// place CRC32 at offset 48, total record 52 bytes.
+typedef struct {
+    uint32_t magic, version, sequence;
+    uint8_t language, volume, exact_hour, quiet_enabled;
+    uint8_t quiet_start, quiet_end, half_hour_enabled, clock_mode;
+    uint8_t alarms[CLOCK_ALARM_COUNT][5];
+    uint8_t reserved[3];
+    uint32_t crc32;
 } settings_record_t;
 
 _Static_assert(sizeof(settings_record_v1_t) == 20, "Unexpected v1 size");
-_Static_assert(sizeof(settings_record_t) == 24, "Unexpected v2 size");
-_Static_assert(offsetof(settings_record_t, crc32) == 20, "Unexpected v2 CRC offset");
+_Static_assert(sizeof(settings_record_v2_t) == 24, "Unexpected v2 size");
+_Static_assert(offsetof(settings_record_v2_t, crc32) == 20, "Unexpected v2 CRC offset");
+_Static_assert(sizeof(settings_record_t) == 52, "Unexpected v3 size");
+_Static_assert(offsetof(settings_record_t, crc32) == 48, "Unexpected v3 CRC offset");
 
 static uint32_t record_crc_bytes(const void *data, size_t length) {
     uint32_t crc = 0xffffffffu;
@@ -71,16 +87,35 @@ static bool record_valid(const settings_record_t *r) {
         return old.crc32 ==
             record_crc_bytes(&old, offsetof(settings_record_v1_t, crc32));
     }
+    if (r->version == RECORD_V2) {
+        settings_record_v2_t old;
+        memcpy(&old, r, sizeof(old));
+        return old.quiet_enabled <= 1u && old.quiet_start <= 23u &&
+               old.quiet_end <= 23u && old.half_hour_enabled <= 1u &&
+               (old.reserved == 0xffu || old.reserved <= 1u) &&
+               old.crc32 ==
+                   record_crc_bytes(&old, offsetof(settings_record_v2_t, crc32));
+    }
     if (r->version != RECORD_VERSION) return false;
-    return r->quiet_enabled <= 1u && r->quiet_start <= 23u &&
-           r->quiet_end <= 23u && r->half_hour_enabled <= 1u &&
-           (r->reserved == 0xffu || r->reserved <= 1u) &&
-           r->crc32 == record_crc_bytes(r, offsetof(settings_record_t, crc32));
+    if (r->quiet_enabled > 1u || r->quiet_start > 23u ||
+        r->quiet_end > 23u || r->half_hour_enabled > 1u ||
+        r->clock_mode > 1u) return false;
+    for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
+        const uint8_t *a = r->alarms[i];
+        if (a[0] > 1u || a[1] > 23u || a[2] > 59u ||
+            a[3] > 1u || a[4] < 1u || a[4] > 45u)
+            return false;
+    }
+    if (r->reserved[0] != 0xffu || r->reserved[1] != 0xffu ||
+        r->reserved[2] != 0xffu) return false;
+    return r->crc32 ==
+        record_crc_bytes(r, offsetof(settings_record_t, crc32));
 }
 
 static size_t record_size(const settings_record_t *r) {
-    return r->version == RECORD_V1 ? sizeof(settings_record_v1_t) :
-                                     sizeof(settings_record_t);
+    if (r->version == RECORD_V1) return sizeof(settings_record_v1_t);
+    if (r->version == RECORD_V2) return sizeof(settings_record_v2_t);
+    return sizeof(settings_record_t);
 }
 
 static bool sector_blank(unsigned slot) {
@@ -235,8 +270,20 @@ settings_store_result_t settings_store_load(clock_settings_t *out) {
         out->half_hour_enabled = r.version == RECORD_V1 ? false :
                                  r.half_hour_enabled != 0u;
         // v2 records before clock-mode support stored FF in reserved.
-        out->clock_mode = r.version == RECORD_V1 || r.reserved == 0xffu
-                              ? 0u : r.reserved;
+        // v3 uses this same byte at offset 19 as clock_mode.
+        out->clock_mode = r.version == RECORD_V1 || r.clock_mode == 0xffu
+                              ? 0u : r.clock_mode;
+        alarm_defaults(out->alarms);
+        if (r.version == RECORD_VERSION) {
+            for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
+                const uint8_t *src = r.alarms[i];
+                out->alarms[i].enabled = src[0] != 0u;
+                out->alarms[i].hour = src[1];
+                out->alarms[i].minute = src[2];
+                out->alarms[i].sound = (alarm_sound_t)src[3];
+                out->alarms[i].track = src[4];
+            }
+        }
     }
     return SETTINGS_STORE_OK;
 }
@@ -258,6 +305,9 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
         cfg->quiet_start > 23u || cfg->quiet_end > 23u ||
         cfg->clock_mode > 1u)
         return SETTINGS_STORE_UNSUPPORTED;
+    for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
+        if (!alarm_entry_valid(&cfg->alarms[i])) return SETTINGS_STORE_UNSUPPORTED;
+    }
     unsigned active_slot;
     settings_record_t current;
     bool valid = newest_valid(&active_slot, &current);
@@ -284,8 +334,17 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
         .quiet_start = cfg->quiet_start,
         .quiet_end = cfg->quiet_end,
         .half_hour_enabled = cfg->half_hour_enabled ? 1u : 0u,
-        .reserved = cfg->clock_mode
+        .clock_mode = cfg->clock_mode,
+        .reserved = {0xffu, 0xffu, 0xffu}
     };
+    for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
+        const alarm_entry_t *a = &cfg->alarms[i];
+        r.alarms[i][0] = a->enabled ? 1u : 0u;
+        r.alarms[i][1] = a->hour;
+        r.alarms[i][2] = a->minute;
+        r.alarms[i][3] = (uint8_t)a->sound;
+        r.alarms[i][4] = a->track;
+    }
     r.crc32 = record_crc_bytes(&r, offsetof(settings_record_t, crc32));
     memcpy(context.page, &r, sizeof(r));
 
