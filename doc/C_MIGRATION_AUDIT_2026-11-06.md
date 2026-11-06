@@ -300,3 +300,21 @@ User successfully compiled/flashed and tested the A2DP firmware via COM8. Observ
 [INFO] A2DP stream: ACTIVE; audio: SILENCE; sample rate: 44100 Hz; samples remaining: 0
 ```
 All five alarm entries remain intact (1 OFF 07:00 signal1; 2 ON 08:33 signal1; 3 ON 09:00 signal1; 4 ON 09:26 signal6; 5 ON 10:34 signal1). RTC continued ticking; JBL A2DP SBC and AVRCP connected. **Verified:** non-overlapping address layout, valid legacy settings fallback, preservation of alarms. **Not yet tested:** first save into new A/B settings slots and subsequent reboot/redundant backup creation; do not claim complete A/B migration until that test. Future MP3 integration should keep the flash guard and 10% test PCM attenuation.
+
+
+## MP3 decode-only experiment staged (2026-11-06)
+
+Implemented experimental, opt-in `CLOCK_ENABLE_MP3` linked against a separate
+checkout of Helix-MP3-Decoder pinned at revision
+`e4f5adadb5126708144e55a862f59e318cbffb51`.
+- Added seekable read-only FAT32 file API with cluster traversal.
+- `audio/mp3_probe.c` decodes up to 4096 stereo PCM frames in bounded 256-frame
+blocks through Helix seek/read callbacks; prints rate, bitrate and CPU microseconds.
+- USB command `mp3-test 07/001.mp3`; no MP3-to-A2DP connection yet, no SD writes.
+- Updater `-Build -Bluetooth -Mp3` explicitly enables this integration;
+the existing `-Build -Bluetooth` remains MP3-free.
+- Licensing: third-party wrapper GPLv3, underlying RealNetworks MP3 decoder
+RPSL/RCSL; vendor source remains outside project and should be reviewed before
+redistribution. No assumptions of permissive relicensing.
+- Hardware build, PCM output, A2DP coexistence and CPU/RAM performance
+are NOT yet confirmed.
