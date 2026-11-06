@@ -34,6 +34,36 @@ int main(void) {
     a[2].enabled = true; a[2].hour = 25;
     assert(!alarm_entry_valid(&a[2]));
     assert(alarm_scheduler_pick(&state,a,2026,11,6,9,0,false)==-1);
+    // Collision policy: lowest slot wins, other co-due alarms are
+    // consumed within the same RTC minute, including after STOP.
+    alarm_defaults(a);
+    alarm_scheduler_init(&state);
+    a[1].enabled = true;
+    a[1].hour = 10;
+    a[1].minute = 15;
+    a[3].enabled = true;
+    a[3].hour = 10;
+    a[3].minute = 15;
+    uint8_t skipped = 0xffu;
+    assert(alarm_scheduler_claim_due(&state, a, 2026, 11, 6,
+                                     10, 15, &skipped) == 1);
+    assert(skipped == (1u << 3));
+    assert(state.fired_mask == ((1u << 1) | (1u << 3)));
+    assert(alarm_scheduler_claim_due(&state, a, 2026, 11, 6,
+                                     10, 15, &skipped) == -1);
+    assert(skipped == 0u);
+    assert(alarm_scheduler_claim_due(&state, a, 2026, 11, 6,
+                                     10, 16, &skipped) == -1);
+    // Next day the same two alarms may compete again.
+    assert(alarm_scheduler_claim_due(&state, a, 2026, 11, 7,
+                                     10, 15, &skipped) == 1);
+    assert(skipped == (1u << 3));
+    // An invalid entry cannot win or be included in skipped mask.
+    a[1].hour = 25u;
+    alarm_scheduler_init(&state);
+    assert(alarm_scheduler_claim_due(&state, a, 2026, 11, 8,
+                                     10, 15, &skipped) == 3);
+    assert(skipped == 0u);
     puts("alarm_engine_host_test: PASS");
     return 0;
 }
