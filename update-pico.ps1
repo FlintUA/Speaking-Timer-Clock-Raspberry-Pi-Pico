@@ -28,22 +28,27 @@ function Wait-Until([scriptblock]$Predicate, [int]$Seconds, [string]$Description
 }
 
 function Get-BootselDrive {
-    # RP2350 (Pico 2 W) labels its ROM boot volume RP2350, unlike
-    # older RP2040 devices labeled RPI-RP2. DriveType also varies.
-    # Verify the bootloader's actual INFO_UF2.TXT instead of trusting
-    # a volume name alone; never flash an arbitrary removable drive.
+    # RP2350 (Pico 2 W) normally has the volume label RP2350.
+    # Confirm the ROM's INFO_UF2.TXT to avoid copying onto another disk.
     $matches = @(
         foreach ($disk in @(Get-CimInstance -ClassName Win32_LogicalDisk)) {
             if (-not $disk.DeviceID) { continue }
             $rootPath = $disk.DeviceID + '\'
             $marker = Join-Path $rootPath 'INFO_UF2.TXT'
-            if (-not (Test-Path -LiteralPath $marker -PathType Leaf -ErrorAction SilentlyContinue)) {
-                continue
-            }
+            if (-not (Test-Path -LiteralPath $marker -PathType Leaf -ErrorAction SilentlyContinue)) { continue }
             try {
                 $info = Get-Content -LiteralPath $marker -Raw -ErrorAction Stop
-                if ($info -match '(?im)^Board-ID:\s*RP2350\s*
-
+                if (($info -match 'Board-ID:\s*RP2350' -and $disk.VolumeName -eq 'RP2350') -or
+                    ($info -match 'Board-ID:\s*RP2' -and $disk.VolumeName -eq 'RPI-RP2')) {
+                    $disk.DeviceID
+                }
+            } catch { }
+        }
+    )
+    if ($matches.Count -gt 1) { throw ('Multiple Pico BOOTSEL drives: ' + ($matches -join ', ')) }
+    if ($matches.Count -eq 1) { return $matches[0] }
+    return $null
+}
 if ($Build) {
     if (-not (Test-Path -LiteralPath $Cmake -PathType Leaf)) {
         throw "CMake not found: $Cmake"
