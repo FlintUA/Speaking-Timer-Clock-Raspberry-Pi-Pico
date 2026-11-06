@@ -1513,6 +1513,8 @@ static void handle_command(char *line) {
         while (end && isspace((unsigned char)*end)) ++end;
         if (!*arg || end == arg || !end || *end || errno == ERANGE || requested > 14400ul || requested < 1ul) {
             puts("[CMD] Invalid duration. Use: t 10 (1..14400 seconds)");
+        } else if (alarm_ui_state != ALARM_UI_CLOSED) {
+            puts("[TIMER] duration change blocked: alarm editor open");
         } else {
             countdown_set_duration(&timer, (uint32_t)requested);
             if (!timer.running) timer_screen = true;
