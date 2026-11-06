@@ -258,3 +258,114 @@ bool sd_fat32_file(const char *path) {
     puts("[SD-FILE] PASS: file lookup and first data sector read (no decoding)");
     return true;
 }
+
+
+// Diagnostic full-file reader: one 512-byte sector per main-loop iteration.
+// CRC32 verifies sequential logical file bytes, including non-contiguous FAT32
+// cluster chains. It never writes sectors or changes clock settings.
+#define STREAM_MAX_BYTES (2u * 1024u * 1024u)
+typedef struct {
+    bool active;
+    uint32_t total;
+    uint32_t consumed;
+    uint32_t cluster;
+    uint32_t sector_index;
+    uint32_t chain_hops;
+    uint32_t crc;
+} fat32_stream_t;
+static fat32_stream_t stream;
+
+bool sd_fat32_stream_active(void) {
+    return stream.active;
+}
+void sd_fat32_stream_stop(void) {
+    if (stream.active) puts("[SD-STREAM] Cancelled by user");
+    stream.active = false;
+}
+bool sd_fat32_stream_start(const char *path) {
+    sd_fat32_stream_stop();
+    if (!mount_volume() || !path) return false;
+    if (*path == '/') ++path;
+    const char *slash = strchr(path, '/');
+    char directory[13] = {0};
+    const char *file = path;
+    if (slash) {
+        size_t len = (size_t)(slash - path);
+        if (len == 0 || len >= sizeof(directory)) {
+            puts("[SD-STREAM] Invalid folder component");
+            return false;
+        }
+        memcpy(directory, path, len);
+        file = slash + 1;
+    }
+    uint8_t name[11];
+    if (!make_short_name(file, name)) {
+        puts("[SD-STREAM] Use DOS 8.3 filename, e.g. 07/001.mp3");
+        return false;
+    }
+    uint32_t dir_cluster;
+    if (!resolve_directory(directory, &dir_cluster)) return false;
+    fat32_entry_t entry;
+    if (!walk_directory(dir_cluster, name, &entry, false) ||
+        entry.directory || !valid_cluster(entry.cluster)) {
+        puts("[SD-STREAM] File missing or invalid first cluster");
+        return false;
+    }
+    if (entry.size == 0 || entry.size > STREAM_MAX_BYTES) {
+        printf("[SD-STREAM] File size %lu unsupported (1..2097152 bytes)\n",
+               (unsigned long)entry.size);
+        return false;
+    }
+    memset(&stream, 0, sizeof(stream));
+    stream.active = true;
+    stream.total = entry.size;
+    stream.cluster = entry.cluster;
+    stream.crc = 0xffffffffu;
+    printf("[SD-STREAM] START /%s size=%lu first_cluster=%lu (read-only, one sector/loop)\n",
+           path, (unsigned long)stream.total, (unsigned long)stream.cluster);
+    return true;
+}
+void sd_fat32_stream_service(void) {
+    if (!stream.active) return;
+    if (!valid_cluster(stream.cluster)) {
+        puts("[SD-STREAM] FAIL: invalid data cluster");
+        stream.active = false;
+        return;
+    }
+    uint32_t cluster_lba;
+    if (!cluster_to_lba(stream.cluster, &cluster_lba) ||
+        !sd_spi_read_sector(cluster_lba + stream.sector_index, sector)) {
+        puts("[SD-STREAM] FAIL: sector read error");
+        stream.active = false;
+        return;
+    }
+    uint32_t remaining = stream.total - stream.consumed;
+    uint32_t count = remaining < SECTOR_BYTES ? remaining : SECTOR_BYTES;
+    for (uint32_t i = 0; i < count; ++i) {
+        stream.crc ^= sector[i];
+        for (unsigned bit = 0; bit < 8u; ++bit)
+            stream.crc = (stream.crc >> 1) ^
+                         ((stream.crc & 1u) ? 0xedb88320u : 0u);
+    }
+    stream.consumed += count;
+    if (stream.consumed == stream.total) {
+        printf("[SD-STREAM] PASS bytes=%lu clusters=%lu crc32=%08lX\n",
+               (unsigned long)stream.consumed,
+               (unsigned long)(stream.chain_hops + 1u),
+               (unsigned long)(stream.crc ^ 0xffffffffu));
+        stream.active = false;
+        return;
+    }
+    if (++stream.sector_index == volume.sectors_per_cluster) {
+        uint32_t next;
+        if (!next_cluster(stream.cluster, &next) ||
+            !valid_cluster(next) || next == stream.cluster ||
+            ++stream.chain_hops > (stream.total / SECTOR_BYTES + 1u)) {
+            puts("[SD-STREAM] FAIL: premature end or corrupt FAT cluster chain");
+            stream.active = false;
+            return;
+        }
+        stream.cluster = next;
+        stream.sector_index = 0;
+    }
+}
