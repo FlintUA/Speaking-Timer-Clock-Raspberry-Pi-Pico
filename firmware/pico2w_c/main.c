@@ -98,6 +98,14 @@ static uint8_t alarm_ui_index;
 static alarm_entry_t alarm_ui_draft;
 static uint64_t alarm_ui_last_input_ms;
 static bool alarm_preview_active;
+#define ALARM_LONG_PRESS_MS 900u
+static bool alarm_button_pressed;
+static bool alarm_button_consumed;
+static uint64_t alarm_button_pressed_at_ms;
+// Standalone music player is RAM-only; no flash schema changes.
+static bool music_ui_open;
+static bool music_ui_playing;
+static uint8_t music_ui_track = 1u;
 // Preview starts only by SETTINGS in TRACK field (not on each encoder tick).
 // This keeps rapid track selection silent and never changes saved config.
 static bool exact_hour_phrase;
@@ -200,7 +208,8 @@ static auto_decision_t auto_evaluate(uint8_t hour, uint8_t minute,
         (finished_screen_until_ms &&
          to_ms_since_boot(get_absolute_time()) < finished_screen_until_ms))
         return AUTO_TIMER;
-    if (menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED)
+    if (menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED ||
+        music_ui_open)
         return AUTO_MENU;
     if (!audio_queue_idle(&audio_queue) || dfplayer_busy()) return AUTO_BUSY;
     // If boot/RTC recovers in the middle of an hour/half-hour minute,
@@ -392,8 +401,9 @@ static void announce_rtc_time(void) {
 }
 
 static void timer_start_now(uint64_t now) {
-    if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED) {
-        puts("[TIMER] start blocked: close alarm editor or stop alarm first");
+    if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED ||
+        music_ui_open) {
+        puts("[TIMER] start blocked: close UI or stop alarm first");
         return;
     }
     countdown_start(&timer, now);
@@ -462,7 +472,7 @@ static void autosave_service(uint64_t now_ms) {
     // Handle timer FINISHED first. Block flash through the final display
     // window, queued audio and physical DFPlayer BUSY (even for clones).
     if (timer.running || alarm_active_index >= 0 || menu_state != MENU_CLOSED ||
-        alarm_ui_state != ALARM_UI_CLOSED ||
+        alarm_ui_state != ALARM_UI_CLOSED || music_ui_open ||
         (finished_screen_until_ms && now_ms < finished_screen_until_ms) ||
         !audio_queue_idle(&audio_queue) || dfplayer_busy()) return;
 
@@ -637,10 +647,67 @@ static void alarm_ui_close(const char *reason) {
     printf("[ALARM-UI] closed=%s\n", reason);
 }
 
+static void music_ui_stop(const char *reason) {
+    if (!music_ui_playing) return;
+    audio_queue_clear(&audio_queue, true);
+    music_ui_playing = false;
+    printf("[MUSIC-UI] stopped=%s\n", reason);
+}
+
+static void music_ui_close(const char *reason) {
+    if (!music_ui_open) return;
+    music_ui_stop(reason);
+    music_ui_open = false;
+    timer_screen = false;
+    printf("[MUSIC-UI] closed=%s\n", reason);
+}
+
+static void music_ui_start(void) {
+    if (!music_ui_open) return;
+    if (!sound_enabled || alarm_active_index >= 0 || timer.running ||
+        !audio_queue_idle(&audio_queue) || dfplayer_busy()) {
+        puts("[MUSIC-UI] playback blocked: sound off or audio busy");
+        return;
+    }
+    if (!audio_queue_enqueue(&audio_queue, 8u, music_ui_track)) {
+        puts("[MUSIC-UI] queue full");
+        return;
+    }
+    music_ui_playing = true;
+    printf("[MUSIC-UI] playing folder=08 track=%03u\n", (unsigned)music_ui_track);
+}
+
+static void music_ui_toggle(void) {
+    if (!music_ui_open) return;
+    if (music_ui_playing) music_ui_stop("BUTTON");
+    else music_ui_start();
+}
+
+static void music_ui_rotate(int direction) {
+    if (!music_ui_open) return;
+    music_ui_stop("TRACK_CHANGED");
+    music_ui_track = wrap_u8(music_ui_track, 1u, CLOCK_ALARM_MAX_TRACK, direction);
+    printf("[MUSIC-UI] selected track=%u\n", (unsigned)music_ui_track);
+}
+
+static void music_ui_enter(void) {
+    if (timer.running || alarm_active_index >= 0 ||
+        menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED ||
+        !audio_queue_idle(&audio_queue) || dfplayer_busy()) {
+        puts("[MUSIC-UI] open blocked: timer/alarm/menu/audio busy");
+        return;
+    }
+    music_ui_open = true;
+    music_ui_playing = false;
+    timer_screen = false;
+    printf("[MUSIC-UI] opened track=%u TIMER=PLAY/STOP MINUS=EXIT\n",
+           (unsigned)music_ui_track);
+}
+
 static void alarm_ui_open(uint64_t now) {
     if (timer.running || alarm_active_index >= 0 ||
-        menu_state != MENU_CLOSED) {
-        puts("[ALARM-UI] busy: timer/alarm/settings active");
+        menu_state != MENU_CLOSED || music_ui_open) {
+        puts("[ALARM-UI] busy: timer/alarm/settings/music active");
         return;
     }
     alarm_ui_index = 0u;
@@ -1186,6 +1253,9 @@ static void alarm_service_rtc(const ds1302_datetime_t *dt, uint64_t now) {
         printf("[ALARM] %d skipped=MENU_OPEN\n", index + 1);
         return;
     }
+    // Scheduled alarms override the standalone music player.
+    // Close it before queueing alarm speech, preserving ALARM button priority.
+    if (music_ui_open) music_ui_close("ALARM_PRIORITY");
     // An alarm owns its minute: prevent normal xx:00/xx:30 announcements.
     if (dt->minute == 0u || dt->minute == 30u) {
         auto_seen_key_valid = true;
@@ -1399,7 +1469,8 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "flash-tail") == 0) {
         settings_store_dump_tail();
     } else if (strcmp(line, "save") == 0) {
-        if (alarm_ui_state != ALARM_UI_CLOSED || alarm_active_index >= 0) {
+        if (alarm_ui_state != ALARM_UI_CLOSED || alarm_active_index >= 0 ||
+            music_ui_open) {
             puts("[FLASH] save blocked: close alarm editor or stop alarm first");
         } else save_settings_now();
     } else if (strcmp(line, "autosave-status") == 0) {
@@ -1460,13 +1531,15 @@ static void handle_command(char *line) {
                (unsigned)quiet_end, half_hour_enabled ? "ON" : "OFF",
                 auto_enabled ? "ON" : "OFF");
     } else if (strcmp(line, "menu") == 0) {
-        if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED) {
-            puts("[MENU] blocked: alarm ringing or alarm editor open");
+        if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED ||
+            music_ui_open) {
+            puts("[MENU] blocked: alarm ringing or music/alarm editor open");
         } else if (menu_state != MENU_CLOSED) menu_close();
         else menu_open(now);
     } else if (strcmp(line, "start") == 0) {
-        if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED) {
-            puts("[TIMER] start blocked: alarm ringing or editor open");
+        if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED ||
+            music_ui_open) {
+            puts("[TIMER] start blocked: alarm ringing or UI open");
         } else {
             if (menu_state != MENU_CLOSED) menu_close();
             timer_start_now(now);
@@ -1554,8 +1627,8 @@ static void handle_command(char *line) {
         while (end && isspace((unsigned char)*end)) ++end;
         if (!*arg || end == arg || !end || *end || errno == ERANGE || requested > 14400ul || requested < 1ul) {
             puts("[CMD] Invalid duration. Use: t 10 (1..14400 seconds)");
-        } else if (alarm_ui_state != ALARM_UI_CLOSED) {
-            puts("[TIMER] duration change blocked: alarm editor open");
+        } else if (alarm_ui_state != ALARM_UI_CLOSED || music_ui_open) {
+            puts("[TIMER] duration change blocked: editor/music open");
         } else {
             countdown_set_duration(&timer, (uint32_t)requested);
             if (!timer.running) timer_screen = true;
@@ -1598,6 +1671,10 @@ static void on_control_event(const control_event_t *event, void *context) {
         change_volume(event->direction);
     } else if (event->type == CONTROL_TIMER_ROTATE) {
         printf("[INPUT] encoder TIMER %s\n", event->direction > 0 ? "CW" : "CCW");
+        if (music_ui_open) {
+            music_ui_rotate(event->direction);
+            return;
+        }
         if (alarm_ui_state != ALARM_UI_CLOSED) {
             alarm_ui_rotate(event->direction, now);
             return;
