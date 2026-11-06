@@ -111,6 +111,13 @@ static uint64_t alarm_button_pressed_at_ms;
 static bool music_ui_open;
 static bool music_ui_playing;
 static uint8_t music_ui_track = 1u;
+static uint8_t music_track_count = 45u; // Used only if DFPlayer folder count query fails.
+static uint8_t music_shuffle[255];
+static unsigned music_shuffle_size;
+static unsigned music_shuffle_next;
+static uint8_t music_recent[7];
+static unsigned music_recent_size;
+static bool music_random_seeded;
 // Preview starts only by SETTINGS in TRACK field (not on each encoder tick).
 // This keeps rapid track selection silent and never changes saved config.
 static bool exact_hour_phrase;
@@ -655,6 +662,53 @@ static void alarm_ui_close(const char *reason) {
     printf("[ALARM-UI] closed=%s\n", reason);
 }
 
+// Fisher-Yates; a shuffle bag avoids repeats until every track is played.
+// The last seven songs of the previous cycle are postponed on the next cycle.
+static void music_shuffle_mix(unsigned first, unsigned end) {
+    if (end <= first + 1u) return;
+    for (unsigned i = end - 1u; i > first; --i) {
+        unsigned j = first + (unsigned)(rand() % (int)(i - first + 1u));
+        uint8_t t = music_shuffle[i];
+        music_shuffle[i] = music_shuffle[j];
+        music_shuffle[j] = t;
+    }
+}
+
+static bool music_was_recent(uint8_t track) {
+    for (unsigned i = 0; i < music_recent_size; ++i)
+        if (music_recent[i] == track) return true;
+    return false;
+}
+
+static void music_shuffle_refill(bool exclude_current) {
+    // Exclude the manually selected first track only from the first bag.
+    unsigned safe = 0u, delayed = 0u;
+    for (unsigned i = 1; i <= music_track_count; ++i) {
+        if (exclude_current && i == music_ui_track) continue;
+        if (!music_was_recent((uint8_t)i))
+            music_shuffle[safe++] = (uint8_t)i;
+    }
+    // Shuffle safe tracks first, then recent tracks to prevent repeats at cycle edge.
+    music_shuffle_mix(0u, safe);
+    unsigned delayed_start = safe;
+    for (unsigned i = 1; i <= music_track_count; ++i) {
+        if (exclude_current && i == music_ui_track) continue;
+        if (music_was_recent((uint8_t)i))
+            music_shuffle[safe + delayed++] = (uint8_t)i;
+    }
+    music_shuffle_mix(delayed_start, safe + delayed);
+    music_shuffle_size = safe + delayed;
+    music_shuffle_next = 0u;
+}
+
+static void music_remember(uint8_t track) {
+    if (music_recent_size >= sizeof(music_recent)) {
+        memmove(&music_recent[0], &music_recent[1], sizeof(music_recent) - 1u);
+        music_recent_size = sizeof(music_recent) - 1u;
+    }
+    music_recent[music_recent_size++] = track;
+}
+
 static void music_ui_stop(const char *reason) {
     if (!music_ui_playing) return;
     audio_queue_clear(&audio_queue, true);
@@ -670,6 +724,18 @@ static void music_ui_close(const char *reason) {
     printf("[MUSIC-UI] closed=%s\n", reason);
 }
 
+static bool music_play_track(uint8_t track) {
+    if (!audio_queue_enqueue(&audio_queue, 8u, track)) {
+        puts("[MUSIC-UI] queue full");
+        return false;
+    }
+    music_ui_track = track;
+    music_ui_playing = true;
+    music_remember(track);
+    printf("[MUSIC-UI] playing folder=08 track=%03u\n", (unsigned)track);
+    return true;
+}
+
 static void music_ui_start(void) {
     if (!music_ui_open) return;
     if (!sound_enabled || alarm_active_index >= 0 || timer.running ||
@@ -677,12 +743,10 @@ static void music_ui_start(void) {
         puts("[MUSIC-UI] playback blocked: sound off or audio busy");
         return;
     }
-    if (!audio_queue_enqueue(&audio_queue, 8u, music_ui_track)) {
-        puts("[MUSIC-UI] queue full");
-        return;
-    }
-    music_ui_playing = true;
-    printf("[MUSIC-UI] playing folder=08 track=%03u\n", (unsigned)music_ui_track);
+    music_recent_size = 0u;
+    // First play selected track, then use all other songs in random order.
+    music_shuffle_refill(true);
+    (void)music_play_track(music_ui_track);
 }
 
 static void music_ui_toggle(void) {
@@ -694,7 +758,7 @@ static void music_ui_toggle(void) {
 static void music_ui_rotate(int direction) {
     if (!music_ui_open) return;
     music_ui_stop("TRACK_CHANGED");
-    music_ui_track = wrap_u8(music_ui_track, 1u, CLOCK_ALARM_MAX_TRACK, direction);
+    music_ui_track = wrap_u8(music_ui_track, 1u, music_track_count, direction);
     printf("[MUSIC-UI] selected track=%u\n", (unsigned)music_ui_track);
 }
 
@@ -705,11 +769,34 @@ static void music_ui_enter(void) {
         puts("[MUSIC-UI] open blocked: timer/alarm/menu/audio busy");
         return;
     }
+    if (!music_random_seeded) {
+        srand((unsigned)time_us_64());
+        music_random_seeded = true;
+    }
+    uint8_t detected = dfplayer_folder_count(8u, to_ms_since_boot(get_absolute_time()));
+    music_track_count = detected ? detected : 45u;
+    printf("[MUSIC-UI] folder=08 files=%u source=%s\n",
+           (unsigned)music_track_count, detected ? "DFPLAYER" : "FALLBACK");
+    if (music_ui_track > music_track_count) music_ui_track = 1u;
+    music_recent_size = 0u;
+    music_shuffle_size = 0u;
+    music_shuffle_next = 0u;
     music_ui_open = true;
     music_ui_playing = false;
     timer_screen = false;
     printf("[MUSIC-UI] opened track=%u TIMER=PLAY/STOP MINUS=EXIT\n",
            (unsigned)music_ui_track);
+}
+
+static void music_ui_service(void) {
+    if (!music_ui_open || !music_ui_playing ||
+        !audio_queue_idle(&audio_queue) || dfplayer_busy()) return;
+    if (music_shuffle_next >= music_shuffle_size)
+        music_shuffle_refill(false);
+    if (music_shuffle_next < music_shuffle_size) {
+        uint8_t track = music_shuffle[music_shuffle_next++];
+        (void)music_play_track(track);
+    }
 }
 
 static void alarm_ui_open(uint64_t now) {
@@ -1938,11 +2025,7 @@ int main(void) {
             alarm_ui_close("TIMEOUT: draft discarded");
         }
         alarm_service_playback(now);
-        if (music_ui_playing && audio_queue_idle(&audio_queue) &&
-            !dfplayer_busy()) {
-            music_ui_playing = false;
-            printf("[MUSIC-UI] finished track=%u\n", (unsigned)music_ui_track);
-        }
+        music_ui_service();
         autosave_service(now);
         if (timer.running) {
             uint32_t left = countdown_remaining(&timer, now);
