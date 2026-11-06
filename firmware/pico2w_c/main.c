@@ -388,8 +388,8 @@ static void announce_rtc_time(void) {
 }
 
 static void timer_start_now(uint64_t now) {
-    if (alarm_active_index >= 0) {
-        puts("[TIMER] start blocked: alarm ringing (use alarm-stop first)");
+    if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED) {
+        puts("[TIMER] start blocked: close alarm editor or stop alarm first");
         return;
     }
     countdown_start(&timer, now);
@@ -1358,7 +1358,9 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "flash-tail") == 0) {
         settings_store_dump_tail();
     } else if (strcmp(line, "save") == 0) {
-        save_settings_now();
+        if (alarm_ui_state != ALARM_UI_CLOSED || alarm_active_index >= 0) {
+            puts("[FLASH] save blocked: close alarm editor or stop alarm first");
+        } else save_settings_now();
     } else if (strcmp(line, "autosave-status") == 0) {
         print_autosave_status(now);
     } else if (strcmp(line, "auto-status") == 0) {
@@ -1370,9 +1372,13 @@ static void handle_command(char *line) {
     } else if (strncmp(line, "alarm-enable ", 13) == 0) {
         alarm_enable(line + 13);
     } else if (strcmp(line, "alarm-off") == 0) {
-        alarms[0].enabled = false;
-        settings_mark_changed();
-        puts("[ALARM] 1 enabled=OFF");
+        if (alarm_ui_state != ALARM_UI_CLOSED) {
+            puts("[ALARM] close editor before changing alarm 1");
+        } else {
+            alarms[0].enabled = false;
+            settings_mark_changed();
+            puts("[ALARM] 1 enabled=OFF");
+        }
     } else if (strcmp(line, "alarm-stop") == 0) {
         alarm_stop("SERIAL");
     } else if (strncmp(line, "alarm-set ", 10) == 0) {
@@ -1418,8 +1424,8 @@ static void handle_command(char *line) {
         } else if (menu_state != MENU_CLOSED) menu_close();
         else menu_open(now);
     } else if (strcmp(line, "start") == 0) {
-        if (alarm_active_index >= 0) {
-            puts("[TIMER] start blocked: alarm ringing");
+        if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED) {
+            puts("[TIMER] start blocked: alarm ringing or editor open");
         } else {
             if (menu_state != MENU_CLOSED) menu_close();
             timer_start_now(now);
