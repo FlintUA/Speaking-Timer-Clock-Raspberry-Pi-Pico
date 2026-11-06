@@ -1621,7 +1621,7 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "bootsel") == 0) {
         puts("[BOOTSEL] Usage: bootsel arm | bootsel confirm | bootsel cancel");
     } else if (strcmp(line, "audio-route") == 0) {
-        printf("[AUDIO-ROUTE] requested=%s effective=%s bluetooth=%s\\n",
+        printf("[AUDIO-ROUTE] requested=%s effective=%s bluetooth=%s\n",
                audio_router_name(audio_router.requested),
                audio_router_name(audio_router.effective),
                audio_router.bt_connected ? "CONNECTED" : "OFFLINE");
