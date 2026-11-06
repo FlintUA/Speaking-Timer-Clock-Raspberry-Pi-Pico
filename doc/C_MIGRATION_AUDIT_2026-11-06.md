@@ -204,3 +204,19 @@ After successful live SPI1 `sd-test` on the **assembled main clock COM8**, new e
 - Encoder **already confirmed by user** to be functioning after GP12/13 relocation. Volume push/button GP20 was also verified functioning: `toggle_sound()` logs ON/OFF and LCD displays ON/OFF. **No button firmware change needed**.
 - Before flashing the main clock, save `flash-info` and alarms and ensure new image preserves reserved flash config region. Test build first, and keep rollback UF2 available.
 - **Pending**: local compile, hardware FAT32 listing, exact file read, and SD+Bluetooth simultaneous test.
+
+
+## One-command production-hardware update preference (2026-11-06)
+
+User confirmed that the assembled clock is on `COM8` and uses the previously existing `update-pico.ps1` firmware updater, which enters BOOTSEL through serial `bootsel arm` / `bootsel confirm` and verifies the running firmware without a physical BOOTSEL press.
+
+Enhanced `update-pico.ps1` with optional `-Bluetooth` and `-JblAddress` switches. The preferred update workflow for the A2DP-enabled clock is:
+
+```powershell
+git pull --ff-only
+powershell -ExecutionPolicy Bypass -File .\update-pico.ps1 -Build -Bluetooth
+```
+
+This invokes `build-clock-bt.ps1`, selects `build-bt/speaking_clock_c.uf2`, then uses the updater's existing serial BOOTSEL, UF2 copy and postflash verification. The original `-Build` without `-Bluetooth` remains the non-Bluetooth `build-ninja` path. Close serial monitor before running; do not confuse the two build variants.
+
+The assembled clock's volume encoder push was tested by the user and correctly toggles sound ON/OFF in serial log and on LCD; no adjustment required. FAT32 directory and file commands were committed but are not yet hardware validated.
