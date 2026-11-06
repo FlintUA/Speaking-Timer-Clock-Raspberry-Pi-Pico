@@ -72,3 +72,13 @@ Acceptance tests: output choice persists only when explicitly designed, every so
 
 **Do not conflate a working A2DP carrier/tone with complete wireless sound routing.**
 
+## Next bench test - flash-resident PCM clip to JBL
+
+- `bt-clip` plays an original fixed 400 ms two-note chime, stored as 8000 Hz signed 8-bit mono PCM in `clock_pcm_clip.h`.
+- A2DP callback converts PCM to 16-bit stereo samples at the currently negotiated rate (simple nearest-neighbor resampling); no SD, DFPlayer, decoder or external hardware required.
+- `bt-tone` remains available as the known-good 300 ms sine test.
+- `bt-silence` stops either source, while the A2DP transport continues with digital silence.
+- `bt-status` shows `PCM_CLIP` while the clip is playing and `SILENCE` afterwards.
+- The PCM sample is a temporary proof-of-concept and **not** a production speech/music decoder. Resampling quality and output gain need listening tests.
+- Build only with `build-clock-bt.ps1` and flash `firmware/pico2w_c/build-bt/speaking_clock_c.uf2` to the spare Pico 2 W; leave production clock untouched.
+- Bench acceptance: JBL pairs; `bt-status` ACTIVE; `bt-clip` produces audible two-note sound, returns to silence; `bt-tone` still works; `bt-silence` still works; 30+ seconds of stable link.
