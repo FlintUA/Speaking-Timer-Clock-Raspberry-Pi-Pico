@@ -12,5 +12,6 @@ bool clock_a2dp_play_tone(void);
 bool clock_a2dp_play_clip(void);
 void clock_a2dp_stop_tone(void);
 void clock_a2dp_print_status(void);
+bool clock_a2dp_stream_active(void);
 
 #endif
