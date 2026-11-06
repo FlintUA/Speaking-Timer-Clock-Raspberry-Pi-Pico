@@ -40,6 +40,7 @@ static countdown_t timer;
 // v3 persists alarm entries alongside existing settings.
 static alarm_entry_t alarms[CLOCK_ALARM_COUNT];
 static alarm_scheduler_t alarm_scheduler;
+static bool alarm_boot_seeded;
 static int alarm_active_index = -1;
 static uint64_t alarm_deadline_ms;
 static bool alarm_audio_armed;
@@ -950,7 +951,26 @@ static void alarm_service_playback(uint64_t now) {
 }
 
 static void alarm_service_rtc(const ds1302_datetime_t *dt, uint64_t now) {
-    if (!dt || dt->second > 5u || alarm_active_index >= 0) return;
+    if (!dt) return;
+    if (!alarm_boot_seeded) {
+        // First RTC minute after power-up is only observed, never fired.
+        // Avoid a surprise alarm when rebooting right at its scheduled time.
+        alarm_boot_seeded = true;
+        alarm_scheduler.minute_valid = true;
+        alarm_scheduler.minute_key = auto_minute_key(dt);
+        alarm_scheduler.fired_mask = 0u;
+        for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
+            if (alarms[i].enabled && alarms[i].hour == dt->hour &&
+                alarms[i].minute == dt->minute) {
+                alarm_scheduler.fired_mask |= (uint8_t)(1u << i);
+            }
+        }
+        printf("[ALARM] boot: %02u:%02u consumed, fired_mask=0x%02x; next minute armed\n",
+               (unsigned)dt->hour, (unsigned)dt->minute,
+               (unsigned)alarm_scheduler.fired_mask);
+        return;
+    }
+    if (dt->second > 5u || alarm_active_index >= 0) return;
     // First mark the matching alarm as seen, then evaluate priorities.
     // This prevents a timer/menu from clearing mid-minute and causing
     // a delayed alarm at second 01..05.
