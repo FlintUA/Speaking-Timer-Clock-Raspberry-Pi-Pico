@@ -27,7 +27,7 @@ static bool clock_a2dp_connect_address(const char *text){
         }
     }
     if (media_tracker.a2dp_cid != 0 || clock_a2dp_stream_running){
-        printf("[BT] Already connected or establishing; disconnect first\\n");
+        printf("[BT] Already connected or establishing; disconnect first\n");
         return false;
     }
     sscanf_bd_addr(text, device_addr);
