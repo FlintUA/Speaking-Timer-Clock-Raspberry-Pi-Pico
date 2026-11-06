@@ -40,3 +40,12 @@ int alarm_scheduler_pick(alarm_scheduler_t *state,
                          const alarm_entry_t alarms[CLOCK_ALARM_COUNT],
                          uint16_t year, uint8_t month, uint8_t day,
                          uint8_t hour, uint8_t minute, bool alarm_active);
+
+// Consume all enabled matches in one calendar minute in a single decision.
+// The lowest-numbered slot wins; others are marked handled to avoid
+// surprise playback after the winning alarm completes/stops.
+// Returns winning index or -1. *other_mask contains skipped co-due slots.
+int alarm_scheduler_claim_due(alarm_scheduler_t *state,
+    const alarm_entry_t alarms[CLOCK_ALARM_COUNT],
+    uint16_t year, uint8_t month, uint8_t day,
+    uint8_t hour, uint8_t minute, uint8_t *other_mask);
