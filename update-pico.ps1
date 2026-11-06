@@ -86,7 +86,7 @@ function Test-PicoFirmware([string]$PortName, [bool]$IncludeAlarms) {
         Write-Host '[VERIFY] flash-info'
         Write-Host $flash
         if ($flash -notmatch '\[FLASH\][^\r\n]*guard=OK' -or
-            $flash -notmatch '\[FLASH\] slot[01]=VALID') {
+            $flash -notmatch '\[FLASH\] (slot[01]|legacy_slot0)=VALID') {
             throw 'Flash guard or configuration slot verification failed.'
         }
 
