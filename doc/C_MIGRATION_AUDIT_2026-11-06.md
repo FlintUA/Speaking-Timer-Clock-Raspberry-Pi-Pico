@@ -220,3 +220,17 @@ powershell -ExecutionPolicy Bypass -File .\update-pico.ps1 -Build -Bluetooth
 This invokes `build-clock-bt.ps1`, selects `build-bt/speaking_clock_c.uf2`, then uses the updater's existing serial BOOTSEL, UF2 copy and postflash verification. The original `-Build` without `-Bluetooth` remains the non-Bluetooth `build-ninja` path. Close serial monitor before running; do not confuse the two build variants.
 
 The assembled clock's volume encoder push was tested by the user and correctly toggles sound ON/OFF in serial log and on LCD; no adjustment required. FAT32 directory and file commands were committed but are not yet hardware validated.
+
+
+## Full SD FAT32 directory and file lookup verified; conservative JBL level (2026-11-06 21:39)
+
+The user ran the experimental clock firmware on assembled **Pico 2 W COM8** and reported:
+- `sd-test`: SPI1 bus 3947368 Hz, SDHC, FAT32 starts at LBA 128, 7741440 sectors, 8 sectors/cluster, PASS.
+- `sd-list`: 27 root entries; music and numbered directories visible.
+- `sd-list 07`: `000.MP3` through `016.MP3` visible, file sizes reported.
+- `sd-file 07/001.mp3`: 53103 bytes, first cluster 1476, first bytes `49 44 33 03 00 00 ...` (ID3 metadata header); PASS.
+- `bt-status`: A2DP ACTIVE, SILENCE, 44100 Hz; RTC ticks continued throughout.
+
+This proves FAT32 directory traversal and first MP3 sector access but **not full-file reading, decoding, or routing audio from SD into JBL**.
+
+To protect against loud playback during initial A2DP tests, the experimental BTstack source-generation patch was updated to multiply the output by 0.1 (integer PCM samples divided by 10) for both the short tone and PCM test clip, before SBC encoding. This is **not** an AVRCP/absolute-volume adjustment on the JBL speaker itself, and does not change the DFPlayer local amplifier. User should additionally set JBL hardware volume low before testing. Compile and hardware effect of the new attenuation are not yet verified.
