@@ -54,3 +54,32 @@ int alarm_scheduler_pick(alarm_scheduler_t *state,
     }
     return -1;
 }
+
+int alarm_scheduler_claim_due(alarm_scheduler_t *state,
+    const alarm_entry_t alarms[CLOCK_ALARM_COUNT],
+    uint16_t year, uint8_t month, uint8_t day,
+    uint8_t hour, uint8_t minute, uint8_t *other_mask) {
+    if (other_mask) *other_mask = 0u;
+    if (!state || !alarms || year < 2000u || year > 2099u ||
+        month < 1u || month > 12u || day < 1u || day > 31u ||
+        hour > 23u || minute > 59u) return -1;
+    uint64_t key = calendar_minute_key(year, month, day, hour, minute);
+    if (!state->minute_valid || state->minute_key != key) {
+        state->minute_valid = true;
+        state->minute_key = key;
+        state->fired_mask = 0u;
+    }
+    int winner = -1;
+    uint8_t skipped = 0u;
+    for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
+        const alarm_entry_t *a = &alarms[i];
+        uint8_t bit = (uint8_t)(1u << i);
+        if ((state->fired_mask & bit) || !alarm_entry_valid(a) ||
+            !a->enabled || a->hour != hour || a->minute != minute) continue;
+        state->fired_mask |= bit;
+        if (winner < 0) winner = (int)i;
+        else skipped |= bit;
+    }
+    if (other_mask) *other_mask = skipped;
+    return winner;
+}
