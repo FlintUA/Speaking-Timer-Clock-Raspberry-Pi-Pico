@@ -82,3 +82,13 @@ Acceptance tests: output choice persists only when explicitly designed, every so
 - The PCM sample is a temporary proof-of-concept and **not** a production speech/music decoder. Resampling quality and output gain need listening tests.
 - Build only with `build-clock-bt.ps1` and flash `firmware/pico2w_c/build-bt/speaking_clock_c.uf2` to the spare Pico 2 W; leave production clock untouched.
 - Bench acceptance: JBL pairs; `bt-status` ACTIVE; `bt-clip` produces audible two-note sound, returns to silence; `bt-tone` still works; `bt-silence` still works; 30+ seconds of stable link.
+
+## JBL discovery vs known-address connection - next test
+
+User observed that `JBL Link Portable` stays paired in Google Home, but the experimental A2DP clock sees `No Bluetooth speakers found, scanning again...` until the user manually allows Bluetooth discovery. This is consistent with the upstream example relying on Bluetooth inquiry, which only finds discoverable devices.
+
+Add `bt-connect XX:XX:XX:XX:XX:XX` (USB serial) to initiate an outgoing A2DP connection directly to a user-supplied known BD_ADDR. This command does **not** re-pair and should work with non-discoverable, previously paired sinks when link security is accepted. The existing `bt-status`, `bt-clip`, `bt-tone` and `bt-silence` remain available.
+
+**Lab procedure**: keep JBL powered on and NOT in discovery mode; boot the spare Pico, issue `bt-connect` with the BD_ADDR observed in the earlier successful pairing log, inspect `[BT] Direct connect ... status=`, then A2DP connection/stream events, and retry `bt-clip`. A successful initiation status is *not* proof that the remote accepted the connection; verify stream ACTIVE and audible output.
+
+**Caveats**: do not commit paired MACs to source; the address is supplied interactively. This initial diagnostic command does not persist the target or provide retry/reconnect scheduling. If it works, next implement controlled boot-time auto-connect with bounded backoff and Bluetooth events, then couple actual A2DP status to Audio Router. Existing auto-scanning remains a fallback when no direct command is sent.
