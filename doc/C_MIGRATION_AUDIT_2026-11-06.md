@@ -247,3 +247,18 @@ After user confirmed JBL output with conservative 10% PCM gain and successful CO
 - Code added in `firmware/pico2w_c/drivers/sd_fat32.c/.h` and `main.c`; no writes to SD, changes to Flash settings, or DFPlayer modifications.
 - Test only on the assembled Pico 2 W COM8 after `git pull --ff-only` and `powershell -ExecutionPolicy Bypass -File .\update-pico.ps1 -Build -Bluetooth`. Close serial monitor first. Then `sd-test`, `sd-stream 07/001.mp3`; watch for `PASS bytes=53103`; follow with `bt-status`, `flash-info`, `alarm-status`.
 - Compilation, CRC results, uninterrupted Bluetooth playback and RTC responsiveness **not verified yet**. Keep firmware rollback option. Helix/MP3 decoder integration is a later step.
+
+
+## Full SD stream verified; Flash A/B redundancy needs investigation (2026-11-06 21:47)
+
+User's COM8 real-device log:
+- A2DP connected to `04:21:44:FA:A9:0E`, 44100 Hz stereo SBC, AVRCP absolute volume 29%; test tone completed, streaming silence.
+- SPI1 `sd-test`: FAT32 PASS, LBA128, 7741440 sectors, 8 sectors/cluster.
+- `sd-stream 07/001.mp3`: **PASS** `bytes=53103 clusters=13 crc32=B81FA766`. Streaming the whole file through FAT cluster chains works; host-side checksum comparison remains pending.
+- `bt-status`: ACTIVE SILENCE 44100 Hz, RTC continued.
+- `flash-info`: 4 MiB flash, `guard=OK`, `slot0=VALID sequence=33 version=3`, but `slot1=OCCUPIED sequence=0 version=0`. Earlier both slots were VALID.
+- `alarm-status` retains configured alarms: 1 OFF 07:00 signal1; 2 ON 08:33 signal1; 3 ON 09:00 signal1; 4 ON 09:26 signal6; 5 ON 10:34 signal1.
+
+**Caution**: The current `settings_store_save` uses the opposite slot as destination and explicitly refuses to erase any unknown nonblank contents. If slot0 is newest VALID and slot1 remains OCCUPIED, saving fails with `SETTINGS_STORE_OCCUPIED`. Do **not** erase/overwrite the suspect sector or force a save. Read-only next diagnostics: `flash-inspect` and `autosave-status` before any further firmware updates; identify cause and safe recovery with an off-device backup.
+
+The confirmed success is full MP3 *file byte read*, **not** MP3 decoding or audible SD-to-A2DP playback. Plan Helix decoder integration only after Flash investigation and robust rollback options.
