@@ -26,6 +26,7 @@ add_executable(speaking_clock_c
     drivers/controls.c
     drivers/dfplayer.c
     drivers/sd_spi.c
+    drivers/sd_fat32.c
     audio/queue.c
     audio/router.c
     audio/speech.c
