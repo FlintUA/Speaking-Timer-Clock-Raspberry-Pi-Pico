@@ -115,3 +115,19 @@ Implementation in generated BTstack sample patch:
 **Not yet proven on hardware.** Build using the usual PowerShell command with `-JblAddress`, flash only spare Pico. Test while connected: turn off JBL and wait for `Signaling released` and `Reconnect scheduled in 5000 ms`; leave Pico powered, turn JBL on (without Google Home discovery). Confirm a later `Reconnect attempt`, A2DP stream ACTIVE and audible `bt-clip`. Keep capture of failures/timeouts.
 
 **Remaining limits:** no HCI connection-attempt watchdog yet; if remote never completes an outgoing connection, backoff may stall. Audio Router still reports LOCAL and does not receive live BT state. No DFPlayer MP3 decode or alarm fallback yet. Do not promote to production until tests pass.
+
+
+## Audio Router - first live A2DP status bridge (experimental)
+
+Implementation gate: Add read-only `clock_a2dp_stream_active()` from the generated BTstack A2DP source; main-clock event loop polls it and updates `audio_router_bluetooth_state()` only when the selected logical destination is `BT_JBL`. A2DP media STREAM_STARTED makes the effective logical route `BT_JBL`, stream release or reconnect makes it revert to `LOCAL`, and successful A2DP recovery promotes it again.
+
+New UART diagnostics:
+- `audio-select jbl`: set RAM-only requested target to BT_JBL and immediately sample media stream readiness. Requires CLOCK_ENABLE_A2DP and does not change Bluetooth peer or firmware settings.
+- `audio-select local`: select LOCAL (RAM-only).
+- `audio-route`: show requested/effective and `STREAM_ACTIVE`/OFFLINE. Logs transitions while JBL is selected.
+
+**This is a diagnostic-only readiness bridge.** The clock's DFPlayer still physically plays speech, chimes, timers, alarms and music even when the logical Audio Router reports effective BT_JBL. Do not use this as evidence of wireless clock-audio routing. No persistent config/schema migration. Production build remains A2DP OFF. Standalone `bt-clip` / `bt-tone` still feed JBL directly; test commands only.
+
+Bench acceptance: build/flash spare Pico; observe A2DP ACTIVE; send `audio-select jbl` and `audio-route` -> requested=BT_JBL/effective=BT_JBL/STREAM_ACTIVE. Turn JBL off without resetting Pico -> effective=LOCAL/OFFLINE. Turn JBL on, await reconnect -> effective=BT_JBL/STREAM_ACTIVE. Send `audio-select local` -> effective=LOCAL. Confirm `bt-clip` remains operational.
+
+Next task: design actual digital audio-source and safe scheduling backend before tying audio_queue to remote route. For alarm safety, LOCAL remains effective when remote unavailable.
