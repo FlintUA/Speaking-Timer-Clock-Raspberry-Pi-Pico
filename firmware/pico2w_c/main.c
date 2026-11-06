@@ -16,6 +16,7 @@
 #include "dfplayer.h"
 #include "sd_spi.h"
 #include "sd_fat32.h"
+#include "mp3_probe.h"
 #include "queue.h"
 #include "router.h"
 #include "speech.h"
@@ -1643,6 +1644,13 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "bt-silence") == 0) {
         clock_a2dp_stop_tone();
 #endif
+    } else if (strncmp(line, "mp3-test ", 9) == 0) {
+        if (timer.running || alarm_active_index >= 0 || music_ui_open ||
+            sd_fat32_stream_active() || !audio_queue_idle(&audio_queue)) {
+            puts("[MP3] Refused while timer/alarm/music/audio/SD test is active");
+        } else if (!mp3_probe_start(line + 9)) {
+            puts("[MP3] Probe not started");
+        }
     } else if (strncmp(line, "sd-stream ", 10) == 0) {
         if (timer.running || alarm_active_index >= 0 || music_ui_open ||
             !audio_queue_idle(&audio_queue)) {
@@ -1693,6 +1701,7 @@ static void handle_command(char *line) {
         puts("[SD] sd-test - initialize/read SD card read-only; sd-info - last detection result");
         puts("[SD] sd-list [folder] - show FAT32 8.3 names; sd-file 07/001.mp3 - read first bytes");
         puts("[SD] sd-stream 07/001.mp3 - nonblocking complete file CRC32; sd-stop - cancel");
+        puts("[MP3] mp3-test 07/001.mp3 - experimental decode to RAM (no JBL output)");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
@@ -2135,6 +2144,7 @@ int main(void) {
         music_ui_service();
         // One sector of read-only SD diagnostics per loop; do not decode in audio callbacks.
         sd_fat32_stream_service();
+        mp3_probe_service();
         autosave_service(now);
         if (timer.running) {
             uint32_t left = countdown_remaining(&timer, now);
