@@ -101,3 +101,17 @@ Add `bt-connect XX:XX:XX:XX:XX:XX` (USB serial) to initiate an outgoing A2DP con
 **Next build:** `powershell -ExecutionPolicy Bypass -File .\build-clock-bt.ps1 -JblAddress '04:21:44:FA:A9:0E'`. Target address stays in the local CMake cache and generated build file, not committed to firmware source. When the Bluetooth HCI controller reaches WORKING, firmware attempts a direct connection to the target instead of waiting for inquiry. Without the parameter, previous scanning behavior is preserved. The first version only handles startup initiation (and immediate fallback if rejected); robust asynchronous failure/reconnect retry remains to implement after hardware validation.
 
 **Acceptance:** With JBL ON and not discoverable, reboot spare Pico and capture full first ~20 seconds log; look for `[BT] Boot direct connect target`, A2DP connection, stream ACTIVE, and `bt-clip`. If connect fails asynchronously, preserve log and add bounded retry later. Do not flash the production clock until this stage is stable.
+
+## Experiment: asynchronous JBL reconnect after A2DP signaling loss
+
+Implementation in generated BTstack sample patch:
+- On `A2DP_SUBEVENT_SIGNALING_CONNECTION_RELEASED`, reset signaling CID, schedule a BTstack run-loop timer, and retry the configured boot target.
+- On `A2DP_SUBEVENT_SIGNALING_CONNECTION_ESTABLISHED` failure, clear CID and schedule another attempt.
+- Retry delay uses 5 seconds, then 10 seconds, then 30 seconds repeatedly, without `sleep_ms()` or blocking clock input/RTC.
+- On successful signaling connection, cancel any pending timer and reset delay sequence.
+- When no `-JblAddress` target is configured, automatic retries are disabled and the existing discovery mode remains.
+- Stream/tone/PCM tests remain unchanged. `bt-clip` is expected to report unavailable during disconnect, and work again after `Stream started`.
+
+**Not yet proven on hardware.** Build using the usual PowerShell command with `-JblAddress`, flash only spare Pico. Test while connected: turn off JBL and wait for `Signaling released` and `Reconnect scheduled in 5000 ms`; leave Pico powered, turn JBL on (without Google Home discovery). Confirm a later `Reconnect attempt`, A2DP stream ACTIVE and audible `bt-clip`. Keep capture of failures/timeouts.
+
+**Remaining limits:** no HCI connection-attempt watchdog yet; if remote never completes an outgoing connection, backoff may stall. Audio Router still reports LOCAL and does not receive live BT state. No DFPlayer MP3 decode or alarm fallback yet. Do not promote to production until tests pass.
