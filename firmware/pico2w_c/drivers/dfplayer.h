@@ -11,3 +11,6 @@ bool dfplayer_command_ready(uint64_t now_ms);
 void dfplayer_play_folder_track(uint8_t folder, uint8_t track, uint64_t now_ms);
 void dfplayer_set_volume(uint8_t volume, uint64_t now_ms);
 void dfplayer_pause(uint64_t now_ms);
+
+// Returns 1..255 on success or 0 when DFPlayer does not answer reliably.
+uint8_t dfplayer_folder_count(uint8_t folder, uint64_t now_ms);
