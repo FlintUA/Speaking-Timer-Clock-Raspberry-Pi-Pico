@@ -15,6 +15,7 @@ set(_old_scan_function [=[
 static void a2dp_source_demo_start_scanning(void){
 ]=])
 set(_new_scan_function [=[
+static const char *clock_autoconnect_target = "__CLOCK_AUTO_TARGET__";
 static bool clock_a2dp_connect_address(const char *text){
     if (text == NULL || strlen(text) != 17u) return false;
     for (unsigned i = 0; i < 17u; ++i){
@@ -51,6 +52,34 @@ if (_scan_fn_position EQUAL -1)
     message(FATAL_ERROR "BTstack scan function changed; review direct-connect patch")
 endif()
 string(REPLACE "${_old_scan_function}" "${_new_scan_function}" _source "${_source}")
+
+# At boot prefer a directly addressed, already paired sink.
+set(_old_boot_scan [=[
+            a2dp_source_demo_start_scanning();
+]=])
+set(_new_boot_scan [=[
+            if (clock_autoconnect_target[0] != 0){
+                printf("[BT] Boot direct connect target %s\n", clock_autoconnect_target);
+                if (!clock_a2dp_connect_address(clock_autoconnect_target)){
+                    printf("[BT] Direct start refused; falling back to scan\n");
+                    a2dp_source_demo_start_scanning();
+                }
+            } else {
+                a2dp_source_demo_start_scanning();
+            }
+]=])
+string(FIND "${_source}" "${_old_boot_scan}" _boot_scan_pos)
+if (_boot_scan_pos EQUAL -1)
+    message(FATAL_ERROR "BTstack startup scan changed; review auto-connect patch")
+endif()
+string(REPLACE "${_old_boot_scan}" "${_new_boot_scan}" _source "${_source}")
+if(NOT DEFINED AUTO_TARGET_ADDR)
+    set(AUTO_TARGET_ADDR "")
+endif()
+if(NOT AUTO_TARGET_ADDR STREQUAL "" AND NOT AUTO_TARGET_ADDR MATCHES "^([0-9A-Fa-f][0-9A-Fa-f]:){5}[0-9A-Fa-f][0-9A-Fa-f]$")
+    message(FATAL_ERROR "Invalid AUTO_TARGET_ADDR")
+endif()
+string(REPLACE "__CLOCK_AUTO_TARGET__" "${AUTO_TARGET_ADDR}" _source "${_source}")
 
 set(_old_produce [=[
 static void produce_audio(int16_t * pcm_buffer, int num_samples){
