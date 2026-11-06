@@ -52,3 +52,23 @@ Both target speakers support Bluetooth reception and Chromecast built-in per the
 
 Acceptance tests: output choice persists only when explicitly designed, every sound category reaches the selected output, mute/volume/STOP behavior is consistent, alarms interrupt music, remote disconnect falls back locally and records a status, and clock continues running with no speaker available.
 
+## A2DP hardware milestone - 2026-11-06: JBL Link Portable
+
+**User verified on bare spare Pico 2 W (COM7):**
+- Experimental combined `speaking_clock_c` with `CLOCK_ENABLE_A2DP=ON` builds and boots.
+- Bluetooth connection established to JBL Link Portable.
+- A2DP SBC stereo 44.1 kHz configured; stream established and started.
+- AVRCP channel opened and absolute volume events received.
+- Generated 300 ms tone was audible on JBL, followed by continuous encoded silence.
+- Clock RTC polling continued while Bluetooth was operating. Missing DS1302 messages are expected on spare board.
+- Nest Audio is currently not discoverable/does not enter pairing mode; postpone Nest troubleshooting. **JBL is the sole active test target** until otherwise requested.
+
+**Next acceptance gate:**
+1. On JBL, verify repeated `bt-tone`, `bt-silence` and `bt-status` after an established A2DP stream; test reconnect after JBL power-cycle.
+2. Explicit JBL peer selection and controlled pairing (current upstream demo auto-selects first audio-class device and auto-confirms SSP). Do not hardcode observed MAC into public firmware.
+3. Connect A2DP output status to `Audio Router`; keep `LOCAL` as safe default, with no flash schema migration yet.
+4. Introduce a real PCM source for voice/timer/music. DFPlayer UART commands **cannot** supply PCM to Bluetooth. Perform a digital audio-source feasibility test before committing to MP3 decode or analogue capture hardware.
+5. Only then test the full clock assembly with `CLOCK_ENABLE_A2DP`; preserve the known-good build and BOOTSEL recovery.
+
+**Do not conflate a working A2DP carrier/tone with complete wireless sound routing.**
+
