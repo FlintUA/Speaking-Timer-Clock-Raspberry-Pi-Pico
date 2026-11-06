@@ -1091,3 +1091,12 @@ This is a **documented future wiring change**, not the active GPIO mapping in `d
 Do not connect SPI1 signals to GP10/GP11 until the timer encoder has been relocated and `drivers/controls.c` plus any active firmware have matching pin assignments. Avoid simultaneously changing pins on the production clock before the new firmware has been built and checked. The new Pico-side SD card is independent of the DFPlayer Mini's SD card. MP3 decoder, SPI+FAT32 driver, PWM control, and backlight switching hardware are **not yet implemented or tested**. Power the SD breakout according to its particular design (3.3V-safe logic mandatory); inspect LCD backpack's A/K backlight wiring before selecting a keying transistor.
 
 The detailed wiring checklist and hardware/firmware rollout sequence live in `doc/C_MIGRATION_PLAN.md`.
+
+
+### Hardware clarification: SD 3.3 V and separate display illumination (2026-11-06)
+
+The user confirmed that the **external SPI microSD module is a 3.3 V module**. Plan its VCC from Pico **3V3(OUT), physical pin 36**, and GND from common ground. All SPI signals GP8/GP9/GP10/GP11 must remain at **3.3 V logic**. The module's stated supply rating does not by itself confirm its exact breakout circuitry or current draw; verify markings/pinout and check power headroom before final connection.
+
+The installed **LCD1602 has no built-in backlight**. Consequently, GP6 (physical pin 9) is reserved for PWM drive of a **separate external LED used to illuminate the display**, rather than the LCD A/K backlight terminals or PCF8574 backpack's backlight control. Use GP6 -> approximately 1 kOhm base resistor -> NPN transistor (e.g. BC547/2N2222), emitter -> GND, collector -> LED cathode, LED anode -> LED current-limiting resistor -> appropriate supply. The previously proposed example uses VBUS 5 V through 220 Ohm for an LED with roughly 3 V forward drop, approximately 9 mA; confirm actual LED ratings and resistor/transistor pinout. Keep common ground; do not drive the LED directly from GPIO. VBUS 5 V is present only with suitable USB-derived power, so check the final clock power wiring before relying on it.
+
+Three planned operating modes remain **OFF, ON, AUTO** (day/night dimming), but PWM driver, scheduling, electrical connections and firmware implementation are **not yet completed**. This clarification does not change the agreed timer encoder relocation GP11->GP12 (DT) and GP10->GP13 (CLK), or planned microSD SPI1 pinout.
