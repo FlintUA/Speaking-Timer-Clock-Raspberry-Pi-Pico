@@ -97,6 +97,9 @@ static alarm_ui_state_t alarm_ui_state;
 static uint8_t alarm_ui_index;
 static alarm_entry_t alarm_ui_draft;
 static uint64_t alarm_ui_last_input_ms;
+static bool alarm_preview_active;
+// Preview starts only by SETTINGS in TRACK field (not on each encoder tick).
+// This keeps rapid track selection silent and never changes saved config.
 static bool exact_hour_phrase;
 static bool quiet_enabled = true;
 static uint8_t quiet_start = 22;
@@ -599,8 +602,36 @@ static bool menu_write_rtc(bool date_only) {
     return true;
 }
 
+static void alarm_preview_stop(const char *reason) {
+    if (!alarm_preview_active) return;
+    audio_queue_clear(&audio_queue, true);
+    alarm_preview_active = false;
+    printf("[ALARM-PREVIEW] stopped=%s\n", reason);
+}
+
+static void alarm_preview_toggle(void) {
+    if (alarm_ui_state != ALARM_UI_TRACK) return;
+    if (alarm_preview_active) {
+        alarm_preview_stop("BUTTON");
+        return;
+    }
+    if (!sound_enabled || alarm_active_index >= 0 ||
+        timer.running || !audio_queue_idle(&audio_queue) || dfplayer_busy()) {
+        puts("[ALARM-PREVIEW] blocked: audio busy, sound off or timer active");
+        return;
+    }
+    if (!audio_queue_enqueue(&audio_queue, 8u, alarm_ui_draft.track)) {
+        puts("[ALARM-PREVIEW] failed: audio queue full");
+        return;
+    }
+    alarm_preview_active = true;
+    printf("[ALARM-PREVIEW] playing folder=08 track=%03u (SETTINGS=STOP)\n",
+           (unsigned)alarm_ui_draft.track);
+}
+
 static void alarm_ui_close(const char *reason) {
     if (alarm_ui_state == ALARM_UI_CLOSED) return;
+    alarm_preview_stop(reason);
     alarm_ui_state = ALARM_UI_CLOSED;
     timer_screen = false;
     printf("[ALARM-UI] closed=%s\n", reason);
@@ -648,6 +679,7 @@ static void alarm_ui_next(uint64_t now) {
             goto commit;
         case ALARM_UI_TRACK:
 commit:
+            alarm_preview_stop("COMMIT");
             if (!alarm_entry_valid(&alarm_ui_draft)) {
                 puts("[ALARM-UI] invalid draft; refused to save");
                 return;
@@ -695,6 +727,7 @@ commit:
 static void alarm_ui_rotate(int direction, uint64_t now) {
     if (alarm_ui_state == ALARM_UI_CLOSED) return;
     alarm_ui_last_input_ms = now;
+    if (alarm_ui_state == ALARM_UI_TRACK) alarm_preview_stop("TRACK_CHANGED");
     switch (alarm_ui_state) {
         case ALARM_UI_LIST:
             alarm_ui_index = wrap_u8(alarm_ui_index, 0u,
@@ -732,6 +765,7 @@ static void alarm_ui_rotate(int direction, uint64_t now) {
 static void alarm_ui_back(uint64_t now) {
     if (alarm_ui_state == ALARM_UI_CLOSED) return;
     alarm_ui_last_input_ms = now;
+    alarm_preview_stop("BACK");
     if (alarm_ui_state == ALARM_UI_LIST) {
         alarm_ui_close("MINUS");
     } else {
@@ -1603,8 +1637,12 @@ static void on_control_event(const control_event_t *event, void *context) {
         }
         if (alarm_ui_state != ALARM_UI_CLOSED) {
             if (event->type == CONTROL_BUTTON_PRESS) {
-                if (event->button == BUTTON_TIMER ||
-                    event->button == BUTTON_SETTINGS) alarm_ui_next(now);
+                if (event->button == BUTTON_SETTINGS &&
+                    alarm_ui_state == ALARM_UI_TRACK) {
+                    alarm_ui_last_input_ms = now;
+                    alarm_preview_toggle();
+                } else if (event->button == BUTTON_TIMER ||
+                           event->button == BUTTON_SETTINGS) alarm_ui_next(now);
                 else if (event->button == BUTTON_MINUS) alarm_ui_back(now);
             }
             return;
@@ -1777,7 +1815,7 @@ int main(void) {
                 snprintf(bottom, sizeof(bottom), "%s NEXT",
                          alarm_ui_draft.sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL");
             else
-                snprintf(bottom, sizeof(bottom), "%u PRESS=SAVE",
+                snprintf(bottom, sizeof(bottom), "%u SET=PREV T=OK",
                          (unsigned)alarm_ui_draft.track);
         } else if (menu_state == MENU_LIST) {
             snprintf(top, sizeof(top), "SETTINGS %u/%u",
