@@ -6,6 +6,8 @@ param(
     [string]$Port = 'COM8',
     [string]$Uf2 = '',
     [switch]$Build,
+    [switch]$Bluetooth,
+    [string]$JblAddress = '04:21:44:FA:A9:0E',
     [switch]$VerifyOnly,
     [int]$TimeoutSeconds = 45,
     [string]$Cmake = 'C:\Users\Flint123\.pico-sdk\cmake\v4.3.4\bin\cmake.exe'
@@ -13,7 +15,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-if (-not $Uf2) { $Uf2 = Join-Path $root 'firmware\pico2w_c\build-ninja\speaking_clock_c.uf2' }
+if (-not $Uf2) {
+    $buildFolder = if ($Bluetooth) { 'build-bt' } else { 'build-ninja' }
+    $Uf2 = Join-Path $root "firmware\pico2w_c\$buildFolder\speaking_clock_c.uf2"
+}
 if (-not [System.IO.Path]::IsPathRooted($Uf2)) { $Uf2 = Join-Path $root $Uf2 }
 $Uf2 = [System.IO.Path]::GetFullPath($Uf2)
 if ($TimeoutSeconds -lt 10) { throw 'TimeoutSeconds must be at least 10.' }
@@ -100,6 +105,9 @@ function Test-PicoFirmware([string]$PortName, [bool]$IncludeAlarms) {
     }
 }
 
+if ($Bluetooth -and -not $Build -and -not $VerifyOnly) {
+    Write-Host '[UPDATE] Bluetooth selected: using existing build-bt UF2 (no build requested).'
+}
 if ($VerifyOnly) {
     if ($Build) { throw 'Cannot combine -VerifyOnly with -Build.' }
     if ($Port -notin [System.IO.Ports.SerialPort]::GetPortNames()) {
@@ -112,12 +120,22 @@ if ($VerifyOnly) {
 }
 
 if ($Build) {
-    if (-not (Test-Path -LiteralPath $Cmake -PathType Leaf)) {
-        throw "CMake not found: $Cmake"
+    if ($Bluetooth) {
+        $buildBt = Join-Path $root 'build-clock-bt.ps1'
+        if (-not (Test-Path -LiteralPath $buildBt -PathType Leaf)) {
+            throw "Bluetooth build script missing: $buildBt"
+        }
+        Write-Host '[UPDATE] Building Bluetooth A2DP firmware (build-bt) ...'
+        & $buildBt -JblAddress $JblAddress
+        if (-not $?) { throw 'Bluetooth build failed. Nothing was flashed.' }
+    } else {
+        if (-not (Test-Path -LiteralPath $Cmake -PathType Leaf)) {
+            throw "CMake not found: $Cmake"
+        }
+        Write-Host '[UPDATE] Building speaking_clock_c (no Bluetooth) ...'
+        & $Cmake --build (Join-Path $root 'firmware\pico2w_c\build-ninja') --target speaking_clock_c
+        if ($LASTEXITCODE -ne 0) { throw "CMake build failed ($LASTEXITCODE). Nothing was flashed." }
     }
-    Write-Host '[UPDATE] Building speaking_clock_c ...'
-    & $Cmake --build (Join-Path $root 'firmware\pico2w_c\build-ninja') --target speaking_clock_c
-    if ($LASTEXITCODE -ne 0) { throw "CMake build failed ($LASTEXITCODE). Nothing was flashed." }
 }
 
 if (-not (Test-Path -LiteralPath $Uf2 -PathType Leaf)) {
