@@ -309,3 +309,70 @@ implemented** in this stage.
 This is a source-only change awaiting Pico SDK build and real
 LCD/button/flash regression. No new flash layout or DFPlayer
 playback changes were introduced in Stage 5A.
+
+
+## Stage 5B - track preview and same-minute collision policy
+
+**Committed as source changes, still requires user's Pico SDK compilation
+and physical DFPlayer/LCD test. No flash record or settings schema changes.**
+
+### Explicit music track preview
+
+- In the ALARM editor, select MUSIC, advance with TIMER to TRACK.
+- Rotate TIMER encoder to choose a 1..45 track.
+- Press **SETTINGS** (also marked SET on LCD) in TRACK to play the
+  chosen track from folder 08, *without committing the draft*.
+- Press SETTINGS again to stop preview. TIMER commits the alarm entry.
+- Rotating TRACK, pressing MINUS/ALARM, committing, or reaching the
+  20-second inactivity timeout all stop the preview.
+- No automatic playback on each encoder step, to avoid a flood of
+  DFPlayer commands during rapid selection.
+- Preview refuses to start with sound OFF, a running countdown, active
+  alarm, occupied audio queue, or DFPlayer BUSY.
+- Preview does not alter persistent settings and does not initiate a
+  flash save. An already committed alarm edit is still autosaved once
+  the editor is closed and audio has been stopped.
+- Music preview can be distinguished in serial output:
+  `[ALARM-PREVIEW] playing folder=08 track=005 (SETTINGS=STOP)`,
+  `[AUDIO-TRACK] play folder=08 track=005 remaining=0`,
+  then `[ALARM-PREVIEW] stopped=...`.
+
+### Coincident alarm behavior
+
+- **One alarm per calendar minute**, deterministically selected:
+  the lowest slot number wins. Every other alarm enabled at exactly
+  the same HH:MM is marked consumed for that calendar minute.
+- The serial log reports
+  `[ALARM] collision HH:MM winner=N skipped_mask=0xXX (once per minute)`.
+  The bit mask uses bit 0 for alarm 1, etc.
+- A stopped or finished winning alarm **must not** start another
+  scheduled alarm for the same minute.
+- The portable `alarm_scheduler_claim_due` function implements this
+  policy. A separate host regression checks the mask and next-day reset.
+- Alarms on different calendar minutes remain independent. If an
+  alarm is still ringing when a different minute begins, current
+  priority logic does not queue or defer that later alarm.
+- No v3 flash layout changes were required.
+
+### Test plan
+
+1. Build/flash. Verify existing five alarm entries with `alarm-status`
+   and both v3 A/B flash records with `flash-info`.
+2. Press ALARM -> choose #4 -> TIMER through ON, HOUR, MINUTE, SOUND
+   (MUSIC) -> TRACK. Choose track 05. Press SETTINGS.
+   The track should audibly start; press SETTINGS again and verify it
+   stops. Rotate the track once to verify preview also stops.
+   Exit with MINUS; check the configured alarm has **not** changed.
+3. For an actual simultaneous-alarm test, choose two low-priority slots
+   (e.g. #4 and #5), configure both for the *same future minute*.
+   Before doing so, note their original settings. Observe that
+   `winner=4 skipped_mask=0x10`, only folder 07/004 begins.
+   Press ALARM to stop: no fifth alarm must begin afterward.
+4. Restore previous alarm configurations after testing. Any deliberate
+   reconfiguration may cause the normal flash v3 autosave.
+5. The C11 portable unit test has been expanded, but compilation and
+   execution still need confirmation locally.
+
+**Known unverified conditions:** behaviour on actual DFPlayer BUSY
+transitions, host C compilation, settings restoration after new editor
+interactions. Music-player long ALARM-press feature remains separate.
