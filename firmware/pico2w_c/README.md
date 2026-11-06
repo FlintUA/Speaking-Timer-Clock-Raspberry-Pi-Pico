@@ -1100,3 +1100,29 @@ The user confirmed that the **external SPI microSD module is a 3.3 V module**. P
 The installed **LCD1602 has no built-in backlight**. Consequently, GP6 (physical pin 9) is reserved for PWM drive of a **separate external LED used to illuminate the display**, rather than the LCD A/K backlight terminals or PCF8574 backpack's backlight control. Use GP6 -> approximately 1 kOhm base resistor -> NPN transistor (e.g. BC547/2N2222), emitter -> GND, collector -> LED cathode, LED anode -> LED current-limiting resistor -> appropriate supply. The previously proposed example uses VBUS 5 V through 220 Ohm for an LED with roughly 3 V forward drop, approximately 9 mA; confirm actual LED ratings and resistor/transistor pinout. Keep common ground; do not drive the LED directly from GPIO. VBUS 5 V is present only with suitable USB-derived power, so check the final clock power wiring before relying on it.
 
 Three planned operating modes remain **OFF, ON, AUTO** (day/night dimming), but PWM driver, scheduling, electrical connections and firmware implementation are **not yet completed**. This clarification does not change the agreed timer encoder relocation GP11->GP12 (DT) and GP10->GP13 (CLK), or planned microSD SPI1 pinout.
+
+
+## MP3 decode-only experiment (optional)
+
+The `mp3-test 07/001.mp3` command uses an external Helix decoder with custom
+read-only SPI1/FAT32 seek/read callbacks. It decodes up to 16 blocks of
+256 stereo PCM frames to RAM and prints sample rate, bitrate, frame count and
+elapsed microseconds. **No audio goes to JBL from the file yet**. DFPlayer
+and clock logic remain unchanged.
+
+License checkpoint: the wrapper [Helix-MP3-Decoder](https://github.com/Lefucjusz/Helix-MP3-Decoder)
+has a GPLv3 LICENSE; RealNetworks Helix core is under RPSL/RCSL notices.
+Review licenses before sharing combined firmware. No vendor code is committed.
+
+```powershell
+git clone https://github.com/Lefucjusz/Helix-MP3-Decoder.git third_party/Helix-MP3-Decoder
+git -C third_party/Helix-MP3-Decoder checkout e4f5adadb5126708144e55a862f59e318cbffb51
+git pull --ff-only
+powershell -ExecutionPolicy Bypass -File .\update-pico.ps1 -Build -Bluetooth -Mp3
+```
+
+Close COM8 serial monitor for update. Afterwards run
+`flash-info`, `alarm-status`, `sd-test`, `mp3-test 07/001.mp3`, `bt-status`.
+The normal `-Build -Bluetooth` remains unchanged (MP3 OFF).
+The MP3 build and performance on actual RP2350 are **not verified yet**.
+Keep the working UF2 for rollback.
