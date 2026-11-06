@@ -1,6 +1,7 @@
 # Build experimental A2DP clock on spare Pico 2 W only. Never flashes.
 param(
-    [string]$JblAddress = ''
+    [string]$JblAddress = '',
+    [switch]$Mp3
 )
 $ErrorActionPreference = 'Stop'
 if ($JblAddress -ne '' -and $JblAddress -notmatch '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$') {
@@ -41,6 +42,8 @@ $options = @(
     '-DPICO_BOARD=pico2_w','-DPICO_PLATFORM=rp2350-arm-s',
     "-DPICO_SDK_PATH=$sdk","-DPICO_EXAMPLES_PATH=$examples",
     '-DCLOCK_ENABLE_A2DP=ON',
+    ("-DCLOCK_ENABLE_MP3=" + $(if ($Mp3) { 'ON' } else { 'OFF' })),
+    ("-DCLOCK_HELIX_PATH=" + $(if ($Mp3) { Join-Path $root 'third_party\Helix-MP3-Decoder' } else { '' })),
     "-DCLOCK_A2DP_TARGET_ADDR=$JblAddress",
     "-DCMAKE_MAKE_PROGRAM=$ninja",
     "-DCMAKE_C_COMPILER=$gcc",
@@ -49,6 +52,12 @@ $options = @(
     "-Dpioasm_DIR=$(Split-Path $pioasm -Parent)",
     "-Dpicotool_DIR=$(Split-Path $picotool -Parent)"
 )
+if ($Mp3) {
+    $helix = Join-Path $root 'third_party\Helix-MP3-Decoder'
+    if (-not (Test-Path (Join-Path $helix 'src\helix_mp3.h'))) {
+        throw "Helix library missing. Clone pinned revision into $helix before -Mp3."
+    }
+}
 & $cmake @options
 if ($LASTEXITCODE -ne 0) { throw "Bluetooth configure failed: $LASTEXITCODE" }
 & $cmake --build $build --target speaking_clock_c
