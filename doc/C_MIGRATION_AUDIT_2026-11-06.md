@@ -35,3 +35,20 @@ Never perform automatic flashing or erase settings from a test script without an
 - `firmware/pico2w_c/main.c`, `firmware/pico2w_c/drivers/dfplayer.c`, `firmware/pico2w_c/CMakeLists.txt`
 - `experiments/bluetooth_a2dp_nest/README.md` and `nest_autotest/`
 - Pico SDK networking libraries, BTstack A2DP Source demo, Google Cast developer documentation
+
+## Required audio output contract - unified routing
+
+The device has **one logical audio program**, comprising every sound produced by the clock: Russian/German speech and time announcements, click/chime/startup sounds, alarms, timer signals, and continuous shuffled music. All of it must follow the **selected output**, not only music.
+
+User-selectable destinations:
+- `LOCAL`: existing DFPlayer Mini -> built-in amplifier/speakers.
+- `BLUETOOTH / NEST`: Pico 2 W A2DP Source -> Google Nest Audio.
+- `BLUETOOTH / JBL`: Pico 2 W A2DP Source -> JBL Link Portable.
+- Future `CAST / NEST`, `CAST / JBL`, or `CAST / SPEAKER GROUP`: Wi-Fi Cast sender/helper path, separate implementation.
+
+Only one active output at a time in the initial version; simultaneous local+remote playback is not promised. Preserve one application-facing audio API (enqueue/play/stop/volume/status/priority) with backend routing. Do not conflate A2DP control with DFPlayer UART commands; digital PCM must be generated or acquired for wireless output. Treat LOCAL as safe default and fallback when Bluetooth connection fails; consider local alarm/timer fallback even if a remote device is selected but not reachable. Never discard/interrupt critical alarms silently. Remote reconnection and output changes must not block RTC, menus or timer deadlines.
+
+Both target speakers support Bluetooth reception and Chromecast built-in per their published specifications; device pairing and Wi-Fi/Cast behavior still need integration tests. For initial wireless integration, add selectable A2DP peers without changing flash v3; use RAM-only selection or a separate versioned persistence migration when ready.
+
+Acceptance tests: output choice persists only when explicitly designed, every sound category reaches the selected output, mute/volume/STOP behavior is consistent, alarms interrupt music, remote disconnect falls back locally and records a status, and clock continues running with no speaker available.
+
