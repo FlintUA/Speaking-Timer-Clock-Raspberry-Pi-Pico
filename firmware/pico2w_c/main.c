@@ -1043,6 +1043,80 @@ static void alarm_set(char *args) {
            hh, mm, music ? "MUSIC" : "SIGNAL", music ? track : 1u);
 }
 
+// New syntax for all five alarm slots; keep alarm-set as a slot-1 alias.
+static void alarm_config(char *args) {
+    unsigned slot = 0, hh = 0, mm = 0, track = 1;
+    char kind[12] = {0}, extra = 0;
+    int fields = sscanf(args, " %u %u %u %11s %u %c",
+                        &slot, &hh, &mm, kind, &track, &extra);
+    bool signal = fields == 4 && strcmp(kind, "signal") == 0;
+    bool music = fields == 5 && strcmp(kind, "music") == 0 &&
+                 track >= 1u && track <= CLOCK_ALARM_MAX_TRACK;
+    if (slot < 1u || slot > CLOCK_ALARM_COUNT || hh > 23u || mm > 59u ||
+        (!signal && !music)) {
+        puts("[ALARM] Use alarm-config N HH MM signal OR alarm-config N HH MM music TRACK");
+        return;
+    }
+    if (alarm_active_index >= 0) {
+        puts("[ALARM] config blocked: an alarm is ringing");
+        return;
+    }
+    alarm_entry_t *a = &alarms[slot - 1u];
+    a->enabled = true;
+    a->hour = (uint8_t)hh;
+    a->minute = (uint8_t)mm;
+    a->sound = music ? ALARM_SOUND_MUSIC : ALARM_SOUND_SIGNAL;
+    a->track = music ? (uint8_t)track : 1u;
+
+    // Do not trigger retroactively if configured in the very same minute.
+    ds1302_datetime_t dt = {0};
+    if (ds1302_read_datetime(&dt) && dt.hour == hh && dt.minute == mm) {
+        uint64_t key = auto_minute_key(&dt);
+        if (!alarm_scheduler.minute_valid || alarm_scheduler.minute_key != key) {
+            alarm_scheduler.minute_valid = true;
+            alarm_scheduler.minute_key = key;
+            alarm_scheduler.fired_mask = 0u;
+        }
+        alarm_scheduler.fired_mask |= (uint8_t)(1u << (slot - 1u));
+    }
+    settings_mark_changed();
+    printf("[ALARM] %u enabled=ON time=%02u:%02u sound=%s track=%u\n",
+           slot, hh, mm, music ? "MUSIC" : "SIGNAL", music ? track : 1u);
+}
+
+static void alarm_enable(char *args) {
+    unsigned slot = 0;
+    char action[8] = {0}, extra = 0;
+    if (sscanf(args, " %u %7s %c", &slot, action, &extra) != 2 ||
+        slot < 1u || slot > CLOCK_ALARM_COUNT ||
+        (strcmp(action, "on") && strcmp(action, "off"))) {
+        puts("[ALARM] Use alarm-enable N on|off (N=1..5)");
+        return;
+    }
+    if (alarm_active_index >= 0 && (unsigned)(alarm_active_index + 1) == slot) {
+        puts("[ALARM] first stop ringing alarm with alarm-stop");
+        return;
+    }
+    alarm_entry_t *a = &alarms[slot - 1u];
+    a->enabled = strcmp(action, "on") == 0;
+    if (a->enabled) {
+        // Do not retroactively trigger during the currently active minute.
+        ds1302_datetime_t dt = {0};
+        if (ds1302_read_datetime(&dt) && dt.hour == a->hour &&
+            dt.minute == a->minute) {
+            uint64_t key = auto_minute_key(&dt);
+            if (!alarm_scheduler.minute_valid || alarm_scheduler.minute_key != key) {
+                alarm_scheduler.minute_valid = true;
+                alarm_scheduler.minute_key = key;
+                alarm_scheduler.fired_mask = 0u;
+            }
+            alarm_scheduler.fired_mask |= (uint8_t)(1u << (slot - 1u));
+        }
+    }
+    settings_mark_changed();
+    printf("[ALARM] %u enabled=%s\n", slot, a->enabled ? "ON" : "OFF");
+}
+
 static void alarm_test(char *args) {
     unsigned hh = 0u, mm = 0u, slot = 0u;
     char extra = 0;
@@ -1091,7 +1165,7 @@ static void handle_command(char *line) {
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
-        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
+        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
     } else if (strcmp(line, "rtc-debug") == 0) {
         print_rtc_debug();
     } else if (strcmp(line, "rtc-reset-stats") == 0) {
@@ -1111,6 +1185,10 @@ static void handle_command(char *line) {
         auto_status();
     } else if (strcmp(line, "alarm-status") == 0) {
         alarm_status();
+    } else if (strncmp(line, "alarm-config ", 13) == 0) {
+        alarm_config(line + 13);
+    } else if (strncmp(line, "alarm-enable ", 13) == 0) {
+        alarm_enable(line + 13);
     } else if (strcmp(line, "alarm-off") == 0) {
         alarms[0].enabled = false;
         settings_mark_changed();
