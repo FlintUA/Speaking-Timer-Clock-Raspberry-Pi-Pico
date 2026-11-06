@@ -6,6 +6,7 @@ param(
     [string]$Port = 'COM8',
     [string]$Uf2 = '',
     [switch]$Build,
+    [switch]$VerifyOnly,
     [int]$TimeoutSeconds = 45,
     [string]$Cmake = 'C:\Users\Flint123\.pico-sdk\cmake\v4.3.4\bin\cmake.exe'
 )
@@ -28,216 +29,88 @@ function Wait-Until([scriptblock]$Predicate, [int]$Seconds, [string]$Description
 }
 
 function Get-BootselDrive {
-    # RP2350 (Pico 2 W) normally has the volume label RP2350.
-    # Confirm the ROM's INFO_UF2.TXT to avoid copying onto another disk.
-    $matches = @(
+    # This updater targets Pico 2 W / RP2350 only, not RP2040.
+    # Never choose a disk based on the volume label alone.
+    $found = @(
         foreach ($disk in @(Get-CimInstance -ClassName Win32_LogicalDisk)) {
-            if (-not $disk.DeviceID) { continue }
-            $rootPath = $disk.DeviceID + '\'
-            $marker = Join-Path $rootPath 'INFO_UF2.TXT'
+            if (-not $disk.DeviceID -or $disk.VolumeName -ne 'RP2350') { continue }
+            $marker = Join-Path ($disk.DeviceID + '\') 'INFO_UF2.TXT'
             if (-not (Test-Path -LiteralPath $marker -PathType Leaf -ErrorAction SilentlyContinue)) { continue }
             try {
                 $info = Get-Content -LiteralPath $marker -Raw -ErrorAction Stop
-                if (($info -match 'Board-ID:\s*RP2350' -and $disk.VolumeName -eq 'RP2350') -or
-                    ($info -match 'Board-ID:\s*RP2' -and $disk.VolumeName -eq 'RPI-RP2')) {
-                    $disk.DeviceID
-                }
+                if ($info -match '(?m)^Board-ID:\s*RP2350\s*$') { $disk.DeviceID }
             } catch { }
         }
     )
-    if ($matches.Count -gt 1) { throw ('Multiple Pico BOOTSEL drives: ' + ($matches -join ', ')) }
-    if ($matches.Count -eq 1) { return $matches[0] }
-    return $null
-}
-if ($Build) {
-    if (-not (Test-Path -LiteralPath $Cmake -PathType Leaf)) {
-        throw "CMake not found: $Cmake"
+    if ($found.Count -gt 1) {
+        throw ('Multiple validated RP2350 BOOTSEL drives: ' + ($found -join ', '))
     }
-    Write-Host '[UPDATE] Building speaking_clock_c ...'
-    & $Cmake --build (Join-Path $root 'firmware\pico2w_c\build-ninja') --target speaking_clock_c
-    if ($LASTEXITCODE -ne 0) { throw "CMake build failed ($LASTEXITCODE). Nothing was flashed." }
-}
-
-if (-not (Test-Path -LiteralPath $Uf2 -PathType Leaf)) {
-    throw "UF2 not found: $Uf2. Build first or use -Build."
-}
-$file = Get-Item -LiteralPath $Uf2
-if ($file.Length -lt 512 -or $file.Length % 512 -ne 0) {
-    throw "UF2 size looks invalid ($($file.Length) bytes). Nothing was flashed."
-}
-if ((Get-BootselDrive)) {
-    throw 'A Pico BOOTSEL drive is already mounted. Disconnect other Pico BOOTSEL devices before continuing.'
-}
-if ($Port -notin [System.IO.Ports.SerialPort]::GetPortNames()) {
-    throw "Serial port $Port not found. Check the port name and USB connection."
-}
-Write-Host "[UPDATE] UF2: $Uf2 ($($file.Length) bytes)"
-Write-Host "[UPDATE] Port: $Port. Close VS Code Serial Monitor before running this script."
-
-$serial = [System.IO.Ports.SerialPort]::new($Port, 115200)
-$serial.DtrEnable = $true # TinyUSB CDC stdio normally requires DTR from terminal.
-$serial.RtsEnable = $true
-$serial.ReadTimeout = 2500
-$serial.WriteTimeout = 2500
-$serial.NewLine = "`n"
-try {
-    $serial.Open()
-    # Allow TinyUSB CDC to finish handshake. Send ARM a single time and
-    # wait for an actual reply rather than assuming it arrives in 500 ms.
-    Start-Sleep -Milliseconds 700
-    $serial.DiscardInBuffer()
-    $serial.WriteLine('bootsel arm')
-    $armedReply = ''
-    $ackTimer = [System.Diagnostics.Stopwatch]::StartNew()
-    while ($ackTimer.Elapsed.TotalSeconds -lt 9) {
-        Start-Sleep -Milliseconds 150
-        $armedReply += $serial.ReadExisting()
-        if ($armedReply -match '\[BOOTSEL\] ARMED for 15s') { break }
-        if ($armedReply -match '\[BOOTSEL\] REFUSED') {
-            throw "Pico refused BOOTSEL; do not flash. Reply: $armedReply"
-        }
-    }
-    if ($armedReply -notmatch '\[BOOTSEL\] ARMED for 15s') {
-        throw "Device did not arm BOOTSEL within 9s. Check COM/DTR and try bootsel arm manually. Reply: $armedReply"
-    }
-    Write-Host '[UPDATE] BOOTSEL armed; confirming ...'
-    $serial.WriteLine('bootsel confirm')
-    Start-Sleep -Milliseconds 350
-    try { 
-        $confirmReply = $serial.ReadExisting()
-        if ($confirmReply) { Write-Host ("[UPDATE] " + $confirmReply.Trim()) }
-    } catch { }
-} finally {
-    if ($serial.IsOpen) { $serial.Close() }
-    $serial.Dispose()
-}
-
-Write-Host '[UPDATE] Waiting for Pico BOOTSEL USB drive (RP2350/RPI-RP2) ...'
-$drive = Wait-Until -Seconds $TimeoutSeconds -Description 'Pico BOOTSEL volume with valid INFO_UF2.TXT' -Predicate {
-    Get-BootselDrive
-}
-$destination = "$drive\$($file.Name)"
-Write-Host "[UPDATE] Copying $($file.Name) to $drive ..."
-Copy-Item -LiteralPath $Uf2 -Destination $destination -ErrorAction Stop
-Write-Host '[UPDATE] UF2 copied. Waiting for firmware serial port ...'
-$portBack = $false
-try {
-    $null = Wait-Until -Seconds $TimeoutSeconds -Description "$Port after reboot" -Predicate {
-        if ($Port -in [System.IO.Ports.SerialPort]::GetPortNames()) { return $true }
-        return $false
-    }
-    $portBack = $true
-} catch {
-    Write-Warning "COM port did not reappear as $Port. Windows may have assigned a new port. Inspect Device Manager."
-}
-if ($portBack) {
-    Write-Host "[UPDATE] SUCCESS: $Port is back. Verify 'flash-info' and 'alarm-status' manually." -ForegroundColor Green
-} else {
-    Write-Warning 'UF2 was copied, but startup was not confirmed. Do not assume firmware is running.'
-}
- -or
-                    ($info -match '(?im)^Board-ID:\s*RP2[-_A-Za-z0-9]*\s*
-
-if ($Build) {
-    if (-not (Test-Path -LiteralPath $Cmake -PathType Leaf)) {
-        throw "CMake not found: $Cmake"
-    }
-    Write-Host '[UPDATE] Building speaking_clock_c ...'
-    & $Cmake --build (Join-Path $root 'firmware\pico2w_c\build-ninja') --target speaking_clock_c
-    if ($LASTEXITCODE -ne 0) { throw "CMake build failed ($LASTEXITCODE). Nothing was flashed." }
-}
-
-if (-not (Test-Path -LiteralPath $Uf2 -PathType Leaf)) {
-    throw "UF2 not found: $Uf2. Build first or use -Build."
-}
-$file = Get-Item -LiteralPath $Uf2
-if ($file.Length -lt 512 -or $file.Length % 512 -ne 0) {
-    throw "UF2 size looks invalid ($($file.Length) bytes). Nothing was flashed."
-}
-if ((Get-BootselDrive)) {
-    throw 'RPI-RP2 drive already mounted. Disconnect other Pico BOOTSEL devices before continuing.'
-}
-if ($Port -notin [System.IO.Ports.SerialPort]::GetPortNames()) {
-    throw "Serial port $Port not found. Check the port name and USB connection."
-}
-Write-Host "[UPDATE] UF2: $Uf2 ($($file.Length) bytes)"
-Write-Host "[UPDATE] Port: $Port. Close VS Code Serial Monitor before running this script."
-
-$serial = [System.IO.Ports.SerialPort]::new($Port, 115200)
-$serial.DtrEnable = $true # TinyUSB CDC stdio normally requires DTR from terminal.
-$serial.RtsEnable = $true
-$serial.ReadTimeout = 2500
-$serial.WriteTimeout = 2500
-$serial.NewLine = "`n"
-try {
-    $serial.Open()
-    # Allow TinyUSB CDC to finish handshake. Send ARM a single time and
-    # wait for an actual reply rather than assuming it arrives in 500 ms.
-    Start-Sleep -Milliseconds 700
-    $serial.DiscardInBuffer()
-    $serial.WriteLine('bootsel arm')
-    $armedReply = ''
-    $ackTimer = [System.Diagnostics.Stopwatch]::StartNew()
-    while ($ackTimer.Elapsed.TotalSeconds -lt 9) {
-        Start-Sleep -Milliseconds 150
-        $armedReply += $serial.ReadExisting()
-        if ($armedReply -match '\[BOOTSEL\] ARMED for 15s') { break }
-        if ($armedReply -match '\[BOOTSEL\] REFUSED') {
-            throw "Pico refused BOOTSEL; do not flash. Reply: $armedReply"
-        }
-    }
-    if ($armedReply -notmatch '\[BOOTSEL\] ARMED for 15s') {
-        throw "Device did not arm BOOTSEL within 9s. Check COM/DTR and try bootsel arm manually. Reply: $armedReply"
-    }
-    Write-Host '[UPDATE] BOOTSEL armed; confirming ...'
-    $serial.WriteLine('bootsel confirm')
-    Start-Sleep -Milliseconds 350
-    try { 
-        $confirmReply = $serial.ReadExisting()
-        if ($confirmReply) { Write-Host ("[UPDATE] " + $confirmReply.Trim()) }
-    } catch { }
-} finally {
-    if ($serial.IsOpen) { $serial.Close() }
-    $serial.Dispose()
-}
-
-Write-Host '[UPDATE] Waiting for RPI-RP2 USB drive ...'
-$drive = Wait-Until -Seconds $TimeoutSeconds -Description 'RPI-RP2 volume' -Predicate {
-    Get-BootselDrive
-}
-$destination = "$drive\$($file.Name)"
-Write-Host "[UPDATE] Copying $($file.Name) to $drive ..."
-Copy-Item -LiteralPath $Uf2 -Destination $destination -ErrorAction Stop
-Write-Host '[UPDATE] UF2 copied. Waiting for firmware serial port ...'
-$portBack = $false
-try {
-    $null = Wait-Until -Seconds $TimeoutSeconds -Description "$Port after reboot" -Predicate {
-        if ($Port -in [System.IO.Ports.SerialPort]::GetPortNames()) { return $true }
-        return $false
-    }
-    $portBack = $true
-} catch {
-    Write-Warning "COM port did not reappear as $Port. Windows may have assigned a new port. Inspect Device Manager."
-}
-if ($portBack) {
-    Write-Host "[UPDATE] SUCCESS: $Port is back. Verify 'flash-info' and 'alarm-status' manually." -ForegroundColor Green
-} else {
-    Write-Warning 'UF2 was copied, but startup was not confirmed. Do not assume firmware is running.'
-}
- -and
-                     $disk.VolumeName -eq 'RPI-RP2')) {
-                    $disk.DeviceID
-                }
-            } catch { }
-        }
-    )
-    if ($matches.Count -gt 1) {
-        throw "Multiple validated Pico BOOTSEL drives detected: $($matches -join ', '). Disconnect the other devices."
-    }
-    if ($matches.Count -eq 1) { return $matches[0] }
+    if ($found.Count -eq 1) { return $found[0] }
     return $null
 }
 
+function New-PicoSerial([string]$PortName) {
+    $serial = [System.IO.Ports.SerialPort]::new($PortName, 115200)
+    $serial.DtrEnable = $true
+    $serial.RtsEnable = $true
+    $serial.ReadTimeout = 1500
+    $serial.WriteTimeout = 2500
+    $serial.NewLine = "\n"
+    return $serial
+}
+
+function Read-PicoReply($Serial, [string]$Command, [string]$Expected, [int]$Seconds = 4) {
+    $Serial.DiscardInBuffer()
+    $Serial.WriteLine($Command)
+    $reply = ''
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($timer.Elapsed.TotalSeconds -lt $Seconds) {
+        Start-Sleep -Milliseconds 150
+        $reply += $Serial.ReadExisting()
+        if ($reply -match $Expected) { break }
+    }
+    return $reply
+}
+
+function Test-PicoFirmware([string]$PortName, [bool]$IncludeAlarms) {
+    $serial = New-PicoSerial $PortName
+    try {
+        $serial.Open()
+        Start-Sleep -Milliseconds 800
+        $flash = Read-PicoReply $serial 'flash-info' '\[FLASH\] slot1=' 4
+        Write-Host '[VERIFY] flash-info'
+        Write-Host $flash
+        if ($flash -notmatch '\[FLASH\][^\r\n]*guard=OK' -or
+            $flash -notmatch '\[FLASH\] slot[01]=VALID') {
+            throw 'Flash guard or configuration slot verification failed.'
+        }
+
+        if ($IncludeAlarms) {
+            $alarms = Read-PicoReply $serial 'alarm-status' '\[ALARM\] 5 enabled=' 4
+            Write-Host '[VERIFY] alarm-status'
+            Write-Host $alarms
+            if ($alarms -notmatch '\[ALARM\][^\r\n]*active=') {
+                throw 'Alarm status response missing.'
+            }
+        }
+        return $true
+    } finally {
+        if ($serial.IsOpen) { $serial.Close() }
+        $serial.Dispose()
+    }
+}
+
+if ($VerifyOnly) {
+    if ($Build) { throw 'Cannot combine -VerifyOnly with -Build.' }
+    if ($Port -notin [System.IO.Ports.SerialPort]::GetPortNames()) {
+        throw "Serial port $Port not found."
+    }
+    Write-Host "[VERIFY] Connecting to $Port ..."
+    $null = Test-PicoFirmware $Port $true
+    Write-Host '[VERIFY] SUCCESS: Flash and alarm diagnostics passed.' -ForegroundColor Green
+    return
+}
+
 if ($Build) {
     if (-not (Test-Path -LiteralPath $Cmake -PathType Leaf)) {
         throw "CMake not found: $Cmake"
@@ -254,73 +127,65 @@ $file = Get-Item -LiteralPath $Uf2
 if ($file.Length -lt 512 -or $file.Length % 512 -ne 0) {
     throw "UF2 size looks invalid ($($file.Length) bytes). Nothing was flashed."
 }
-if ((Get-BootselDrive)) {
-    throw 'RPI-RP2 drive already mounted. Disconnect other Pico BOOTSEL devices before continuing.'
-}
-if ($Port -notin [System.IO.Ports.SerialPort]::GetPortNames()) {
-    throw "Serial port $Port not found. Check the port name and USB connection."
-}
 Write-Host "[UPDATE] UF2: $Uf2 ($($file.Length) bytes)"
-Write-Host "[UPDATE] Port: $Port. Close VS Code Serial Monitor before running this script."
 
-$serial = [System.IO.Ports.SerialPort]::new($Port, 115200)
-$serial.DtrEnable = $true # TinyUSB CDC stdio normally requires DTR from terminal.
-$serial.RtsEnable = $true
-$serial.ReadTimeout = 2500
-$serial.WriteTimeout = 2500
-$serial.NewLine = "`n"
-try {
-    $serial.Open()
-    # Allow TinyUSB CDC to finish handshake. Send ARM a single time and
-    # wait for an actual reply rather than assuming it arrives in 500 ms.
-    Start-Sleep -Milliseconds 700
-    $serial.DiscardInBuffer()
-    $serial.WriteLine('bootsel arm')
-    $armedReply = ''
-    $ackTimer = [System.Diagnostics.Stopwatch]::StartNew()
-    while ($ackTimer.Elapsed.TotalSeconds -lt 9) {
-        Start-Sleep -Milliseconds 150
-        $armedReply += $serial.ReadExisting()
-        if ($armedReply -match '\[BOOTSEL\] ARMED for 15s') { break }
-        if ($armedReply -match '\[BOOTSEL\] REFUSED') {
-            throw "Pico refused BOOTSEL; do not flash. Reply: $armedReply"
+$drive = Get-BootselDrive
+if ($drive) {
+    Write-Host "[UPDATE] RP2350 already in BOOTSEL on $drive; skipping serial commands."
+} else {
+    if ($Port -notin [System.IO.Ports.SerialPort]::GetPortNames()) {
+        throw "RP2350 BOOTSEL drive not found and serial port $Port is unavailable."
+    }
+    Write-Host "[UPDATE] Connecting to $Port. Close other serial monitors first."
+    $serial = New-PicoSerial $Port
+    try {
+        $serial.Open()
+        Start-Sleep -Milliseconds 700
+        $armed = Read-PicoReply $serial 'bootsel arm' '\[BOOTSEL\] (ARMED for 15s|REFUSED)' 9
+        if ($armed -match '\[BOOTSEL\] REFUSED') {
+            throw "Pico refused BOOTSEL: $armed"
         }
+        if ($armed -notmatch '\[BOOTSEL\] ARMED for 15s') {
+            throw "BOOTSEL ARM was not confirmed: $armed"
+        }
+        Write-Host '[UPDATE] BOOTSEL armed; confirming ...'
+        $serial.WriteLine('bootsel confirm')
+        Start-Sleep -Milliseconds 350
+    } finally {
+        if ($serial.IsOpen) { $serial.Close() }
+        $serial.Dispose()
     }
-    if ($armedReply -notmatch '\[BOOTSEL\] ARMED for 15s') {
-        throw "Device did not arm BOOTSEL within 9s. Check COM/DTR and try bootsel arm manually. Reply: $armedReply"
+    Write-Host '[UPDATE] Waiting for RP2350 BOOTSEL drive ...'
+    $drive = Wait-Until -Seconds $TimeoutSeconds -Description 'validated RP2350 BOOTSEL drive' -Predicate {
+        Get-BootselDrive
     }
-    Write-Host '[UPDATE] BOOTSEL armed; confirming ...'
-    $serial.WriteLine('bootsel confirm')
-    Start-Sleep -Milliseconds 350
-    try { 
-        $confirmReply = $serial.ReadExisting()
-        if ($confirmReply) { Write-Host ("[UPDATE] " + $confirmReply.Trim()) }
-    } catch { }
-} finally {
-    if ($serial.IsOpen) { $serial.Close() }
-    $serial.Dispose()
 }
 
-Write-Host '[UPDATE] Waiting for RPI-RP2 USB drive ...'
-$drive = Wait-Until -Seconds $TimeoutSeconds -Description 'RPI-RP2 volume' -Predicate {
-    Get-BootselDrive
+# Recheck the exact identity immediately before copying the UF2.
+if ((Get-BootselDrive) -ne $drive) {
+    throw "RP2350 BOOTSEL drive $drive disappeared or changed."
 }
-$destination = "$drive\$($file.Name)"
+$destination = Join-Path ($drive + '\') $file.Name
 Write-Host "[UPDATE] Copying $($file.Name) to $drive ..."
 Copy-Item -LiteralPath $Uf2 -Destination $destination -ErrorAction Stop
-Write-Host '[UPDATE] UF2 copied. Waiting for firmware serial port ...'
-$portBack = $false
-try {
-    $null = Wait-Until -Seconds $TimeoutSeconds -Description "$Port after reboot" -Predicate {
-        if ($Port -in [System.IO.Ports.SerialPort]::GetPortNames()) { return $true }
-        return $false
+Write-Host '[UPDATE] UF2 copied. Waiting for firmware verification ...'
+
+$verified = $false
+$lastFailure = ''
+$timer = [System.Diagnostics.Stopwatch]::StartNew()
+while ($timer.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+    Start-Sleep -Milliseconds 500
+    if ($Port -notin [System.IO.Ports.SerialPort]::GetPortNames()) { continue }
+    try {
+        $null = Test-PicoFirmware $Port $false
+        $verified = $true
+        break
+    } catch {
+        $lastFailure = $_.Exception.Message
     }
-    $portBack = $true
-} catch {
-    Write-Warning "COM port did not reappear as $Port. Windows may have assigned a new port. Inspect Device Manager."
 }
-if ($portBack) {
-    Write-Host "[UPDATE] SUCCESS: $Port is back. Verify 'flash-info' and 'alarm-status' manually." -ForegroundColor Green
-} else {
-    Write-Warning 'UF2 was copied, but startup was not confirmed. Do not assume firmware is running.'
+if (-not $verified) {
+    if ($lastFailure) { Write-Warning $lastFailure }
+    throw "UF2 was copied, but firmware startup on $Port was not verified."
 }
+Write-Host '[UPDATE] SUCCESS: Firmware responds and Flash guard is OK.' -ForegroundColor Green
