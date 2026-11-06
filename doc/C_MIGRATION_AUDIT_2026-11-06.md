@@ -92,3 +92,12 @@ Add `bt-connect XX:XX:XX:XX:XX:XX` (USB serial) to initiate an outgoing A2DP con
 **Lab procedure**: keep JBL powered on and NOT in discovery mode; boot the spare Pico, issue `bt-connect` with the BD_ADDR observed in the earlier successful pairing log, inspect `[BT] Direct connect ... status=`, then A2DP connection/stream events, and retry `bt-clip`. A successful initiation status is *not* proof that the remote accepted the connection; verify stream ACTIVE and audible output.
 
 **Caveats**: do not commit paired MACs to source; the address is supplied interactively. This initial diagnostic command does not persist the target or provide retry/reconnect scheduling. If it works, next implement controlled boot-time auto-connect with bounded backoff and Bluetooth events, then couple actual A2DP status to Audio Router. Existing auto-scanning remains a fallback when no direct command is sent.
+
+
+## Boot-time direct A2DP target - experimental gate
+
+**Verified:** On bare spare Pico 2 W, USB `bt-connect 04:21:44:FA:A9:0E` succeeded without Google Home discovery mode. A2DP reached ACTIVE and a PCM clip played.
+
+**Next build:** `powershell -ExecutionPolicy Bypass -File .\build-clock-bt.ps1 -JblAddress '04:21:44:FA:A9:0E'`. Target address stays in the local CMake cache and generated build file, not committed to firmware source. When the Bluetooth HCI controller reaches WORKING, firmware attempts a direct connection to the target instead of waiting for inquiry. Without the parameter, previous scanning behavior is preserved. The first version only handles startup initiation (and immediate fallback if rejected); robust asynchronous failure/reconnect retry remains to implement after hardware validation.
+
+**Acceptance:** With JBL ON and not discoverable, reboot spare Pico and capture full first ~20 seconds log; look for `[BT] Boot direct connect target`, A2DP connection, stream ACTIVE, and `bt-clip`. If connect fails asynchronously, preserve log and add bounded retry later. Do not flash the production clock until this stage is stable.
