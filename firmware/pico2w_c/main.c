@@ -15,6 +15,7 @@
 #include "controls.h"
 #include "dfplayer.h"
 #include "queue.h"
+#include "router.h"
 #include "speech.h"
 #include "settings_store.h"
 
@@ -54,6 +55,7 @@ static bool bootsel_armed;
 static uint64_t bootsel_armed_ms;
 static bool timer_screen;
 static audio_queue_t audio_queue;
+static audio_router_t audio_router;
 static uint8_t volume = 10; // Default; overridden by saved flash settings.
 static bool sound_enabled = true;
 static speech_language_t language = SPEECH_RU;
@@ -1618,6 +1620,11 @@ static void handle_command(char *line) {
         bootsel_command("cancel", now);
     } else if (strcmp(line, "bootsel") == 0) {
         puts("[BOOTSEL] Usage: bootsel arm | bootsel confirm | bootsel cancel");
+    } else if (strcmp(line, "audio-route") == 0) {
+        printf("[AUDIO-ROUTE] requested=%s effective=%s bluetooth=%s\\n",
+               audio_router_name(audio_router.requested),
+               audio_router_name(audio_router.effective),
+               audio_router.bt_connected ? "CONNECTED" : "OFFLINE");
     } else if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
@@ -1988,6 +1995,7 @@ int main(void) {
     puts("[INPUT] GPIO controls initialized (2 encoders, 7 buttons)");
     dfplayer_init();
     audio_queue_init(&audio_queue);
+    audio_router_init(&audio_router);
     alarm_defaults(alarms);
     alarm_scheduler_init(&alarm_scheduler);
     load_settings_at_boot();
