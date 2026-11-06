@@ -8,6 +8,50 @@ endif()
 
 file(READ "${UPSTREAM_SOURCE}" _source)
 
+# Direct connect to an already known Bluetooth MAC without requiring inquiry mode.
+# The upstream example only connects after a discoverable inquiry result.
+# Keep the MAC outside firmware source; receive it over USB for this test.
+set(_old_scan_function [=[
+static void a2dp_source_demo_start_scanning(void){
+]=])
+set(_new_scan_function [=[
+static bool clock_a2dp_connect_address(const char *text){
+    if (text == NULL || strlen(text) != 17u) return false;
+    for (unsigned i = 0; i < 17u; ++i){
+        if ((i % 3u) == 2u){
+            if (text[i] != ':') return false;
+        } else {
+            if (!((text[i] >= '0' && text[i] <= '9') ||
+                  (text[i] >= 'a' && text[i] <= 'f') ||
+                  (text[i] >= 'A' && text[i] <= 'F'))) return false;
+        }
+    }
+    if (media_tracker.a2dp_cid != 0 || clock_a2dp_stream_running){
+        printf("[BT] Already connected or establishing; disconnect first\\n");
+        return false;
+    }
+    sscanf_bd_addr(text, device_addr);
+    if (scan_active){
+        scan_active = false;
+        gap_inquiry_stop();
+    }
+    uint8_t status = a2dp_source_establish_stream(device_addr, &media_tracker.a2dp_cid);
+    printf("[BT] Direct connect %s status=0x%02x\\n", text, status);
+    return status == ERROR_CODE_SUCCESS;
+}
+
+bool clock_a2dp_connect(const char *address){
+    return clock_a2dp_connect_address(address);
+}
+
+static void a2dp_source_demo_start_scanning(void){
+]=])
+string(FIND "${_source}" "${_old_scan_function}" _scan_fn_position)
+if (_scan_fn_position EQUAL -1)
+    message(FATAL_ERROR "BTstack scan function changed; review direct-connect patch")
+endif()
+string(REPLACE "${_old_scan_function}" "${_new_scan_function}" _source "${_source}")
+
 set(_old_produce [=[
 static void produce_audio(int16_t * pcm_buffer, int num_samples){
     btstack_audio_generator_generate(&audio_generator_state.generator.base, pcm_buffer, num_samples);
