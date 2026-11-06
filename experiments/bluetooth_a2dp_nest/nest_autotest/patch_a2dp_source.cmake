@@ -281,6 +281,12 @@ static void produce_audio(int16_t * pcm_buffer, int num_samples){
             }
         }
     }
+    // Keep all experimental JBL output quiet regardless of the sink volume.
+    // 10 percent linear PCM gain, applied before BTstack SBC encoding.
+    // This also limits the startup tone and any future test PCM generated here.
+    for (int sample = 0; sample < num_samples * NUM_CHANNELS; ++sample){
+        pcm_buffer[sample] = (int16_t)(pcm_buffer[sample] / 10);
+    }
 #ifdef VOLUME_REDUCTION
 ]=])
 string(FIND "${_source}" "${_old_produce}" _produce_position)
