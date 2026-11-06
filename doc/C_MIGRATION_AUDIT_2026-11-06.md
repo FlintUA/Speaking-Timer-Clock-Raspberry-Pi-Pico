@@ -175,3 +175,20 @@ Three planned operating modes remain **OFF, ON, AUTO** (day/night dimming), but 
 - User explicitly requested **leave current behavior unchanged** until a later audio-assets repair task. Do **not** substitute a guessed track, synthesize an unapproved announcement, or alter existing timer priority/finish signaling in this change.
 - Future action: identify the correct German phrase/audio file, confirm its exact DFPlayer folder/track mapping and RU/DE sequencing, add/repair the asset and verify both language modes on hardware. Also account for this when migrating voice playback from DFPlayer to second microSD + software MP3/A2DP.
 - The exact German source track name/location remains **unverified**. This is not a new implementation or evidence the underlying firmware cannot play such an asset.
+
+
+## Hardware verified: main Pico 2 W SPI1 microSD FAT32 bring-up (2026-11-06 21:28)
+
+User reports the assembled main clock on USB COM8 with the new 3.3 V SPI1 SD module on GP8 MISO, GP9 CS, GP10 SCK, GP11 MOSI, and timer encoder physically remapped to GP12/GP13. The new SD card contains a duplicate of DFPlayer MP3 files.
+
+Observed live serial transcript:
+```text
+[RTC] 21:28:55 06.11.2026
+[SD] SPI1 initialized: SDHC/SDXC, bus=3947368 Hz, read-only
+[SD] FAT32 detected at LBA 128, 7741440 sectors, sectors/cluster=8
+[SD] PASS: SPI sector read + FAT32 boot sector
+[RTC] 21:28:56 06.11.2026
+```
+Verified: SD initialization, SPI sector read, recognizable FAT32 volume geometry, continuing RTC activity. FAT cluster size = 4096 bytes (8 × 512). This does **not** yet prove file traversal, opening/reading MP3 files, software MP3 decoding, A2DP streaming from SD, or encoder functionality on relocated GPIO. SD remains read-only. Preserve DFPlayer fallback and existing audio setup.
+
+Next gate: add read-only FAT32 root/subdirectory traversal and diagnostic listing/opening of an exact file (e.g. `/07/001.mp3`), then a bounded sequential-read test before integrating a decoder.
