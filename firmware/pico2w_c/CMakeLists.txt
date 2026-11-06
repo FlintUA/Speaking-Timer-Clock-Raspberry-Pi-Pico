@@ -66,9 +66,11 @@ if(CLOCK_ENABLE_A2DP)
     set(_a2dp_generated "${CMAKE_CURRENT_BINARY_DIR}/clock_a2dp_source_generated.c")
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
         "${_a2dp_orig}" "${_a2dp_test}/patch_a2dp_source.cmake")
+    set(CLOCK_A2DP_TARGET_ADDR "" CACHE STRING "Known A2DP target (experimental; local build only)")
     execute_process(COMMAND "${CMAKE_COMMAND}"
         "-DUPSTREAM_SOURCE=${_a2dp_orig}"
         "-DPATCHED_SOURCE=${_a2dp_generated}"
+        "-DAUTO_TARGET_ADDR=${CLOCK_A2DP_TARGET_ADDR}"
         -P "${_a2dp_test}/patch_a2dp_source.cmake"
         RESULT_VARIABLE _patch_result)
     if(NOT _patch_result EQUAL 0)
