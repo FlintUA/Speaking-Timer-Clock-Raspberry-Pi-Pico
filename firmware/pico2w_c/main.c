@@ -18,6 +18,11 @@
 #include "router.h"
 #include "speech.h"
 #include "settings_store.h"
+#ifdef CLOCK_ENABLE_A2DP
+#include "pico/cyw43_arch.h"
+#include "clock_a2dp_control.h"
+int btstack_main(int argc, const char *argv[]);
+#endif
 
 #define LCD_SDA_GPIO 0
 #define LCD_SCL_GPIO 1
@@ -1620,6 +1625,15 @@ static void handle_command(char *line) {
         bootsel_command("cancel", now);
     } else if (strcmp(line, "bootsel") == 0) {
         puts("[BOOTSEL] Usage: bootsel arm | bootsel confirm | bootsel cancel");
+#ifdef CLOCK_ENABLE_A2DP
+    } else if (strcmp(line, "bt-status") == 0) {
+        clock_a2dp_print_status();
+    } else if (strcmp(line, "bt-tone") == 0) {
+        if (!clock_a2dp_play_tone())
+            puts("[BT] No active A2DP stream");
+    } else if (strcmp(line, "bt-silence") == 0) {
+        clock_a2dp_stop_tone();
+#endif
     } else if (strcmp(line, "audio-route") == 0) {
         printf("[AUDIO-ROUTE] requested=%s effective=%s bluetooth=%s\n",
                audio_router_name(audio_router.requested),
@@ -1975,7 +1989,19 @@ int main(void) {
     stdio_init_all();
     sleep_ms(3000); // Give VS Code Serial Monitor time to attach.
     printf("\n[BOOT] Speaking Clock C bring-up 0.1 (Pico 2 W)\n");
+#ifdef CLOCK_ENABLE_A2DP
+    puts("[BOOT] EXPERIMENTAL A2DP active; LOCAL DFPlayer still primary output");
+    int bt_error = cyw43_arch_init();
+    printf("[BT] cyw43_arch_init=%d\n", bt_error);
+    if (bt_error == PICO_OK) {
+        int result = btstack_main(0, NULL);
+        printf("[BT] btstack_main=%d\n", result);
+    } else {
+        puts("[BT] radio init failed, clock continues without remote audio");
+    }
+#else
     printf("[BOOT] DS1302 manual datetime writes only; LCD1602 scan; no Bluetooth\n");
+#endif
 
     i2c_init(i2c0, 400 * 1000);
     gpio_set_function(LCD_SDA_GPIO, GPIO_FUNC_I2C);
