@@ -224,6 +224,12 @@ void clock_a2dp_stop_tone(void){
     printf("[TONE] Stopped; sending silence\n");
 }
 
+// True only after the A2DP media stream has started. Do not equate a
+// signaling-only connection with an audio-ready remote output.
+bool clock_a2dp_stream_active(void){
+    return clock_a2dp_stream_running;
+}
+
 void clock_a2dp_print_status(void){
     printf("[INFO] A2DP stream: %s; audio: %s; sample rate: %d Hz; samples remaining: %lu\n",
            clock_a2dp_stream_running ? "ACTIVE" : "INACTIVE",
