@@ -402,18 +402,24 @@ static clock_settings_t settings_snapshot(void) {
         .half_hour_enabled = half_hour_enabled,
         .clock_mode = clock_mode
     };
+    memcpy(cfg.alarms, alarms, sizeof(cfg.alarms));
     return cfg;
 }
 
 static bool settings_equal(clock_settings_t a, clock_settings_t b) {
     // Compare fields explicitly, not struct padding.
-    return a.language == b.language && a.volume == b.volume &&
-           a.exact_hour == b.exact_hour &&
-           a.quiet_enabled == b.quiet_enabled &&
-           a.quiet_start == b.quiet_start &&
-           a.quiet_end == b.quiet_end &&
-           a.half_hour_enabled == b.half_hour_enabled &&
-           a.clock_mode == b.clock_mode;
+    if (a.language != b.language || a.volume != b.volume ||
+        a.exact_hour != b.exact_hour || a.quiet_enabled != b.quiet_enabled ||
+        a.quiet_start != b.quiet_start || a.quiet_end != b.quiet_end ||
+        a.half_hour_enabled != b.half_hour_enabled ||
+        a.clock_mode != b.clock_mode) return false;
+    for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
+        const alarm_entry_t *x = &a.alarms[i], *y = &b.alarms[i];
+        if (x->enabled != y->enabled || x->hour != y->hour ||
+            x->minute != y->minute || x->sound != y->sound ||
+            x->track != y->track) return false;
+    }
+    return true;
 }
 
 static void settings_mark_changed(void) {
@@ -843,6 +849,7 @@ static void load_settings_at_boot(void) {
         quiet_end = saved.quiet_end;
         half_hour_enabled = saved.half_hour_enabled;
         clock_mode = saved.clock_mode;
+        memcpy(alarms, saved.alarms, sizeof(alarms));
         printf("[FLASH] loaded lang=%s volume=%u exact=%s quiet=%s %02u-%02u half_hour=%s mode=%s\n",
                speech_language_name(language), (unsigned)volume,
                exact_hour_phrase ? "ON" : "OFF",
@@ -1381,14 +1388,14 @@ int main(void) {
     puts("[INPUT] GPIO controls initialized (2 encoders, 7 buttons)");
     dfplayer_init();
     audio_queue_init(&audio_queue);
+    alarm_defaults(alarms);
+    alarm_scheduler_init(&alarm_scheduler);
     load_settings_at_boot();
     audio_queue_set_volume(&audio_queue, volume);
     puts("[AUDIO] DFPlayer UART0 GP16/17 BUSY GP18");
     puts("[AUTO] runtime=ON after boot; first observed RTC boundary will be consumed");
     countdown_init(&timer);
-    alarm_defaults(alarms);
-    alarm_scheduler_init(&alarm_scheduler);
-    puts("[ALARM] 5 slots OFF at boot; slot1 can be armed by alarm-set (RAM only)");
+    puts("[ALARM] five slots loaded from flash (v1/v2 default OFF); confirm with alarm-status");
     puts("[CMD] Serial timer ready. Type help + Enter");
     char last_top[17] = {0};
     char last_bottom[17] = {0};
