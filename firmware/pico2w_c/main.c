@@ -1626,6 +1626,10 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "bootsel") == 0) {
         puts("[BOOTSEL] Usage: bootsel arm | bootsel confirm | bootsel cancel");
 #ifdef CLOCK_ENABLE_A2DP
+    } else if (strncmp(line, "bt-connect ", 11) == 0) {
+        const char *address = line + 11;
+        if (!clock_a2dp_connect(address))
+            puts("[BT] Direct connect rejected; check address/connection status");
     } else if (strcmp(line, "bt-status") == 0) {
         clock_a2dp_print_status();
     } else if (strcmp(line, "bt-tone") == 0) {
