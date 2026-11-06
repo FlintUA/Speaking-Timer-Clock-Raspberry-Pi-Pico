@@ -30,6 +30,7 @@ add_executable(speaking_clock_c
     audio/queue.c
     audio/router.c
     audio/speech.c
+    audio/mp3_probe.c
     services/settings_store.c
 )
 target_include_directories(speaking_clock_c PRIVATE
@@ -95,4 +96,21 @@ if(CLOCK_ENABLE_A2DP)
         pico_btstack_sbc_encoder)
     target_compile_definitions(speaking_clock_c PRIVATE CLOCK_ENABLE_A2DP=1)
     message(STATUS "Experimental A2DP enabled: test on spare Pico 2 W only")
+endif()
+
+# MP3 decoding is opt-in: keep the previously tested clock image unchanged
+# unless the user explicitly requests an experiment. Third-party Helix source
+# is checked out separately, not vendored into the clock repository.
+option(CLOCK_ENABLE_MP3 "Experimental Helix MP3 diagnostics (no A2DP audio yet)" OFF)
+set(CLOCK_HELIX_PATH "" CACHE PATH "Path to separate Helix-MP3-Decoder checkout")
+if(CLOCK_ENABLE_MP3)
+    if(NOT EXISTS "${CLOCK_HELIX_PATH}/src/helix_mp3.h" OR
+       NOT EXISTS "${CLOCK_HELIX_PATH}/CMakeLists.txt")
+        message(FATAL_ERROR "Set CLOCK_HELIX_PATH to a cloned Helix-MP3-Decoder checkout")
+    endif()
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${CLOCK_HELIX_PATH}" "${CMAKE_CURRENT_BINARY_DIR}/helix_mp3_build")
+    target_link_libraries(speaking_clock_c PRIVATE helix_mp3)
+    target_compile_definitions(speaking_clock_c PRIVATE CLOCK_ENABLE_MP3=1)
+    message(STATUS "Experimental MP3 decode-only probe enabled; audio routing unchanged")
 endif()
