@@ -28,3 +28,7 @@ config.tmp
 # Do not accidentally commit local diagnostics or binary backups
 *.backup
 *.bak
+
+
+# Third-party external decoder checkout; not distributed in this repository
+third_party/Helix-MP3-Decoder/
