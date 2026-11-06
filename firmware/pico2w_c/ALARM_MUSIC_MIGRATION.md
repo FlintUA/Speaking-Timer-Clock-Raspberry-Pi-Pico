@@ -244,3 +244,68 @@ This implementation was inspected through repository source updates.
 It has **not** been compiled with the user's Pico SDK or verified on
 Pico 2 W. No claim of successful flash migration can be made until
 the physical tests above pass.
+
+
+## Stage 5A - physical ALARM editor on LCD1602 (pending hardware test)
+
+The C firmware now supports a dedicated modal editor for each of five
+persistent alarms. The existing clock settings menu is unchanged.
+
+### Buttons and rotary encoder
+
+1. Press **ALARM** briefly from the normal clock display:
+   the display opens \`ALARM 1/5 ON|OFF\` with the configured HH:MM
+   and SIGNAL/MUSIC on the second line.
+2. Rotate **TIMER** encoder clockwise/counterclockwise to choose
+   alarm 1..5 (wraps at either end).
+3. Press **TIMER** (or SETTINGS) to edit the selected alarm.
+4. Rotate TIMER to change the displayed field. Press TIMER to advance:
+   ON/OFF -> HOUR -> MINUTE -> SOUND -> TRACK (only if MUSIC).
+5. Press TIMER at SOUND when SIGNAL was selected, or at TRACK when
+   MUSIC was selected, to **commit** the full alarm entry.
+   The display returns to the alarm list. On a real change
+   \`[ALARM-UI] saved #N ... changed=YES\` appears in COM8.
+6. Press **MINUS** while editing to discard the entire draft;
+   press MINUS from the alarm list to close it. Press ALARM
+   again to close the editor (discarding an incomplete draft).
+7. After 20 seconds of no input the editor closes and any
+   incomplete draft is discarded. On commit the existing flash
+   v3 autosave is marked pending (5-second debounce and
+   60-second minimum interval for successive writes).
+
+While alarm UI is open, physical TIMER encoder/button is dedicated to
+the editor and neither the countdown nor the settings menu can be
+modified. Alarm and regular automatic announcements falling inside
+the edit period are skipped, not delayed. An alarm already ringing
+takes priority; physical ALARM stops it instead of opening the editor.
+
+Track 1..45 can be selected but **no sound preview in the editor yet**.
+Long ALARM press for the full music-player application is **not
+implemented** in this stage.
+
+### Suggested safe test order (with existing v3 backup)
+
+1. Build new firmware and inspect \`flash-info\`, \`alarm-status\`;
+   existing alarm #2 should still show ON at 08:33 if retained.
+2. Press ALARM, rotate TIMER twice to highlight #3. Press TIMER:
+   the first editable field is ON/OFF. Turn encoder to ON, then
+   proceed through hour/minute/sound with TIMER presses. For the
+   first pass **cancel** with MINUS instead of committing.
+   \`alarm-status\` should still show #3 OFF, unchanged.
+3. Open #3 again, edit and commit. Confirm
+   \`[ALARM-UI] saved #3 ... changed=YES\`,
+   \`[FLASH] settings changed; autosave pending after 5s\`.
+   Exit using ALARM or MINUS. Confirm \`flash-info\` after
+   autosave shows a newer valid v3 record.
+4. Power-cycle Pico, then \`alarm-status\`; verify the committed
+   alarm #3 values were restored. Previously saved #2 is unchanged.
+5. Test MUSIC/track path separately. Never configure a test
+   alarm in the current minute (editor consumes same-minute
+   events) or during any real daily alarm you need to hear.
+6. Existing \`alarm-config\`, \`alarm-enable\` and
+   \`alarm-set\` serial commands remain functional outside the
+   editor.
+
+This is a source-only change awaiting Pico SDK build and real
+LCD/button/flash regression. No new flash layout or DFPlayer
+playback changes were introduced in Stage 5A.
