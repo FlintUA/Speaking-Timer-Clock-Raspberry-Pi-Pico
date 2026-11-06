@@ -45,6 +45,43 @@ bool clock_a2dp_connect(const char *address){
     return clock_a2dp_connect_address(address);
 }
 
+// All reconnect callbacks run on the BTstack event loop.
+static btstack_timer_source_t clock_reconnect_timer;
+static bool clock_reconnect_pending;
+static unsigned clock_reconnect_failures;
+static const uint32_t clock_backoff_ms[] = {5000u, 10000u, 30000u};
+static void clock_reconnect_schedule(void);
+
+static void clock_reconnect_cancel(void){
+    if (!clock_reconnect_pending) return;
+    btstack_run_loop_remove_timer(&clock_reconnect_timer);
+    clock_reconnect_pending = false;
+}
+
+static void clock_reconnect_timer_handler(btstack_timer_source_t *timer){
+    (void)timer;
+    clock_reconnect_pending = false;
+    if (clock_autoconnect_target[0] == 0) return;
+    if (media_tracker.a2dp_cid != 0) return;
+    printf("[BT] Reconnect attempt %u to %s\n",
+           clock_reconnect_failures, clock_autoconnect_target);
+    if (!clock_a2dp_connect_address(clock_autoconnect_target)){
+        clock_reconnect_schedule();
+    }
+}
+
+static void clock_reconnect_schedule(void){
+    if (clock_autoconnect_target[0] == 0 || clock_reconnect_pending) return;
+    uint32_t index = clock_reconnect_failures < 3u ? clock_reconnect_failures : 2u;
+    uint32_t delay = clock_backoff_ms[index];
+    clock_reconnect_failures++;
+    btstack_run_loop_set_timer_handler(&clock_reconnect_timer, clock_reconnect_timer_handler);
+    btstack_run_loop_set_timer(&clock_reconnect_timer, delay);
+    btstack_run_loop_add_timer(&clock_reconnect_timer);
+    clock_reconnect_pending = true;
+    printf("[BT] Reconnect scheduled in %lu ms\n", (unsigned long)delay);
+}
+
 static void a2dp_source_demo_start_scanning(void){
 ]=])
 string(FIND "${_source}" "${_old_scan_function}" _scan_fn_position)
@@ -91,6 +128,53 @@ if(NOT AUTO_TARGET_ADDR STREQUAL "")
     endforeach()
 endif()
 string(REPLACE "__CLOCK_AUTO_TARGET__" "${AUTO_TARGET_ADDR}" _source "${_source}")
+
+# Retrying an A2DP connection requires waiting for failure or release.
+set(_old_failed_connection [=[
+                media_tracker.a2dp_cid = 0;
+                break;
+]=])
+set(_new_failed_connection [=[
+                media_tracker.a2dp_cid = 0;
+                clock_reconnect_schedule();
+                break;
+]=])
+string(FIND "${_source}" "${_old_failed_connection}" _failed_position)
+if(_failed_position EQUAL -1)
+    message(FATAL_ERROR "BTstack connection-failure handler changed")
+endif()
+string(REPLACE "${_old_failed_connection}" "${_new_failed_connection}" _source "${_source}")
+
+set(_old_connected [=[
+            media_tracker.a2dp_cid = cid;
+            media_tracker.volume = 32;
+]=])
+set(_new_connected [=[
+            media_tracker.a2dp_cid = cid;
+            clock_reconnect_cancel();
+            clock_reconnect_failures = 0;
+            media_tracker.volume = 32;
+]=])
+string(FIND "${_source}" "${_old_connected}" _connected_position)
+if(_connected_position EQUAL -1)
+    message(FATAL_ERROR "BTstack connection-success handler changed")
+endif()
+string(REPLACE "${_old_connected}" "${_new_connected}" _source "${_source}")
+
+set(_old_signal_released [=[
+                media_tracker.a2dp_cid = 0;
+                printf("A2DP Source: Signaling released.\n\n");
+]=])
+set(_new_signal_released [=[
+                media_tracker.a2dp_cid = 0;
+                printf("A2DP Source: Signaling released.\n\n");
+                clock_reconnect_schedule();
+]=])
+string(FIND "${_source}" "${_old_signal_released}" _signal_release_pos)
+if(_signal_release_pos EQUAL -1)
+    message(FATAL_ERROR "BTstack signaling-release handler changed")
+endif()
+string(REPLACE "${_old_signal_released}" "${_new_signal_released}" _source "${_source}")
 
 set(_old_produce [=[
 static void produce_audio(int16_t * pcm_buffer, int num_samples){
