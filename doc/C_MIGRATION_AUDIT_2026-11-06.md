@@ -286,3 +286,17 @@ User's assembled clock COM8, read-only `flash-inspect` output:
 - **Compilation and hardware verification pending**. Before update, use the scripted build + flash only after validating compile and preserving firmware rollback. Post-update: expect `slot0=BLANK`, `slot1=BLANK`, `legacy_slot0=VALID sequence=33` until a deliberate settings change. Do not issue arbitrary `save` simply to force migration; initial read-only verification is sufficient.
 
 This Flash conflict should take priority over adding an MP3 decoder. Documentation and code changes do not indicate the physical hardware has been modified.
+
+
+## Main-clock Flash collision fix verified on hardware (2026-11-06 21:54)
+
+User successfully compiled/flashed and tested the A2DP firmware via COM8. Observed:
+```text
+[FLASH] size=4096 KiB slots=0x003fa000,0x003fb000 image_end=0x1009ce7c guard=OK
+[FLASH] slot0=BLANK sequence=0 version=0 offset=0x003fa000
+[FLASH] slot1=BLANK sequence=0 version=0 offset=0x003fb000
+[FLASH] legacy_slot0=VALID sequence=33 version=3 offset=0x003fc000 READ_ONLY
+[FLASH] BTstack banks start=0x003fd000 (reserved, not inspected)
+[INFO] A2DP stream: ACTIVE; audio: SILENCE; sample rate: 44100 Hz; samples remaining: 0
+```
+All five alarm entries remain intact (1 OFF 07:00 signal1; 2 ON 08:33 signal1; 3 ON 09:00 signal1; 4 ON 09:26 signal6; 5 ON 10:34 signal1). RTC continued ticking; JBL A2DP SBC and AVRCP connected. **Verified:** non-overlapping address layout, valid legacy settings fallback, preservation of alarms. **Not yet tested:** first save into new A/B settings slots and subsequent reboot/redundant backup creation; do not claim complete A/B migration until that test. Future MP3 integration should keep the flash guard and 10% test PCM attenuation.
