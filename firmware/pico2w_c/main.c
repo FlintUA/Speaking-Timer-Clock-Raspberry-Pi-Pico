@@ -547,7 +547,10 @@ static void change_volume(int direction) {
 static void toggle_sound(void) {
     sound_enabled = !sound_enabled;
     volume_overlay_until_ms = to_ms_since_boot(get_absolute_time()) + VOLUME_OVERLAY_MS;
-    if (!sound_enabled) audio_queue_clear(&audio_queue, true);
+    if (!sound_enabled) {
+        audio_queue_clear(&audio_queue, true);
+        if (music_ui_open) music_ui_playing = false;
+    }
     printf("[AUDIO] sound=%s\n", sound_enabled ? "ON" : "OFF");
 }
 
@@ -1310,8 +1313,9 @@ static void alarm_set(char *args) {
         puts("[ALARM] Use alarm-set HH MM signal OR alarm-set HH MM music TRACK(1..45)");
         return;
     }
-    if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED) {
-        puts("[ALARM] Stop ringing alarm or close editor before configuration");
+    if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED ||
+        music_ui_open) {
+        puts("[ALARM] Stop ringing alarm or close editor/player before configuration");
         return;
     }
     alarms[0].enabled = true;
@@ -1347,8 +1351,9 @@ static void alarm_config(char *args) {
         puts("[ALARM] Use alarm-config N HH MM signal OR alarm-config N HH MM music TRACK");
         return;
     }
-    if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED) {
-        puts("[ALARM] config blocked: alarm ringing or alarm editor open");
+    if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED ||
+        music_ui_open) {
+        puts("[ALARM] config blocked: alarm ringing or editor/player open");
         return;
     }
     alarm_entry_t *a = &alarms[slot - 1u];
@@ -1383,7 +1388,7 @@ static void alarm_enable(char *args) {
         puts("[ALARM] Use alarm-enable N on|off (N=1..5)");
         return;
     }
-    if (alarm_ui_state != ALARM_UI_CLOSED ||
+    if (alarm_ui_state != ALARM_UI_CLOSED || music_ui_open ||
         (alarm_active_index >= 0 && (unsigned)(alarm_active_index + 1) == slot)) {
         puts("[ALARM] close alarm editor or stop ringing alarm first");
         return;
@@ -1457,6 +1462,7 @@ static void handle_command(char *line) {
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
+        puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
     } else if (strcmp(line, "rtc-debug") == 0) {
         print_rtc_debug();
     } else if (strcmp(line, "rtc-reset-stats") == 0) {
@@ -1484,8 +1490,8 @@ static void handle_command(char *line) {
     } else if (strncmp(line, "alarm-enable ", 13) == 0) {
         alarm_enable(line + 13);
     } else if (strcmp(line, "alarm-off") == 0) {
-        if (alarm_ui_state != ALARM_UI_CLOSED) {
-            puts("[ALARM] close editor before changing alarm 1");
+        if (alarm_ui_state != ALARM_UI_CLOSED || music_ui_open) {
+            puts("[ALARM] close editor/player before changing alarm 1");
         } else {
             alarms[0].enabled = false;
             settings_mark_changed();
@@ -1597,7 +1603,9 @@ static void handle_command(char *line) {
             printf("[AUDIO] volume=%u/30\n", (unsigned)volume);
         }
     } else if (strcmp(line, "pause") == 0) {
-        if (alarm_active_index >= 0) {
+        if (music_ui_open) {
+            music_ui_stop("SERIAL_PAUSE");
+        } else if (alarm_active_index >= 0) {
             puts("[AUDIO] pause blocked: use alarm-stop");
         } else {
             audio_queue_clear(&audio_queue, true);
@@ -1611,8 +1619,9 @@ static void handle_command(char *line) {
             puts("[AUDIO] Use play <folder 1..99> <track 1..255>");
         } else if (!sound_enabled) {
             puts("[AUDIO] Sound OFF; press volume button to enable");
-        } else if (alarm_active_index >= 0) {
-            puts("[AUDIO] play blocked: alarm ringing");
+        } else if (alarm_active_index >= 0 || music_ui_open ||
+                   alarm_ui_state != ALARM_UI_CLOSED) {
+            puts("[AUDIO] play blocked: alarm/editor/music active");
         } else if (audio_queue_enqueue(&audio_queue, (uint8_t)folder, (uint8_t)track)) {
             printf("[AUDIO] Queued folder=%u track=%u\n", folder, track);
         } else {
