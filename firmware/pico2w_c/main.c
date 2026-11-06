@@ -680,11 +680,10 @@ static bool music_was_recent(uint8_t track) {
     return false;
 }
 
-static void music_shuffle_refill(bool exclude_current) {
-    // Exclude the manually selected first track only from the first bag.
+static void music_shuffle_refill(void) {
+    // Generate an entire shuffled playlist, navigable before playback.
     unsigned safe = 0u, delayed = 0u;
     for (unsigned i = 1; i <= music_track_count; ++i) {
-        if (exclude_current && i == music_ui_track) continue;
         if (!music_was_recent((uint8_t)i))
             music_shuffle[safe++] = (uint8_t)i;
     }
@@ -692,7 +691,6 @@ static void music_shuffle_refill(bool exclude_current) {
     music_shuffle_mix(0u, safe);
     unsigned delayed_start = safe;
     for (unsigned i = 1; i <= music_track_count; ++i) {
-        if (exclude_current && i == music_ui_track) continue;
         if (music_was_recent((uint8_t)i))
             music_shuffle[safe + delayed++] = (uint8_t)i;
     }
@@ -743,10 +741,9 @@ static void music_ui_start(void) {
         puts("[MUSIC-UI] playback blocked: sound off or audio busy");
         return;
     }
-    music_recent_size = 0u;
-    // First play selected track, then use all other songs in random order.
-    music_shuffle_refill(true);
-    (void)music_play_track(music_ui_track);
+    // Play the selected entry in the already shuffled playlist.
+    if (music_shuffle_next >= music_shuffle_size) return;
+    (void)music_play_track(music_shuffle[music_shuffle_next]);
 }
 
 static void music_ui_toggle(void) {
@@ -758,8 +755,15 @@ static void music_ui_toggle(void) {
 static void music_ui_rotate(int direction) {
     if (!music_ui_open) return;
     music_ui_stop("TRACK_CHANGED");
-    music_ui_track = wrap_u8(music_ui_track, 1u, music_track_count, direction);
-    printf("[MUSIC-UI] selected track=%u\n", (unsigned)music_ui_track);
+    if (!music_shuffle_size) return;
+    if (direction > 0)
+        music_shuffle_next = (music_shuffle_next + 1u) % music_shuffle_size;
+    else if (direction < 0)
+        music_shuffle_next = (music_shuffle_next + music_shuffle_size - 1u) % music_shuffle_size;
+    music_ui_track = music_shuffle[music_shuffle_next];
+    printf("[MUSIC-UI] selected position=%u/%u track=%u\n",
+           (unsigned)(music_shuffle_next + 1u), (unsigned)music_shuffle_size,
+           (unsigned)music_ui_track);
 }
 
 static void music_ui_enter(void) {
@@ -777,13 +781,15 @@ static void music_ui_enter(void) {
     music_track_count = detected ? detected : 45u;
     printf("[MUSIC-UI] folder=08 files=%u source=%s\n",
            (unsigned)music_track_count, detected ? "DFPLAYER" : "FALLBACK");
-    if (music_ui_track > music_track_count) music_ui_track = 1u;
     music_recent_size = 0u;
-    music_shuffle_size = 0u;
-    music_shuffle_next = 0u;
+    music_shuffle_refill();
+    music_ui_track = music_shuffle[0];
     music_ui_open = true;
     music_ui_playing = false;
     timer_screen = false;
+    printf("[MUSIC-UI] playlist ready tracks=%u; position=1/%u track=%u\n",
+           (unsigned)music_track_count, (unsigned)music_shuffle_size,
+           (unsigned)music_ui_track);
     printf("[MUSIC-UI] opened track=%u TIMER=PLAY/STOP MINUS=EXIT\n",
            (unsigned)music_ui_track);
 }
@@ -791,12 +797,14 @@ static void music_ui_enter(void) {
 static void music_ui_service(void) {
     if (!music_ui_open || !music_ui_playing ||
         !audio_queue_idle(&audio_queue) || dfplayer_busy()) return;
-    if (music_shuffle_next >= music_shuffle_size)
-        music_shuffle_refill(false);
-    if (music_shuffle_next < music_shuffle_size) {
-        uint8_t track = music_shuffle[music_shuffle_next++];
-        (void)music_play_track(track);
+    // Advance through the existing playlist; reshuffle only at cycle end.
+    ++music_shuffle_next;
+    if (music_shuffle_next >= music_shuffle_size) {
+        music_shuffle_refill();
+        puts("[MUSIC-UI] next shuffled cycle");
     }
+    if (music_shuffle_next < music_shuffle_size)
+        (void)music_play_track(music_shuffle[music_shuffle_next]);
 }
 
 static void alarm_ui_open(uint64_t now) {
