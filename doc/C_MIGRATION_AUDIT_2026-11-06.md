@@ -143,3 +143,16 @@ User hardware log on bare spare Pico 2 W confirmed:
 - Existing UART PCM clip played successfully before the disconnect. Logs do not demonstrate real clock voice/timer/alarm/music routing and do not demonstrate `audio-select local` test.
 
 **Decision for next gate:** Keep a single logical sound API but do not implement a misleading DFPlayer-to-Bluetooth "switch". DFPlayer's UART-based MP3 decoder does not provide PCM to the Pico. Before activating physical route change, evaluate audio asset/PCM storage and decode method, and implement a self-contained source or sampled PCM track playback through A2DP. All critical alarms must remain audible via LOCAL during incomplete integration, and no flash layout migration yet.
+
+## GPIO hardware expansion decision - SPI1 microSD and LCD PWM (2026-11-06)
+
+User confirmed the assembled clock uses removable Dupont leads and that moving timer encoder wiring is easy. Reserve the Pico 2 W hardware SPI1 bus for a **second** microSD card used by Pico as an MP3 digital source; DFPlayer Mini and its original microSD remain unchanged for local fallback. Reserve GP6 (physical pin 9) for the LCD1602 backlight PWM output with a transistor switch.
+
+Planned wiring:
+- Timer encoder DT: GP11 (physical pin 15) -> **GP12 (pin 16)**.
+- Timer encoder CLK: GP10 (pin 14) -> **GP13 (pin 17)**.
+- SPI1 SD DO/MISO -> **GP8 (pin 11)**, CS -> **GP9 (pin 12)**, CLK -> **GP10 (pin 14)**, DI/MOSI -> **GP11 (pin 15)**.
+- LCD backlight PWM -> **GP6 (pin 9)**.
+- SD module VCC is **not specified** until breakout regulator/level shifting is identified. Never apply 5V signals to Pico GPIO.
+
+Existing drivers still use GP11/GP10 for the timer encoder, so the SD bus cannot be wired without coordinated firmware changes. **No hardware changes or firmware edits were made in this documentation commit.** Keep production clock operational; update C and MicroPython configurations at the appropriate rollout stage. See `doc/C_MIGRATION_PLAN.md` for full pin table, verification and rollback checklist.
