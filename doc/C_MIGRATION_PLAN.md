@@ -136,3 +136,13 @@ The user confirmed that the **external SPI microSD module is a 3.3 V module**. P
 The installed **LCD1602 has no built-in backlight**. Consequently, GP6 (physical pin 9) is reserved for PWM drive of a **separate external LED used to illuminate the display**, rather than the LCD A/K backlight terminals or PCF8574 backpack's backlight control. Use GP6 -> approximately 1 kOhm base resistor -> NPN transistor (e.g. BC547/2N2222), emitter -> GND, collector -> LED cathode, LED anode -> LED current-limiting resistor -> appropriate supply. The previously proposed example uses VBUS 5 V through 220 Ohm for an LED with roughly 3 V forward drop, approximately 9 mA; confirm actual LED ratings and resistor/transistor pinout. Keep common ground; do not drive the LED directly from GPIO. VBUS 5 V is present only with suitable USB-derived power, so check the final clock power wiring before relying on it.
 
 Three planned operating modes remain **OFF, ON, AUTO** (day/night dimming), but PWM driver, scheduling, electrical connections and firmware implementation are **not yet completed**. This clarification does not change the agreed timer encoder relocation GP11->GP12 (DT) and GP10->GP13 (CLK), or planned microSD SPI1 pinout.
+
+
+## Known audio-language difference: timer completion (RU vs DE, 2026-11-06)
+
+**Documented existing behavior - intentionally not fixed in this iteration.**
+- **Russian (RU):** after countdown completion, the spoken phrase `Таймер завершён` plays, together with the double timer-finish sound.
+- **German (DE):** after countdown completion, only the double timer-finish sound plays. The corresponding German spoken completion message is missing/not found at the expected location in the current audio asset set.
+- User explicitly requested **leave current behavior unchanged** until a later audio-assets repair task. Do **not** substitute a guessed track, synthesize an unapproved announcement, or alter existing timer priority/finish signaling in this change.
+- Future action: identify the correct German phrase/audio file, confirm its exact DFPlayer folder/track mapping and RU/DE sequencing, add/repair the asset and verify both language modes on hardware. Also account for this when migrating voice playback from DFPlayer to second microSD + software MP3/A2DP.
+- The exact German source track name/location remains **unverified**. This is not a new implementation or evidence the underlying firmware cannot play such an asset.
