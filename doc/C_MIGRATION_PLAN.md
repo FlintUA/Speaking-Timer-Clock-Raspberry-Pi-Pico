@@ -146,3 +146,20 @@ Three planned operating modes remain **OFF, ON, AUTO** (day/night dimming), but 
 - User explicitly requested **leave current behavior unchanged** until a later audio-assets repair task. Do **not** substitute a guessed track, synthesize an unapproved announcement, or alter existing timer priority/finish signaling in this change.
 - Future action: identify the correct German phrase/audio file, confirm its exact DFPlayer folder/track mapping and RU/DE sequencing, add/repair the asset and verify both language modes on hardware. Also account for this when migrating voice playback from DFPlayer to second microSD + software MP3/A2DP.
 - The exact German source track name/location remains **unverified**. This is not a new implementation or evidence the underlying firmware cannot play such an asset.
+
+
+## Hardware rewired and SD diagnostic firmware staged (2026-11-06)
+
+User confirmed that the timer encoder Dupont leads have been moved to GP12 (DT) / GP13 (CLK), a 3.3 V SPI1 SD breakout is connected on GP8/GP9/GP10/GP11, and the 4 GB FAT32 card contains a duplicate of the original DFPlayer MP3 folders/files. The original DFPlayer microSD remains untouched.
+
+Updated experimental C firmware on `develop/v3`:
+- `drivers/controls.c`: timer encoder input map changed from 11/10 to **12/13**.
+- New `drivers/sd_spi.c/.h`: read-only SPI1 400 kHz init, 4 MHz sector reads, CMD0/CMD8/ACMD41/CMD58 handshake, SDSC/SDHC addressing, LBA0 + FAT partition boot sector probe.
+- `sd-test`: attempts initialization and FAT32 boot-sector geometry check, with error messages.
+- `sd-info`: prints last card readiness/type/filesystem probe result.
+- CMake links `hardware_spi`; standard and experimental builds both compile the same SD diagnostics.
+- **No SD writes, no file enumeration/FAT directory traversal, no MP3 decoding, no real clock audio routing, no GP6 PWM driver** yet.
+
+Local next steps: `git pull --ff-only`; `powershell -ExecutionPolicy Bypass -File .\\build-clock-bt.ps1 -JblAddress "04:21:44:FA:A9:0E"`; flash the generated UF2 to **spare Pico only**. Run `sd-test`, `sd-info`, `bt-status`. Keep log of any CMake/compiler errors or card initialization results. On the assembled clock use **only firmware appropriate to its updated GP12/GP13 encoder wiring**; production MicroPython pin assignments have **not** been migrated.
+
+**Validation state:** code has been committed but local compilation and physical SPI SD test are not yet reported. Reported user hardware rewiring is user-confirmed, not independently electrically verified. Do not run pin-sensitive SD tests on the working clock until ready for intentional firmware migration.
