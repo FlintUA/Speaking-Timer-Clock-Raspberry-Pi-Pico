@@ -457,3 +457,30 @@ No automatic flash write is triggered by BOOTSEL. Added `pico_bootrom`
 link dependency and `#include "pico/bootrom.h"`.
 
 This change is source-only until built/flashed and tested on hardware.
+
+
+## Stage 5E - Windows PowerShell one-command updater
+
+Repository root: `update-pico.ps1`. This is a Windows-only host script
+(not firmware) using a standard USB serial connection; **not Wi-Fi OTA**.
+
+- Close VS Code Serial Monitor so COM8 is free.
+- From the repository root, run
+  `powershell -ExecutionPolicy Bypass -File .\\update-pico.ps1 -Build`.
+  This builds `speaking_clock_c` using the installed CMake, validates
+  `build-ninja\\speaking_clock_c.uf2`, sends `bootsel arm`,
+  confirms it within 15 seconds, locates the `RPI-RP2` removable volume,
+  copies the UF2 and waits for COM8 to return.
+- For an already built UF2, use
+  `powershell -ExecutionPolicy Bypass -File .\\update-pico.ps1`.
+- `-Port COM9`, `-Uf2 <path>` and `-TimeoutSeconds 60` can override
+  defaults. Script paths are resolved relative to the repository root.
+- Fails before touching the target if the COM port is missing, UF2 is
+  missing/implausible, a different BOOTSEL device is already mounted,
+  or the firmware does not confirm its two-step safety handshake.
+- A normal power reset or USB reconnect remains the fallback if the
+  update is interrupted. Check `flash-info` and `alarm-status` after.
+- COM port returning indicates USB serial enumeration, not a cryptographic
+  confirmation of firmware version. A version-identification handshake
+  should be added to the firmware as a later enhancement.
+- Windows real-device test is still pending.
