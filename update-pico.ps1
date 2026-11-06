@@ -55,7 +55,7 @@ function New-PicoSerial([string]$PortName) {
     $serial.RtsEnable = $true
     $serial.ReadTimeout = 1500
     $serial.WriteTimeout = 2500
-    $serial.NewLine = "\n"
+    $serial.NewLine = "`n"
     return $serial
 }
 
