@@ -99,3 +99,31 @@ Development PC contains untracked user files and modified sound assets.
 Do **not** use `git clean -fdx` or `git reset --hard` as cleanup.
 Always inspect `git status -sb` first; back up or stash only the intended
 tracked file when needed. Never add local secrets or private archives.
+
+## Reserved GPIO map for the planned microSD / LCD backlight expansion (2026-11-06)
+
+**Decision approved, documentation only - rewiring, drivers and firmware changes NOT yet performed.** Production MicroPython and current C `drivers/controls.c` still use timer encoder DT=GP11, CLK=GP10. Do not connect microSD SPI1 until this encoder has been moved and the firmware mapping has been updated together.
+
+| Signal | Old / current assignment | Planned assignment | Pico 2 W physical pin |
+| --- | --- | --- | --- |
+| Timer encoder DT | GP11 | **GP12** | **16** |
+| Timer encoder CLK | GP10 | **GP13** | **17** |
+| SD card DO / MISO, SPI1 RX | Unused | **GP8** | **11** |
+| SD card CS / SPI1 CSn | Unused | **GP9** | **12** |
+| SD card CLK / SPI1 SCK | Currently timer CLK GP10 | **GP10** | **14** |
+| SD card DI / MOSI, SPI1 TX | Currently timer DT GP11 | **GP11** | **15** |
+| LCD1602 backlight PWM | Unused | **GP6** | **9** |
+
+Power: SD-card module ground to Pico GND; supply must be chosen only after confirming the exact module's regulator/level-shifter design. Pico GPIO are **3.3 V only**; never feed 5 V logic to GP8-GP11. LCD backlight PWM GP6 must control a suitably rated transistor/MOSFET switch; do not connect the backlight LED directly to a GPIO pin. If using the LCD backpack's existing LED, inspect its A/K connections and existing switching/jumper before wiring.
+
+Preserve: I2C LCD GP0/GP1, DS1302 GP2/GP5/GP4, volume encoder GP14/GP15, UART DFPlayer GP16/GP17 with BUSY GP18, existing button GP19-GP22/GP26-GP28. DFPlayer retains its **own** SD card and independent analog local audio; second card is exclusively for Pico digital MP3 reading and later A2DP playback. MP3 decoding / filesystem / SPI driver are future work.
+
+Next required tasks:
+- [ ] Inspect actual SD breakout's power and signal-level design and take wiring photos.
+- [ ] Move Dupont timer encoder DT GP11->GP12 and CLK GP10->GP13, keeping both signals in the same orientation.
+- [ ] Update **both** `firmware/pico2w_c/drivers/controls.c` and production `source/v3` pin definitions **only when that firmware will be deployed**; verify all other GPIO references before editing. Retain compatibility/testing guidance for boards with old wiring.
+- [ ] Connect SD SPI1 GP8/9/10/11 with 3.3 V safe logic; implement SPI1 + FAT32 and test SD card independently.
+- [ ] Implement GP6 PWM backlight driver and electrical switch, then day/night control.
+- [ ] Bench-test encoder, display, DFPlayer, RTC, SPI SD and A2DP together before production migration.
+
+**Critical**: As of this decision, this is a *planned pin reservation*, not a claim that either current firmware supports the new GPIO mapping.
