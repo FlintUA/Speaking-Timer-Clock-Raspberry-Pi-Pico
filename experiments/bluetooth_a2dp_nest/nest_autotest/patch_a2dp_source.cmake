@@ -36,7 +36,7 @@ static bool clock_a2dp_connect_address(const char *text){
         gap_inquiry_stop();
     }
     uint8_t status = a2dp_source_establish_stream(device_addr, &media_tracker.a2dp_cid);
-    printf("[BT] Direct connect %s status=0x%02x\\n", text, status);
+    printf("[BT] Direct connect %s status=0x%02x\n", text, status);
     return status == ERROR_CODE_SUCCESS;
 }
 
