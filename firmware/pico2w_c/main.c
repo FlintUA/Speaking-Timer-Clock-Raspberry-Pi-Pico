@@ -1131,12 +1131,18 @@ static void alarm_service_rtc(const ds1302_datetime_t *dt, uint64_t now) {
         return;
     }
     if (dt->second > 5u || alarm_active_index >= 0) return;
-    // First mark the matching alarm as seen, then evaluate priorities.
-    // This prevents a timer/menu from clearing mid-minute and causing
-    // a delayed alarm at second 01..05.
-    int index = alarm_scheduler_pick(&alarm_scheduler, alarms, dt->year,
-                            dt->month, dt->day, dt->hour, dt->minute, false);
+    // Atomically claim every match for the minute. If two or more alarms
+    // coincide, only the lowest-numbered slot may play. Mark others
+    // consumed so stopping the winner never triggers a surprise second alarm.
+    uint8_t other_mask = 0u;
+    int index = alarm_scheduler_claim_due(&alarm_scheduler, alarms, dt->year,
+                         dt->month, dt->day, dt->hour, dt->minute, &other_mask);
     if (index < 0) return;
+    if (other_mask) {
+        printf("[ALARM] collision %02u:%02u winner=%d skipped_mask=0x%02x (once per minute)\n",
+               (unsigned)dt->hour, (unsigned)dt->minute, index + 1,
+               (unsigned)other_mask);
+    }
     if (timer.running || (finished_screen_until_ms &&
         now < finished_screen_until_ms)) {
         printf("[ALARM] %d skipped=TIMER_PRIORITY\n", index + 1);
