@@ -1697,18 +1697,41 @@ static void on_control_event(const control_event_t *event, void *context) {
         printf("[INPUT] button %s %s\n",
                controls_button_name(event->button),
                event->type == CONTROL_BUTTON_PRESS ? "PRESS" : "RELEASE");
-        if (event->type == CONTROL_BUTTON_PRESS &&
-            event->button == BUTTON_ALARM && alarm_active_index >= 0) {
-            alarm_stop("BUTTON");
+        // Press/release separation prevents a long ALARM hold from
+        // briefly opening the short-press alarm editor.
+        if (event->button == BUTTON_ALARM) {
+            if (event->type == CONTROL_BUTTON_PRESS) {
+                alarm_button_pressed = true;
+                alarm_button_pressed_at_ms = now;
+                alarm_button_consumed = alarm_active_index >= 0;
+                if (alarm_active_index >= 0) alarm_stop("BUTTON");
+            } else if (event->type == CONTROL_BUTTON_RELEASE &&
+                       alarm_button_pressed) {
+                alarm_button_pressed = false;
+                if (!alarm_button_consumed && alarm_active_index < 0) {
+                    if (music_ui_open) {
+                        music_ui_close("ALARM_BUTTON");
+                    } else if (now - alarm_button_pressed_at_ms >=
+                               ALARM_LONG_PRESS_MS) {
+                        if (alarm_ui_state == ALARM_UI_CLOSED) music_ui_enter();
+                        else alarm_ui_close("ALARM_LONG");
+                    } else if (alarm_ui_state != ALARM_UI_CLOSED) {
+                        alarm_ui_close("ALARM_SHORT");
+                    } else if (menu_state == MENU_CLOSED) {
+                        alarm_ui_open(now);
+                    }
+                }
+                alarm_button_consumed = false;
+            }
             return;
         }
-        // During ringing, ALARM stops playback; volume remains available.
+        // During ringing, only ALARM stop and VOLUME remain interactive.
         if (alarm_active_index >= 0) return;
-        if (event->type == CONTROL_BUTTON_PRESS && event->button == BUTTON_ALARM) {
-            if (alarm_ui_state == ALARM_UI_CLOSED) {
-                if (menu_state == MENU_CLOSED) alarm_ui_open(now);
-            } else {
-                alarm_ui_close("ALARM");
+        if (music_ui_open) {
+            if (event->type == CONTROL_BUTTON_PRESS) {
+                if (event->button == BUTTON_TIMER ||
+                    event->button == BUTTON_SETTINGS) music_ui_toggle();
+                else if (event->button == BUTTON_MINUS) music_ui_close("MINUS");
             }
             return;
         }
@@ -1836,6 +1859,11 @@ int main(void) {
             alarm_ui_close("TIMEOUT: draft discarded");
         }
         alarm_service_playback(now);
+        if (music_ui_playing && audio_queue_idle(&audio_queue) &&
+            !dfplayer_busy()) {
+            music_ui_playing = false;
+            printf("[MUSIC-UI] finished track=%u\n", (unsigned)music_ui_track);
+        }
         autosave_service(now);
         if (timer.running) {
             uint32_t left = countdown_remaining(&timer, now);
@@ -1866,7 +1894,12 @@ int main(void) {
         }
 
         char top[17], bottom[17];
-        if (alarm_ui_state == ALARM_UI_LIST) {
+        if (music_ui_open) {
+            snprintf(top, sizeof(top), "MUSIC PLAYER");
+            snprintf(bottom, sizeof(bottom), "T%02u %s",
+                     (unsigned)music_ui_track,
+                     music_ui_playing ? "PLAY" : "STOP");
+        } else if (alarm_ui_state == ALARM_UI_LIST) {
             const alarm_entry_t *a = &alarms[alarm_ui_index];
             snprintf(top, sizeof(top), "ALARM %u/5 %s",
                      (unsigned)(alarm_ui_index + 1u), a->enabled ? "ON" : "OFF");
