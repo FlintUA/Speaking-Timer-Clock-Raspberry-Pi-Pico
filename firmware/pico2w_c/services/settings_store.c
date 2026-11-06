@@ -14,12 +14,24 @@
 #error "Flash unexpectedly small; do not enable settings storage"
 #endif
 
-// Leave the final flash sector untouched. UF2 installers may program
-// the final 256-byte page with EF bytes for RP2350-E10 bootrom workaround.
-// Do not overwrite unfamiliar data: an old MicroPython FS may still be here.
-// This layout is provisional until its two sectors are inspected on hardware.
-#define SLOT0_OFFSET (PICO_FLASH_SIZE_BYTES - 4u * FLASH_SECTOR_SIZE)
-#define SLOT1_OFFSET (PICO_FLASH_SIZE_BYTES - 3u * FLASH_SECTOR_SIZE)
+// Flash map (4 KiB sectors; RP2350):
+// -6, -5: NEW clock A/B settings (safe from BTstack).
+// -4: previous clock slot0; READ ONLY for migration/fallback.
+// -3, -2: Pico SDK BTstack's two flash banks (DO NOT TOUCH).
+// -1: reserved for RP2350-E10 UF2 bootrom workaround (DO NOT TOUCH).
+// Never erase sectors with unknown data or the legacy clock sector.
+// The active clock record is migrated to the new A/B area only upon an
+// explicit save/autosave after a user settings change, not at startup.
+#define SLOT0_OFFSET (PICO_FLASH_SIZE_BYTES - 6u * FLASH_SECTOR_SIZE)
+#define SLOT1_OFFSET (PICO_FLASH_SIZE_BYTES - 5u * FLASH_SECTOR_SIZE)
+#define LEGACY_SLOT_OFFSET (PICO_FLASH_SIZE_BYTES - 4u * FLASH_SECTOR_SIZE)
+#ifdef CLOCK_ENABLE_A2DP
+#include "pico/btstack_flash_bank.h"
+_Static_assert(SLOT1_OFFSET + FLASH_SECTOR_SIZE <= PICO_FLASH_BANK_STORAGE_OFFSET,
+               "Clock settings Flash overlaps BTstack storage");
+_Static_assert(LEGACY_SLOT_OFFSET + FLASH_SECTOR_SIZE <= PICO_FLASH_BANK_STORAGE_OFFSET,
+               "Legacy clock Flash overlaps BTstack storage");
+#endif
 #define RECORD_MAGIC 0x53434c4bu /* SCLK */
 #define RECORD_VERSION 3u
 #define RECORD_V1 1u
@@ -74,8 +86,13 @@ static uint32_t record_crc_bytes(const void *data, size_t length) {
     return crc ^ 0xffffffffu;
 }
 
+static uint32_t slot_offset(unsigned slot) {
+    return slot == 0u ? SLOT0_OFFSET :
+           slot == 1u ? SLOT1_OFFSET : LEGACY_SLOT_OFFSET;
+}
+
 static const uint8_t *slot_bytes(unsigned slot) {
-    return (const uint8_t *)(uintptr_t)(XIP_BASE + (slot ? SLOT1_OFFSET : SLOT0_OFFSET));
+    return (const uint8_t *)(uintptr_t)(XIP_BASE + slot_offset(slot));
 }
 
 static bool record_valid(const settings_record_t *r) {
@@ -149,15 +166,20 @@ bool settings_store_layout_safe(void) {
 }
 
 static bool newest_valid(unsigned *slot, settings_record_t *result) {
-    settings_record_t a, b;
-    memcpy(&a, slot_bytes(0), sizeof(a));
-    memcpy(&b, slot_bytes(1), sizeof(b));
-    bool va = sector_owned(0), vb = sector_owned(1);
-    if (!va && !vb) return false;
-    bool choose_b = vb && (!va || (int32_t)(b.sequence - a.sequence) > 0);
-    *slot = choose_b ? 1u : 0u;
-    *result = choose_b ? b : a;
-    return true;
+    // Include the old slot0 as a read-only fallback so the existing clock
+    // configuration survives its first firmware upgrade with the new map.
+    bool have = false;
+    for (unsigned candidate = 0u; candidate < 3u; ++candidate) {
+        if (!sector_owned(candidate)) continue;
+        settings_record_t record;
+        memcpy(&record, slot_bytes(candidate), sizeof(record));
+        if (!have || (int32_t)(record.sequence - result->sequence) > 0) {
+            *slot = candidate; // 2 means legacy, never a write target.
+            *result = record;
+            have = true;
+        }
+    }
+    return have;
 }
 
 const char *settings_store_result_name(settings_store_result_t r) {
@@ -179,14 +201,22 @@ void settings_store_print_info(void) {
            (unsigned long)SLOT0_OFFSET, (unsigned long)SLOT1_OFFSET,
            (unsigned long)(uintptr_t)&__flash_binary_end,
            settings_store_layout_safe() ? "OK" : "FAIL");
-    for (unsigned i = 0; i < 2u; ++i) {
+    for (unsigned i = 0; i < 3u; ++i) {
         settings_record_t r;
         memcpy(&r, slot_bytes(i), sizeof(r));
-        printf("[FLASH] slot%u=%s sequence=%lu version=%lu\n", i,
-               sector_owned(i) ? "VALID" : (sector_blank(i) ? "BLANK" : "OCCUPIED"),
-               sector_owned(i) ? (unsigned long)r.sequence : 0ul,
-               sector_owned(i) ? (unsigned long)r.version : 0ul);
+        bool owned = sector_owned(i);
+        printf("[FLASH] %s=%s sequence=%lu version=%lu offset=0x%08lx%s\n",
+               i == 2u ? "legacy_slot0" : (i == 0u ? "slot0" : "slot1"),
+               owned ? "VALID" : (sector_blank(i) ? "BLANK" : "OCCUPIED"),
+               owned ? (unsigned long)r.sequence : 0ul,
+               owned ? (unsigned long)r.version : 0ul,
+               (unsigned long)slot_offset(i),
+               i == 2u ? " READ_ONLY" : "");
     }
+#ifdef CLOCK_ENABLE_A2DP
+    printf("[FLASH] BTstack banks start=0x%08lx (reserved, not inspected)\n",
+           (unsigned long)PICO_FLASH_BANK_STORAGE_OFFSET);
+#endif
 }
 
 
@@ -194,7 +224,7 @@ void settings_store_inspect(void) {
     // Read-only sampling from the two reserved sectors. We do not try to
     // interpret or mount prior MicroPython filesystem contents.
     puts("[FLASH] Inspect is READ ONLY; hexadecimal samples are NOT proof of filesystem type.");
-    for (unsigned slot = 0u; slot < 2u; ++slot) {
+    for (unsigned slot = 0u; slot < 3u; ++slot) {
         const uint8_t *data = slot_bytes(slot);
         size_t ff_count = 0, zero_count = 0, other_count = 0;
         size_t first_non_ff = FLASH_SECTOR_SIZE;
@@ -210,8 +240,9 @@ void settings_store_inspect(void) {
                 else ++other_count;
             }
         }
-        printf("[FLASH] slot%u offset=0x%08lx status=%s ff=%lu zero=%lu other=%lu\n",
-               slot, (unsigned long)(slot ? SLOT1_OFFSET : SLOT0_OFFSET),
+        printf("[FLASH] %s offset=0x%08lx status=%s ff=%lu zero=%lu other=%lu\n",
+               slot == 2u ? "legacy_slot0" : (slot == 0u ? "slot0" : "slot1"),
+               (unsigned long)slot_offset(slot),
                sector_owned(slot) ? "VALID" : (sector_blank(slot) ? "BLANK" : "OCCUPIED"),
                (unsigned long)ff_count, (unsigned long)zero_count,
                (unsigned long)other_count);
@@ -311,8 +342,10 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
     unsigned active_slot;
     settings_record_t current;
     bool valid = newest_valid(&active_slot, &current);
-    unsigned dest = valid ? (1u - active_slot) : 0u;
+    // A legacy record is never a destination: first new save targets slot0.
+    unsigned dest = valid && active_slot < 2u ? (1u - active_slot) : 0u;
     // Never erase unknown content; applies even after a first good save.
+    // In particular, never touch BTstack -3/-2 or the legacy -4 sector.
     if (!sector_blank(dest)) {
         settings_record_t existing;
         memcpy(&existing, slot_bytes(dest), sizeof(existing));
