@@ -74,7 +74,7 @@ static void produce_audio(int16_t * pcm_buffer, int num_samples){
                 break;
             }
             // Signed 8-bit source PCM -> 16-bit stereo; nearest-neighbor resample.
-            int16_t pcm = (int16_t)((int16_t)clock_pcm_clip[sample_position] << 8);
+            int16_t pcm = (int16_t)((int16_t)clock_pcm_clip[sample_position] * 256);
             pcm_buffer[i * NUM_CHANNELS] = pcm;
             pcm_buffer[i * NUM_CHANNELS + 1] = pcm;
             ++clock_clip_frames_played;
