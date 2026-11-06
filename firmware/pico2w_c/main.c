@@ -1631,6 +1631,9 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "bt-tone") == 0) {
         if (!clock_a2dp_play_tone())
             puts("[BT] No active A2DP stream");
+    } else if (strcmp(line, "bt-clip") == 0) {
+        if (!clock_a2dp_play_clip())
+            puts("[BT] PCM clip unavailable (A2DP not active)");
     } else if (strcmp(line, "bt-silence") == 0) {
         clock_a2dp_stop_tone();
 #endif
