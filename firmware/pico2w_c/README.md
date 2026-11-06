@@ -1115,6 +1115,7 @@ has a GPLv3 LICENSE; RealNetworks Helix core is under RPSL/RCSL notices.
 Review licenses before sharing combined firmware. No vendor code is committed.
 
 ```powershell
+New-Item -ItemType Directory -Force -Path third_party | Out-Null
 git clone https://github.com/Lefucjusz/Helix-MP3-Decoder.git third_party/Helix-MP3-Decoder
 git -C third_party/Helix-MP3-Decoder checkout e4f5adadb5126708144e55a862f59e318cbffb51
 git pull --ff-only
