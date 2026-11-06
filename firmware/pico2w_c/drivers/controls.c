@@ -19,7 +19,7 @@ typedef struct {
 
 static encoder_t encoders[] = {
     {14, 15, 0, CONTROL_VOLUME_ROTATE},
-    {11, 10, 0, CONTROL_TIMER_ROTATE}
+    {12, 13, 0, CONTROL_TIMER_ROTATE} // Hardware revision: SPI1 takes GP8..GP11
 };
 static button_t buttons[BUTTON_COUNT] = {
     {20, false, false, 0}, // Volume encoder push
