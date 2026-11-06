@@ -41,6 +41,7 @@ target_link_libraries(speaking_clock_c PRIVATE
     hardware_uart
     hardware_flash
     pico_flash
+    pico_bootrom
 )
 pico_enable_stdio_usb(speaking_clock_c 1)
 pico_enable_stdio_uart(speaking_clock_c 0)
