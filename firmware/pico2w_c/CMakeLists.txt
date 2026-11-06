@@ -25,6 +25,7 @@ add_executable(speaking_clock_c
     app/alarm_engine.c
     drivers/controls.c
     drivers/dfplayer.c
+    drivers/sd_spi.c
     audio/queue.c
     audio/router.c
     audio/speech.c
@@ -39,6 +40,7 @@ target_include_directories(speaking_clock_c PRIVATE
 target_link_libraries(speaking_clock_c PRIVATE
     pico_stdlib
     hardware_i2c
+    hardware_spi
     hardware_uart
     hardware_flash
     pico_flash
