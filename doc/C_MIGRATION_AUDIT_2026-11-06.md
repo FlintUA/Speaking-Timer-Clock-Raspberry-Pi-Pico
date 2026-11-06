@@ -262,3 +262,27 @@ User's COM8 real-device log:
 **Caution**: The current `settings_store_save` uses the opposite slot as destination and explicitly refuses to erase any unknown nonblank contents. If slot0 is newest VALID and slot1 remains OCCUPIED, saving fails with `SETTINGS_STORE_OCCUPIED`. Do **not** erase/overwrite the suspect sector or force a save. Read-only next diagnostics: `flash-inspect` and `autosave-status` before any further firmware updates; identify cause and safe recovery with an off-device backup.
 
 The confirmed success is full MP3 *file byte read*, **not** MP3 decoding or audible SD-to-A2DP playback. Plan Helix decoder integration only after Flash investigation and robust rollback options.
+
+
+## Confirmed settings/BTstack flash collision and staged non-destructive fix (2026-11-06 21:49)
+
+User's assembled clock COM8, read-only `flash-inspect` output:
+```
+[FLASH] slot0 offset=0x003fc000 status=VALID ff=4047 zero=18 other=31
+[FLASH] slot0 head16=4b4c4353030000002100000000050001
+[FLASH] slot1 offset=0x003fd000 status=OCCUPIED ff=3868 zero=80 other=148
+[FLASH] slot1 head16=4254737461636b00534d455200000010
+[FLASH] autosave pending=no current=ru,5,OFF debounce=0ms cooldown=0ms retry=0ms
+```
+`0x42 0x54 0x73 0x74 0x61 0x63 0x6b 0x00` is ASCII `BTstack\0`, confirming that the former settings slot1 (`-3` from flash end) was overwritten by BTstack's own nonvolatile storage. This was **not random corruption**. The clock's valid record at `-4` remains intact (sequence 33); alarm status previously verified. Pico SDK docs state two BTstack flash bank sectors from `-3` and `-2` for RP2350; last sector `-1` reserved for RP2350-E10 workaround.
+
+**Staged source fix** in `firmware/pico2w_c/services/settings_store.c`:
+- New clock A/B slots: `-6` (`0x003fa000`), `-5` (`0x003fb000`).
+- Old clock slot `-4` (`0x003fc000`) is **READ ONLY** legacy fallback and will never be erased or selected as write destination.
+- BTstack-owned `-3` (`0x003fd000`) and `-2` (`0x003fe000`) left untouched; final `-1` untouched.
+- Load newest valid record across new A/B and legacy old slot. On subsequent actual user setting change the first new save targets new slot0; never migration-on-boot.
+- `flash-info` and `flash-inspect` will show the two new slots and `legacy_slot0`; compile-time check prevents overlap with SDK's BTstack bank offset for A2DP builds.
+- No attempt to recover the previous overwritten backup slot. The old slot1 is currently BTstack storage and **must not be erased**.
+- **Compilation and hardware verification pending**. Before update, use the scripted build + flash only after validating compile and preserving firmware rollback. Post-update: expect `slot0=BLANK`, `slot1=BLANK`, `legacy_slot0=VALID sequence=33` until a deliberate settings change. Do not issue arbitrary `save` simply to force migration; initial read-only verification is sufficient.
+
+This Flash conflict should take priority over adding an MP3 decoder. Documentation and code changes do not indicate the physical hardware has been modified.
