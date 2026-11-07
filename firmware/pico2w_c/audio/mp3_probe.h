@@ -5,3 +5,11 @@
 bool mp3_probe_start(const char *path);
 void mp3_probe_service(void);
 bool mp3_probe_active(void);
+
+/* Experimental MP3 to A2DP playback (currently limited to five seconds).
+ * Decoding happens only in main loop. A2DP drains a 44.1 kHz PCM ring.
+ */
+bool mp3_play_start(const char *path, uint32_t a2dp_rate);
+void mp3_play_stop(void);
+bool mp3_play_active(void);
+void mp3_play_status(void);
