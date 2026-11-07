@@ -197,6 +197,10 @@ static uint64_t alarm_button_pressed_at_ms;
 // Standalone music player is RAM-only; no flash schema changes.
 static bool music_ui_open;
 static bool music_ui_playing;
+// Output follows current manual LOCAL / BT sink preference. BT can only
+// read music files present on the separate SPI1 FAT32 card.
+static bool music_ui_bluetooth;
+static bool music_ui_bt_started;
 static uint8_t music_ui_track = 1u;
 static uint8_t music_track_count = 45u; // Used only if DFPlayer folder count query fails.
 static uint8_t music_shuffle[255];
@@ -1013,7 +1017,7 @@ static bool volume_for_bluetooth(void) {
     // manual output preference remains Bluetooth.
     if (bt_timer_running || bt_alarm_running || bt_speech_running ||
         routed_test_pending || mp3_play_active()) return true;
-    if (music_ui_open || music_ui_playing) return false;
+    if (music_ui_open || music_ui_playing) return music_ui_bluetooth;
     // Other active DFPlayer output must not accidentally adjust a remote
     // speaker just because A2DP stays connected and idle.
     if (!audio_queue_idle(&audio_queue) || dfplayer_busy()) return false;
@@ -1223,7 +1227,11 @@ static void music_remember(uint8_t track) {
 
 static void music_ui_stop(const char *reason) {
     if (!music_ui_playing) return;
-    audio_queue_clear(&audio_queue, true);
+#ifdef CLOCK_ENABLE_A2DP
+    if (music_ui_bluetooth && mp3_play_active()) mp3_play_stop();
+#endif
+    if (!music_ui_bluetooth) audio_queue_clear(&audio_queue, true);
+    music_ui_bt_started = false;
     music_ui_playing = false;
     printf("[MUSIC-UI] stopped=%s\n", reason);
 }
@@ -1237,6 +1245,29 @@ static void music_ui_close(const char *reason) {
 }
 
 static bool music_play_track(uint8_t track) {
+#ifdef CLOCK_ENABLE_A2DP
+    if (music_ui_bluetooth) {
+        char path[20];
+        snprintf(path, sizeof(path), "08/%03u.mp3", (unsigned)track);
+        if (clock_a2dp_stream_active() &&
+            clock_a2dp_current_rate() == 44100u &&
+            mp3_play_start(path, clock_a2dp_current_rate())) {
+            music_ui_bt_started = true;
+            music_ui_track = track;
+            music_ui_playing = true;
+            music_remember(track);
+            printf("[MUSIC-UI] playing BT folder=08 track=%03u\n",
+                   (unsigned)track);
+            return true;
+        }
+        // The DFPlayer's SD and the SPI FAT32 card are physically separate.
+        // If no matching SPI MP3 exists, allow local playback rather than
+        // silently claiming BT succeeded.
+        printf("[MUSIC-UI] BT unavailable or SPI file %s absent; LOCAL fallback\n",
+               path);
+        music_ui_bluetooth = false;
+    }
+#endif
     if (!audio_queue_enqueue(&audio_queue, 8u, track)) {
         puts("[MUSIC-UI] queue full");
         return false;
@@ -1244,14 +1275,21 @@ static bool music_play_track(uint8_t track) {
     music_ui_track = track;
     music_ui_playing = true;
     music_remember(track);
-    printf("[MUSIC-UI] playing folder=08 track=%03u\n", (unsigned)track);
+    printf("[MUSIC-UI] playing LOCAL folder=08 track=%03u\n",
+           (unsigned)track);
     return true;
 }
 
 static void music_ui_start(void) {
     if (!music_ui_open) return;
     if (!sound_enabled || alarm_active_index >= 0 || timer.running ||
-        !audio_queue_idle(&audio_queue) || dfplayer_busy()) {
+        !audio_queue_idle(&audio_queue) || dfplayer_busy()
+#ifdef CLOCK_ENABLE_A2DP
+        || bt_speech_running || bt_timer_running || bt_alarm_running ||
+        mp3_play_active() || routed_test_pending || mp3_probe_active() ||
+        sd_fat32_stream_active()
+#endif
+       ) {
         puts("[MUSIC-UI] playback blocked: sound off or audio busy");
         return;
     }
@@ -1300,7 +1338,16 @@ static void music_ui_enter(void) {
     music_ui_track = music_shuffle[0];
     music_ui_open = true;
     music_ui_playing = false;
+    music_ui_bt_started = false;
+#ifdef CLOCK_ENABLE_A2DP
+    music_ui_bluetooth = audio_router.requested == AUDIO_OUTPUT_BT_JBL &&
+                         clock_a2dp_stream_active();
+#else
+    music_ui_bluetooth = false;
+#endif
     timer_screen = false;
+    printf("[MUSIC-UI] output=%s, BT music requires /08/NNN.mp3 on SPI FAT32\n",
+           music_ui_bluetooth ? "BT" : "LOCAL");
     printf("[MUSIC-UI] playlist ready tracks=%u; position=1/%u track=%u\n",
            (unsigned)music_track_count, (unsigned)music_shuffle_size,
            (unsigned)music_ui_track);
@@ -1309,8 +1356,27 @@ static void music_ui_enter(void) {
 }
 
 static void music_ui_service(void) {
-    if (!music_ui_open || !music_ui_playing ||
-        !audio_queue_idle(&audio_queue) || dfplayer_busy()) return;
+    if (!music_ui_open || !music_ui_playing) return;
+#ifdef CLOCK_ENABLE_A2DP
+    if (music_ui_bluetooth) {
+        if (!clock_a2dp_stream_active()) {
+            puts("[MUSIC-UI] BT link lost; switching to LOCAL");
+            if (mp3_play_active()) mp3_play_stop();
+            music_ui_bluetooth = false;
+            music_ui_bt_started = false;
+            if (audio_queue_idle(&audio_queue) && !dfplayer_busy())
+                (void)music_play_track(music_ui_track);
+            return;
+        }
+        // MP3 decoding is serviced later in the main loop.
+        if (mp3_play_active()) return;
+        if (!music_ui_bt_started) return;
+        music_ui_bt_started = false;
+    } else
+#endif
+    {
+        if (!audio_queue_idle(&audio_queue) || dfplayer_busy()) return;
+    }
     // Advance through the existing playlist; reshuffle only at cycle end.
     ++music_shuffle_next;
     if (music_shuffle_next >= music_shuffle_size) {
@@ -3473,7 +3539,7 @@ int main(void) {
 #ifdef CLOCK_ENABLE_A2DP
               && !bt_alarm_running
 #endif
-             ) || music_ui_open ||
+             ) || (music_ui_open && !music_ui_bluetooth) ||
              !sound_enabled || !audio_queue_idle(&audio_queue)
 #ifdef CLOCK_ENABLE_A2DP
              || !clock_a2dp_stream_active()
@@ -3529,7 +3595,8 @@ int main(void) {
 
         char top[17], bottom[17];
         if (music_ui_open) {
-            snprintf(top, sizeof(top), "MUSIC PLAYER");
+            snprintf(top, sizeof(top), "MUSIC %s",
+                     music_ui_bluetooth ? "BT" : "LOCAL");
             snprintf(bottom, sizeof(bottom), "T%02u %s",
                      (unsigned)music_ui_track,
                      music_ui_playing ? "PLAY" : "STOP");
