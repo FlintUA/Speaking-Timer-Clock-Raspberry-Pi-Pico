@@ -1327,3 +1327,51 @@ running 44.1kHz A2DP stream, not merely an accepted reconnect request.
 Please test normal two-fragment playback before testing disconnect
 fallback. This new sequence-routing change is committed but **not yet
 built or tested on the physical board**.
+
+
+## Opt-in automatic hourly VOICE announcement via JBL (2026-11-07)
+
+After hardware-verified manual two-fragment speech via JBL (`say 08 25`
+with 0 MP3 underruns), we added a conservative opt-in for **hourly
+VOICE** announcements. It is RAM-only and always defaults to LOCAL on
+reboot. It does **not** reroute automatic CHIME strikes, half-hour
+signals, countdown timer announcements, scheduled alarms, alarm preview,
+music, or DFPlayer commands.
+
+COM8 controls:
+
+```text
+sd-test
+bt-status
+auto-audio
+auto-audio jbl
+auto-audio-test 8
+auto-audio
+auto-status
+auto-audio local
+auto-audio-test 8
+```
+
+`auto-audio-test 8` plays the announcement for simulated **08:00**
+immediately via the hourly announcement routing mechanism; it does not
+write RTC, change automatic scheduler minute deduplication, or change
+Flash settings. With a live 44100 Hz A2DP stream and `auto-audio jbl`,
+it constructs the original `speech_enqueue_time` track list and streams
+one MP3 at a time through Helix/A2DP, returning to silence at EOF.
+Without Bluetooth, it immediately falls back to DFPlayer. The same
+logic is used at actual xx:00 boundaries **only in VOICE clock mode**,
+subject to unchanged auto-enabled, quiet hours, sound, timer, menu,
+alarm and 5-second RTC window gates.
+
+At loss of an already active A2DP stream during an hourly voice
+sequence, the interrupted fragment is replayed from its start
+locally, followed by any remaining hour/minute fragments. Priority
+events (timer, alarm, music, active local queue) interrupt optional
+speech to protect urgent sound output.
+
+`auto-audio jbl` is independent of `audio-select jbl` for manual
+speech. No persistent schema or audio-volume change. The new
+automatic feature is source-committed but **not yet compiled or
+hardware-verified**. Test simulated output before relying on an actual
+hour boundary. Never treat a Bluetooth announcement as a guaranteed
+alarm until explicit disconnect/preemption tests are completed.
