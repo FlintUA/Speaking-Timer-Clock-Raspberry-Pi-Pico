@@ -421,3 +421,30 @@ so post-completion `mp3-status` remains diagnostically useful.
 No change to amplitude (53.3%), Flash writes, DFPlayer or alarm routing.
 Compilation, hardware pause/resume sound behavior and long-file stability
 still require validation before routing automatic speech.
+
+
+## Bluetooth audio router first live-track experiment staged (2026-11-07)
+
+After proven on-device 53.3% Helix playback with auto pause/resume,
+inspected `audio/queue.c`, `audio/router.c`, and current alarm/timer code.
+The production audio queue plays exclusively on DFPlayer, requiring explicit
+per-track completion/backpressure and failover semantics before routing
+automatic speech safely.
+
+Implemented first **explicit test only** `audio-route-test F T`:
+- `audio-select jbl` selects the test target; `audio-route-test 7 1`
+opens `07/001.mp3` on SPI1 and uses the existing proven MP3 -> PCM ring ->
+resample -> BTstack A2DP path. `audio-select local` plus `audio-route-test 7 2`
+uses the existing DFPlayer `audio_queue_enqueue` path.
+- If Bluetooth is not ready at command time or Helix file open fails, enqueue
+the requested track locally. If A2DP drops while a remote test is active,
+stop MP3 and enqueue whole track to LOCAL unless an alarm, timer or music
+source preempts. Do not replay partially consumed voice on Bluetooth drop.
+- The router selection remains **RAM-only**, resets to LOCAL on reboot, with
+no changes to Flash slots, alarm configuration, event scheduling,
+timer queue or DFPlayer hardware.
+- Tracks from the normal `play F T`, `say` commands and automatic events
+remain LOCAL and are *not* redirected by `audio-select jbl`.
+- COM8 hardware compile, remote/local test, failover on disconnect and
+event preemption remain to be verified before activating automatic queue
+routing.
