@@ -1638,3 +1638,63 @@ messages, `output=consumed` at EOF, `underruns=0`.
 Then run `audio-select jbl` / `say 08 25` and
 `alarm-audio jbl` / `alarm-audio-test 1` to confirm other paths.
 **Not yet built or tested on Pico.**
+
+
+## v4 persisted audio output preferences (2026-11-07)
+
+**Staged for hardware testing - do not assume Flash migration has passed
+until COM8 logs confirm it.**
+
+The four independent preferred outputs are now persisted using the
+existing A/B, CRC-protected Flash settings store:
+
+| Setting | Change command | Default for v1-v3 |
+| --- | --- | --- |
+| Manual time / route-test | `audio-select local|jbl` | LOCAL |
+| Automatic hourly VOICE | `auto-audio local|jbl` | LOCAL |
+| Timer start/cancel/finish | `timer-audio local|jbl` | LOCAL |
+| Alarm number/time/signal | `alarm-audio local|jbl` | LOCAL |
+
+Use `audio-settings` to view all four preferred outputs and A2DP
+connection status. Preference JBL never disables DFPlayer fallback.
+Chime, half-hour notification and standalone music continue LOCAL.
+
+The old Flash **v3** record remains fully readable at 52 bytes with
+its original CRC offset 48. The new **v4** record is 56 bytes with
+four preference bytes and CRC at offset 52. The on-flash magic,
+sequence numbering, A/B sector locations, legacy sector read-only
+policy, BTstack banks and safety checks are unchanged. Records
+v1/v2/v3 load with four LOCAL preferences; the original 5 saved
+alarm slots are preserved. No Flash migration is performed simply
+by booting the new firmware. A real settings change triggers the
+existing 5-second debounced autosave, subject to the 60-second write
+cooldown. A write is blocked while the timer, alarm, DFPlayer or any
+Bluetooth MP3 owner is active.
+
+**First hardware test - protect existing alarm settings:**
+
+1. Before firmware update, capture serial output from `flash-info`
+   and `alarm-status` (this is read-only).
+2. Rebuild/flash with `update-pico.ps1 -Build -Bluetooth -Mp3`.
+3. After reboot, run `flash-info`, `alarm-status`,
+   `audio-settings`. Previously saved alarms must be unchanged and
+   the preference defaults should be LOCAL for old v3 records.
+4. With idle audio, send `auto-audio jbl` then
+   `autosave-status`. Wait for `[FLASH] autosave=OK`.
+   Check `flash-info` shows a VALID v4 slot.
+5. Power-cycle the Pico. Confirm `audio-settings` shows
+   `hourly=JBL`, and `alarm-status` still lists all five saved
+   alarms unchanged. Test `auto-audio-test 12` after A2DP connects.
+6. Repeat with `audio-select jbl`, `timer-audio jbl` and
+   `alarm-audio jbl`, allowing autosave, then power-cycle and
+   validate all four outputs. Use the existing speech/timer/alarm
+   tests for runtime regressions.
+
+**Important rollback note:** old v3 firmware does not understand v4
+records. If a rollback is needed, use the previously captured Flash
+status and do not manually erase the clock sectors or BTstack banks.
+The v4 firmware remains able to load both v3 and v4 records.
+
+**Pending:** Pico SDK build, first v3->v4 Flash save and reboot,
+persistence regression across all four selectors, live RTC alarm,
+and long-term A2DP stability.
