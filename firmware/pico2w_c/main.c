@@ -1626,7 +1626,7 @@ static void print_rtc_debug(void) {
 }
 
 static void alarm_status(void) {
-    printf("[ALARM] flash v3 capable; active=%d (0=none)\n",
+    printf("[ALARM] flash v4 capable; active=%d (0=none)\n",
            alarm_active_index + 1);
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
         const alarm_entry_t *a = &alarms[i];
@@ -2204,18 +2204,18 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "audio-health") == 0) {
         // Read-only snapshot for hardware priority/collision regression tests.
         // Never changes clock, audio owner, saved preferences or Flash.
-        printf("[AUDIO-HEALTH] timer=%s alarm=%d sound=%s local_queue=%u local_started=%s df_busy=%s\\n",
+        printf("[AUDIO-HEALTH] timer=%s alarm=%d sound=%s local_queue=%u local_started=%s df_busy=%s\n",
                timer.running ? "RUNNING" : "IDLE", alarm_active_index + 1,
                sound_enabled ? "ON" : "OFF", (unsigned)audio_queue.size,
                audio_queue.track_started ? "YES" : "NO",
                dfplayer_busy() ? "YES" : "NO");
-        printf("[AUDIO-HEALTH] auto=%s clock_mode=%s saved_pending=%s menu=%s music=%s\\n",
+        printf("[AUDIO-HEALTH] auto=%s clock_mode=%s saved_pending=%s menu=%s music=%s\n",
                auto_enabled ? "ON" : "OFF", clock_mode ? "CHIME" : "VOICE",
                autosave_pending ? "YES" : "NO",
                menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED
                  ? "OPEN" : "CLOSED", music_ui_open ? "OPEN" : "CLOSED");
 #ifdef CLOCK_ENABLE_A2DP
-        printf("[AUDIO-HEALTH] BT stream=%s rate=%lu MP3=%s speech=%s (%u/%u) timer=%s (%u/%u) alarm=%s (%u/%u) route_test=%s\\n",
+        printf("[AUDIO-HEALTH] BT stream=%s rate=%lu MP3=%s speech=%s (%u/%u) timer=%s (%u/%u) alarm=%s (%u/%u) route_test=%s\n",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE",
                (unsigned long)clock_a2dp_current_rate(),
                mp3_play_active() ? "YES" : "NO",
