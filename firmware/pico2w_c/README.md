@@ -1747,3 +1747,46 @@ after this safe diagnostic run.
 
 **Pending:** compile, COM8 read-only diagnostics, actual simultaneous
 RTC events and long A2DP soak test.
+
+
+## Autonomous SPI microSD start and error recovery (2026-11-07)
+
+The Pico 2 W firmware now performs `sd_spi_ensure_fat32()` during
+startup when built with `CLOCK_ENABLE_MP3`: initializes SPI1 GP8/9/10/11,
+probes FAT32, and reports `[SD-AUTO] READY`. The existing separate
+DFPlayer on UART0 is unchanged. No manual serial `sd-test` is needed
+for normal MP3-to-JBL timer, alarm or speech playback.
+
+If the card is absent or FAT32 cannot be mounted, boot continues with
+DFPlayer fallback. Failed auto-initializations are rate-limited to at
+most one attempt per **30 seconds**, triggered on the next MP3 open,
+rather than repeatedly blocking the main loop. If a CMD17 sector
+command or its data token fails, the SPI driver marks the card not
+ready so a later MP3 request can reinitialize it. Successful cards
+are reused; no SPI/FAT reinit occurs before each sound. The operation
+uses only cooperative main-loop code, never BTstack's A2DP callback.
+The `sd-test` manual diagnostic remains available for explicit
+card testing.
+
+Important: recovery is retried upon a *new playback request*, not on
+a timer. A card removed in the middle of a decoding session can cause
+that session to fail/stop; seamless resume of mid-track MP3 playback is
+not yet implemented.
+
+Hardware checks (compile first):
+1. Cold boot with SPI microSD present. Capture boot log for
+   `[SD-AUTO] READY`, no serial commands before first playback.
+2. Run `bt-status`, `audio-settings`, `alarm-audio-test 1`.
+   Expect `[BT-ALARM] SEGMENT 1/4` ... `COMPLETE`, zero underruns,
+   no `[SD-FAT] Run sd-test first` message.
+3. Cold boot again and repeat a timer: `t 8`, `start` (again without
+   `sd-test`). Verify output=consumed, underruns=0.
+4. To test unavailable-media behavior, **power off the Pico before
+   removing the SPI card**. Power on with card absent. Expect
+   `[SD-AUTO] FAILED`; then `alarm-audio-test 1` should use LOCAL.
+   Power off before reinserting. A later MP3 event must recover to
+   JBL automatically. Do not hot-plug an unprotected SPI card.
+5. Check `flash-info` and `alarm-status`; no configuration migration
+   or new Flash writes are expected.
+
+This change has not yet been compiled or verified on target hardware.
