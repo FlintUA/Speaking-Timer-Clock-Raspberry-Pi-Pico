@@ -1,7 +1,11 @@
 #include "pcm_ring.h"
 #include <string.h>
+#include "hardware/sync.h"
 
-// Consumed and produced in one BTstack cooperative run-loop context.
+// Single-producer / single-consumer ring. A2DP media processing can
+// interrupt the main-loop PCM producer, so count read-modify-write is
+// not safe without a short IRQ critical section. Keep sample copying
+// outside the critical section to minimize Bluetooth latency.
 static int16_t samples[CLOCK_PCM_RING_FRAMES * 2u];
 static uint32_t head, tail, count, underruns, consumed, produced;
 static bool active, paused, source_eof;
@@ -52,8 +56,12 @@ bool clock_pcm_ring_push(int16_t l, int16_t r) {
     samples[2u * head] = l;
     samples[2u * head + 1u] = r;
     head = (head + 1u) % CLOCK_PCM_RING_FRAMES;
+    // Publish the written frame atomically with both counters.
+    // Otherwise an IRQ-driven pop() can overwrite a stale ++count value.
+    uint32_t irq_state = save_and_disable_interrupts();
     ++count;
     ++produced;
+    restore_interrupts(irq_state);
     return true;
 }
 uint32_t clock_pcm_ring_pop(int16_t *dst, uint32_t frames) {
@@ -74,8 +82,12 @@ uint32_t clock_pcm_ring_pop(int16_t *dst, uint32_t frames) {
         dst[2u * i + 1u] = samples[2u * tail + 1u];
         tail = (tail + 1u) % CLOCK_PCM_RING_FRAMES;
     }
+    // The producer may resume while A2DP is draining the ring.
+    // Atomically retire these frames with respect to producer ++count.
+    uint32_t irq_state = save_and_disable_interrupts();
     count -= take;
     consumed += take;
+    restore_interrupts(irq_state);
     if (active && !source_eof && take < frames) ++underruns; // not at EOF
     if (take < frames) {
         memset(dst + 2u * take, 0,
