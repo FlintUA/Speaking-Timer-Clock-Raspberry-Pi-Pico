@@ -1790,3 +1790,61 @@ Hardware checks (compile first):
    or new Flash writes are expected.
 
 This change has not yet been compiled or verified on target hardware.
+
+
+## Tactical timer priority and deferred scheduled alarms (2026-11-07)
+
+Policy: **timer > alarm > manual speech > hourly announcement**.
+A scheduled alarm that becomes due while a timer is running (or its
+finish sound is still playing) is placed in a **RAM-only pending queue**
+instead of being skipped. It is started once the timer is stopped or
+finished, the finish message is complete, local/BT audio is idle, and
+the UI is available. A ringing alarm preempted by starting a timer is
+also queued and can replay after the timer. The countdown itself
+continues unaffected by the alarm. Auto hourly announcements remain
+skip-on-conflict (no delayed replay).
+
+- Five slots maximum, one pending event per slot; events execute in
+  timestamp order (tie: lower slot number).
+- Pending expiry = 30 minutes measured from first due/preemption,
+  never extended by subsequent deferrals. After expiry the alarm is
+  discarded with an `[ALARM-PENDING] expired` log.
+- RTC due events are claimed once per minute before enqueueing, so
+  skipped/repeated RTC reads cannot fire a duplicate; simultaneous
+  slots are queued in priority order rather than silently discarded.
+- Alarm phrases use the original due HH:MM, not the time of delayed
+  playback. The current configuration (signal/music choice) is used.
+- Pending events vanish on power loss or reboot, intentionally.
+  No new Flash schema, RTC writes or persistent changes.
+- `alarm-pending` reports queue and remaining TTL;
+  `alarm-pending-clear` clears only pending events (does not disable
+  configured alarms); `alarm-pending-test N` injects a RAM-only
+  test event for slot N using current RTC time, without editing
+  actual alarms, Flash or RTC.
+- `audio-health` and `alarm-status` include pending status.
+- If the buzzer/sound setting is OFF, new RTC alarm events are not
+  enqueued (consistent with the old SOUND_OFF policy). Already queued
+  events wait until sound returns or until expiry.
+
+**On-device acceptance procedure:**
+
+1. Before flashing: `flash-info`, `alarm-status`. Save log.
+2. Flash the new binary, run `alarm-pending`, `audio-health`,
+   `alarm-status`. Queue must be empty, schedules unchanged.
+3. Without editing scheduled alarms: `t 20`, `start`,
+   `alarm-pending-test 1`, `alarm-pending`. Expect queued=1
+   while the timer runs. After `[BT-TIMER] COMPLETE` for FINISH
+   and local output is idle, expect `[ALARM-PENDING] dispatch=1`
+   and four alarm fragments through the chosen output.
+4. While idle run `alarm-audio-test 1`, then `t 8`, `start`
+   during its last long signal. Expect `[ALARM] 1
+   stopped=TIMER_PRIORITY_DEFERRED`; timer finishes normally;
+   pending alarm plays afterward. Use `alarm-stop` as needed.
+5. Run `alarm-pending-test 1`, then
+   `alarm-pending-clear` before it fires (e.g. while timer is
+   running); `alarm-pending` must report count=0.
+6. Compare `flash-info` and `alarm-status`; no Flash writes or
+   schedule changes are expected.
+
+Real due-RTC tests and full 30-minute expiry remain separate
+acceptance checks. This change is not yet compiler/hardware tested.
