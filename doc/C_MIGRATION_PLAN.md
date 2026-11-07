@@ -2,6 +2,8 @@
 
 > Historical migration log. Current C firmware, wiring and update instructions are documented in [README](../README.md) and [Pico 2 W wiring](HARDWARE_PICO2W.md). Early statuses below describe previous stages.
 
+> The later [hardware test evidence](HARDWARE_TEST_EVIDENCE.md) supersedes the pending-test notes below: relocated encoder operation, SPI SD/FAT32, file reads and MP3/Bluetooth playback were subsequently verified on the assembled clock.
+
 **Status:** design and preparation; existing clock remains on MicroPython v3.10.0.
 **Target:** Raspberry Pi Pico 2 W, Pico SDK; one repository, staged implementation.
 
