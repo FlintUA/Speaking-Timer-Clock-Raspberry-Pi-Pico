@@ -318,9 +318,12 @@ void settings_store_dump_tail(void) {
 settings_store_result_t settings_store_load(clock_settings_t *out) {
     if (!settings_store_layout_safe()) return SETTINGS_STORE_IMAGE_OVERLAP;
     unsigned slot;
-    settings_record_t r;
+    settings_record_v4_t r;
     if (!newest_valid(&slot, &r)) return SETTINGS_STORE_EMPTY;
     if (out) {
+        // Older versions have no audio preferences. Zero all fields before
+        // decoding so v1-v3 always boot with four LOCAL defaults.
+        memset(out, 0, sizeof(*out));
         out->language = r.language;
         out->volume = r.volume;
         out->exact_hour = r.exact_hour != 0u;
