@@ -97,6 +97,12 @@ static void bt_speech_cancel(const char *reason);
 static bool auto_voice_jbl_enabled; // RAM-only opt-in; default false after reboot.
 static bool bt_speech_start(uint8_t hour, uint8_t minute, bool automatic);
 #endif
+// In BT-free builds, preserve saved v4 choices opaquely on subsequent
+// Flash writes rather than silently overwriting them with LOCAL.
+#ifndef CLOCK_ENABLE_A2DP
+static uint8_t saved_audio_manual, saved_audio_hourly;
+static uint8_t saved_audio_timer, saved_audio_alarm;
+#endif
 static uint8_t volume = 10; // Default; overridden by saved flash settings.
 static bool sound_enabled = true;
 static speech_language_t language = SPEECH_RU;
@@ -753,11 +759,16 @@ static clock_settings_t settings_snapshot(void) {
         .quiet_end = quiet_end,
         .half_hour_enabled = half_hour_enabled,
         .clock_mode = clock_mode,
-        .audio_manual_jbl = audio_router.requested == AUDIO_OUTPUT_BT_JBL ? 1u : 0u,
 #ifdef CLOCK_ENABLE_A2DP
+        .audio_manual_jbl = audio_router.requested == AUDIO_OUTPUT_BT_JBL ? 1u : 0u,
         .audio_hourly_jbl = auto_voice_jbl_enabled ? 1u : 0u,
         .audio_timer_jbl = timer_audio_jbl_enabled ? 1u : 0u,
         .audio_alarm_jbl = alarm_audio_jbl_enabled ? 1u : 0u
+#else
+        .audio_manual_jbl = saved_audio_manual,
+        .audio_hourly_jbl = saved_audio_hourly,
+        .audio_timer_jbl = saved_audio_timer,
+        .audio_alarm_jbl = saved_audio_alarm
 #endif
     };
     memcpy(cfg.alarms, alarms, sizeof(cfg.alarms));
@@ -1551,6 +1562,11 @@ static void load_settings_at_boot(void) {
         audio_router_select(&audio_router,
             saved.audio_manual_jbl ? AUDIO_OUTPUT_BT_JBL : AUDIO_OUTPUT_LOCAL);
         audio_router_bluetooth_state(&audio_router, clock_a2dp_stream_active());
+#else
+        saved_audio_manual = saved.audio_manual_jbl;
+        saved_audio_hourly = saved.audio_hourly_jbl;
+        saved_audio_timer = saved.audio_timer_jbl;
+        saved_audio_alarm = saved.audio_alarm_jbl;
 #endif
         printf("[FLASH] loaded lang=%s volume=%u exact=%s quiet=%s %02u-%02u half_hour=%s mode=%s\n",
                speech_language_name(language), (unsigned)volume,
