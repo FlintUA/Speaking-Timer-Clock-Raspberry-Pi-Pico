@@ -1162,3 +1162,44 @@ MP3 source is playing to avoid sharing their FAT32 scratch buffer.
 **This implementation has not yet been compiled or heard on the physical
 clock.** If the build fails, do not flash; if audio glitches or RTC stalls, use
 `mp3-stop` and return to the known-good firmware. See development audit.
+
+
+## MP3 full-file playback and pause/resume (2026-11-07 experimental)
+
+Full-file MP3 playback replaces the earlier five-second cap. Existing
+`mp3-play 07/001.mp3` reads sequentially until Helix reaches EOF;
+the decoder still runs cooperatively in blocks of at most 256 source
+frames. It uses the same 8192-frame PCM ring, 48kHz to 44.1kHz
+resampling and **40% MP3 PCM gain**. The local DFPlayer remains independent.
+
+Commands:
+
+```text
+sd-test
+bt-status
+mp3-play 07/001.mp3
+mp3-status
+mp3-pause
+mp3-status
+mp3-resume
+mp3-status
+mp3-stop
+```
+
+During `mp3-pause`, A2DP continues to send SBC silence, but decoded PCM
+already in the ring is preserved; the producer does not read from SD.
+`mp3-resume` continues at the saved position. `mp3-stop` closes the
+decoder/file and drops buffered PCM. On the normal EOF, leftover PCM is
+drained before returning to silence. An incomplete final SBC packet is
+padded with zero samples **without counting an underrun**; the remaining
+underrun count should now better reflect true buffer starvation.
+
+As before, a live timer, alarm, active local player, mute or Bluetooth
+disconnection interrupts MP3 playback; starting the experiment requires
+a running 44100Hz A2DP stream. The feature is optional and requires
+`-Build -Bluetooth -Mp3`.
+
+**IMPORTANT:** This full-file variant is committed but has not yet been
+compiled or tested on physical Pico 2 W. First test a short MP3 and then
+a longer one, observing `mp3-status`, RTC ticks and audio stability.
+Do not change persistent clock settings during initial experiment.
