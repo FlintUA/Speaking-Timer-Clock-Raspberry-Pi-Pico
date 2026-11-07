@@ -1541,6 +1541,9 @@ static void load_settings_at_boot(void) {
         half_hour_enabled = saved.half_hour_enabled;
         clock_mode = saved.clock_mode;
         memcpy(alarms, saved.alarms, sizeof(alarms));
+        printf("[FLASH] audio preferences loaded manual=%u hourly=%u timer=%u alarm=%u\n",
+               (unsigned)saved.audio_manual_jbl, (unsigned)saved.audio_hourly_jbl,
+               (unsigned)saved.audio_timer_jbl, (unsigned)saved.audio_alarm_jbl);
 #ifdef CLOCK_ENABLE_A2DP
         auto_voice_jbl_enabled = saved.audio_hourly_jbl != 0u;
         timer_audio_jbl_enabled = saved.audio_timer_jbl != 0u;
@@ -2182,6 +2185,24 @@ static void handle_command(char *line) {
         } else {
             puts("[SD] FAIL: check GP8/9/10/11, 3V3, GND and card seating");
         }
+    } else if (strcmp(line, "audio-settings") == 0) {
+        printf("[AUDIO-SETTINGS] manual=%s hourly=%s timer=%s alarm=%s\n",
+               audio_router.requested == AUDIO_OUTPUT_BT_JBL ? "JBL" : "LOCAL",
+#ifdef CLOCK_ENABLE_A2DP
+               auto_voice_jbl_enabled ? "JBL" : "LOCAL",
+               timer_audio_jbl_enabled ? "JBL" : "LOCAL",
+               alarm_audio_jbl_enabled ? "JBL" : "LOCAL"
+#else
+               "LOCAL", "LOCAL", "LOCAL"
+#endif
+        );
+        printf("[AUDIO-SETTINGS] output=preferred, effective JBL requires A2DP; autosave=%s\n",
+               autosave_pending ? "PENDING" : "IDLE");
+#ifdef CLOCK_ENABLE_A2DP
+        printf("[AUDIO-SETTINGS] Bluetooth stream=%s rate=%luHz; LOCAL fallback enabled\n",
+               clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE",
+               (unsigned long)clock_a2dp_current_rate());
+#endif
     } else if (strcmp(line, "timer-audio jbl") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
         timer_audio_jbl_enabled = true;
@@ -2367,6 +2388,7 @@ static void handle_command(char *line) {
         puts("[AUTO-AUDIO] auto-audio-test 8 - play simulated 08:00 hourly voice, no RTC change");
         puts("[TIMER-AUDIO] timer-audio jbl|local; timer-audio - timer start/cancel/finish routing");
         puts("[ALARM-AUDIO] alarm-audio jbl|local; alarm-audio; alarm-audio-test 1; alarm-stop");
+        puts("[AUDIO-SETTINGS] audio-settings shows persisted preferences; change with audio-select, auto-audio, timer-audio, alarm-audio; save");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
@@ -2383,8 +2405,14 @@ static void handle_command(char *line) {
         settings_store_dump_tail();
     } else if (strcmp(line, "save") == 0) {
         if (alarm_ui_state != ALARM_UI_CLOSED || alarm_active_index >= 0 ||
-            music_ui_open) {
-            puts("[FLASH] save blocked: close alarm editor or stop alarm first");
+            music_ui_open || timer.running || !audio_queue_idle(&audio_queue) ||
+            dfplayer_busy()
+#ifdef CLOCK_ENABLE_A2DP
+            || bt_speech_running || bt_timer_running || bt_alarm_running ||
+            routed_test_pending || mp3_play_active() || sd_fat32_stream_active()
+#endif
+           ) {
+            puts("[FLASH] save blocked: wait for audio/timer/alarm to finish");
         } else save_settings_now();
     } else if (strcmp(line, "autosave-status") == 0) {
         print_autosave_status(now);
