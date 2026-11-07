@@ -55,6 +55,24 @@ static int alarm_active_index = -1;
 static uint64_t alarm_deadline_ms;
 static bool alarm_audio_armed;
 #define ALARM_SAFETY_TIMEOUT_MS (15u * 60u * 1000u)
+// Runtime-only pending alarms: timer sound always plays first, alarm follows
+// when the output is idle. Do not extend an overdue alarm beyond 30 minutes.
+#define ALARM_DEFER_MAX_MS (30u * 60u * 1000u)
+typedef struct {
+    bool pending;
+    bool test;
+    uint8_t hour;
+    uint8_t minute;
+    uint64_t queued_ms;
+} deferred_alarm_t;
+static deferred_alarm_t deferred_alarms[CLOCK_ALARM_COUNT];
+static uint8_t active_alarm_hour, active_alarm_minute;
+static bool active_alarm_test;
+static uint64_t active_alarm_due_ms;
+static void alarm_stop(const char *reason);
+static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
+                              uint64_t now, bool test);
+static void alarm_pending_service(uint64_t now);
 static char command_line[48];
 static size_t command_length;
 // BOOTSEL is intentionally a two-step, time-limited serial operation.
@@ -729,11 +747,87 @@ static void announce_rtc_time(void) {
     announce_time(dt.hour, dt.minute);
 }
 
-static void timer_start_now(uint64_t now) {
-    if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED ||
-        music_ui_open) {
-        puts("[TIMER] start blocked: close UI or stop alarm first");
+static void alarm_pending_add(unsigned index, uint8_t hour,
+                              uint8_t minute, uint64_t due_ms, bool test) {
+    if (index >= CLOCK_ALARM_COUNT) return;
+    deferred_alarm_t *p = &deferred_alarms[index];
+    if (p->pending) {
+        printf("[ALARM-PENDING] %u already queued; no duplicate\n", index + 1u);
         return;
+    }
+    *p = (deferred_alarm_t){
+        .pending = true, .test = test, .hour = hour, .minute = minute,
+        .queued_ms = due_ms
+    };
+    printf("[ALARM-PENDING] queued=%u time=%02u:%02u ttl=30m%s\n",
+           index + 1u, (unsigned)hour, (unsigned)minute,
+           test ? " TEST" : "");
+}
+static void alarm_pending_status(uint64_t now) {
+    unsigned count = 0u;
+    for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
+        const deferred_alarm_t *p = &deferred_alarms[i];
+        if (!p->pending) continue;
+        ++count;
+        uint64_t age = now >= p->queued_ms ? now - p->queued_ms : 0u;
+        uint64_t left = age >= ALARM_DEFER_MAX_MS ? 0u :
+                        (ALARM_DEFER_MAX_MS - age + 999u) / 1000u;
+        printf("[ALARM-PENDING] slot=%u due=%02u:%02u expires_in=%llus%s\n",
+               i + 1u, (unsigned)p->hour, (unsigned)p->minute,
+               (unsigned long long)left, p->test ? " TEST" : "");
+    }
+    printf("[ALARM-PENDING] count=%u limit=30m (RAM only)\n", count);
+}
+static void alarm_pending_service(uint64_t now) {
+    int first = -1;
+    // Expiration applies even if the timer keeps running or sound is muted.
+    for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
+        deferred_alarm_t *p = &deferred_alarms[i];
+        if (!p->pending) continue;
+        if (now < p->queued_ms || now - p->queued_ms >= ALARM_DEFER_MAX_MS) {
+            printf("[ALARM-PENDING] expired=%u age_limit=30m\n", i + 1u);
+            p->pending = false;
+            continue;
+        }
+        if (first < 0 ||
+            p->queued_ms < deferred_alarms[first].queued_ms)
+            first = (int)i;
+    }
+    if (first < 0 || timer.running || alarm_active_index >= 0 ||
+        (finished_screen_until_ms && now < finished_screen_until_ms) ||
+        menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED ||
+        !sound_enabled || !audio_queue_idle(&audio_queue) || dfplayer_busy()
+#ifdef CLOCK_ENABLE_A2DP
+        || bt_timer_running || bt_speech_running || bt_alarm_running ||
+           mp3_play_active() || mp3_probe_active() ||
+           sd_fat32_stream_active() || routed_test_pending
+#endif
+       ) return;
+    if (music_ui_open) music_ui_close("DEFERRED_ALARM_PRIORITY");
+    deferred_alarm_t pending = deferred_alarms[first];
+    deferred_alarms[first].pending = false;
+    printf("[ALARM-PENDING] dispatch=%d waited=%llus%s\n",
+           first + 1, (unsigned long long)((now - pending.queued_ms) / 1000u),
+           pending.test ? " TEST" : "");
+    // Keep the original RTC due time rather than announcing the late wall time.
+    active_alarm_due_ms = pending.queued_ms;
+    alarm_start_audio((unsigned)first, pending.hour, pending.minute,
+                      now, pending.test);
+}
+
+static void timer_start_now(uint64_t now) {
+    if (alarm_ui_state != ALARM_UI_CLOSED || music_ui_open) {
+        puts("[TIMER] start blocked: close UI/player first");
+        return;
+    }
+    // An interactive timer preempts a ringing alarm, which resumes later
+    // from the beginning if it is still within its 30-minute deadline.
+    if (alarm_active_index >= 0) {
+        unsigned interrupted = (unsigned)alarm_active_index;
+        alarm_pending_add(interrupted, active_alarm_hour,
+                          active_alarm_minute, active_alarm_due_ms,
+                          active_alarm_test);
+        alarm_stop("TIMER_PRIORITY_DEFERRED");
     }
     countdown_start(&timer, now);
     timer_screen = true;
@@ -1739,6 +1833,12 @@ static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
         return;
     }
     alarm_active_index = (int)index;
+    active_alarm_hour = hour;
+    active_alarm_minute = minute;
+    active_alarm_test = test;
+    // Direct test calls start immediately; deferred events preserve original due.
+    if (!active_alarm_due_ms || active_alarm_due_ms > now)
+        active_alarm_due_ms = now;
     alarm_deadline_ms = now + ALARM_SAFETY_TIMEOUT_MS;
     alarm_audio_armed = true;
 #ifdef CLOCK_ENABLE_A2DP
@@ -1773,6 +1873,7 @@ static void alarm_stop(const char *reason) {
     alarm_active_index = -1;
     alarm_audio_armed = false;
     alarm_deadline_ms = 0u;
+    active_alarm_due_ms = 0u;
     printf("[ALARM] %d stopped=%s\n", number, reason);
 }
 
@@ -1792,6 +1893,7 @@ static void alarm_service_playback(uint64_t now) {
         alarm_active_index = -1;
         alarm_audio_armed = false;
         alarm_deadline_ms = 0u;
+        active_alarm_due_ms = 0u;
         puts("[ALARM] finished=AUDIO_COMPLETED");
     }
 }
@@ -1799,61 +1901,45 @@ static void alarm_service_playback(uint64_t now) {
 static void alarm_service_rtc(const ds1302_datetime_t *dt, uint64_t now) {
     if (!dt) return;
     if (!alarm_boot_seeded) {
-        // First RTC minute after power-up is only observed, never fired.
-        // Avoid a surprise alarm when rebooting right at its scheduled time.
+        // Never replay an RTC minute that was already in progress at boot.
         alarm_boot_seeded = true;
         alarm_scheduler.minute_valid = true;
         alarm_scheduler.minute_key = auto_minute_key(dt);
         alarm_scheduler.fired_mask = 0u;
         for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
             if (alarms[i].enabled && alarms[i].hour == dt->hour &&
-                alarms[i].minute == dt->minute) {
+                alarms[i].minute == dt->minute)
                 alarm_scheduler.fired_mask |= (uint8_t)(1u << i);
-            }
         }
         printf("[ALARM] boot: %02u:%02u consumed, fired_mask=0x%02x; next minute armed\n",
                (unsigned)dt->hour, (unsigned)dt->minute,
                (unsigned)alarm_scheduler.fired_mask);
         return;
     }
-    if (dt->second > 5u || alarm_active_index >= 0) return;
-    // Atomically claim every match for the minute. If two or more alarms
-    // coincide, only the lowest-numbered slot may play. Mark others
-    // consumed so stopping the winner never triggers a surprise second alarm.
+    if (dt->second > 5u) return;
+    // Claim all due alarms once, even when a timer or another alarm is active.
+    // A single RTC minute is never replayed; each due slot is queued at most once.
     uint8_t other_mask = 0u;
     int index = alarm_scheduler_claim_due(&alarm_scheduler, alarms, dt->year,
                          dt->month, dt->day, dt->hour, dt->minute, &other_mask);
     if (index < 0) return;
-    if (other_mask) {
-        printf("[ALARM] collision %02u:%02u winner=%d skipped_mask=0x%02x (once per minute)\n",
-               (unsigned)dt->hour, (unsigned)dt->minute, index + 1,
-               (unsigned)other_mask);
-    }
-    if (timer.running || (finished_screen_until_ms &&
-        now < finished_screen_until_ms)) {
-        printf("[ALARM] %d skipped=TIMER_PRIORITY\n", index + 1);
-        return;
-    }
-    if (menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED) {
-        printf("[ALARM] %d skipped=MENU_OPEN\n", index + 1);
-        return;
-    }
-    // Scheduled alarms override the standalone music player.
-    // Close it before queueing alarm speech, preserving ALARM button priority.
-    if (music_ui_open) music_ui_close("ALARM_PRIORITY");
-    // An alarm owns its minute: prevent normal xx:00/xx:30 announcements.
+    uint8_t due_mask = (uint8_t)((1u << index) | other_mask);
+    if (other_mask)
+        printf("[ALARM] collision %02u:%02u queued_mask=0x%02x\n",
+               (unsigned)dt->hour, (unsigned)dt->minute, due_mask);
+    // A due alarm owns this boundary, even if its sound must be deferred.
     if (dt->minute == 0u || dt->minute == 30u) {
         auto_seen_key_valid = true;
         auto_seen_minute_key = auto_minute_key(dt);
     }
     if (!sound_enabled) {
-        printf("[ALARM] %d skipped=SOUND_OFF\n", index + 1);
+        printf("[ALARM] due_mask=0x%02x skipped=SOUND_OFF\n", due_mask);
         return;
     }
-#ifdef CLOCK_ENABLE_A2DP
-    bt_timer_cancel("ALARM_PRIORITY");
-#endif
-    alarm_start_audio((unsigned)index, dt->hour, dt->minute, now, false);
+    for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
+        if (due_mask & (1u << i))
+            alarm_pending_add(i, dt->hour, dt->minute, now, false);
+    }
 }
 
 static void alarm_set(char *args) {
@@ -2209,6 +2295,7 @@ static void handle_command(char *line) {
                sound_enabled ? "ON" : "OFF", (unsigned)audio_queue.size,
                audio_queue.track_started ? "YES" : "NO",
                dfplayer_busy() ? "YES" : "NO");
+        alarm_pending_status(now);
         printf("[AUDIO-HEALTH] auto=%s clock_mode=%s saved_pending=%s menu=%s music=%s\n",
                auto_enabled ? "ON" : "OFF", clock_mode ? "CHIME" : "VOICE",
                autosave_pending ? "YES" : "NO",
@@ -2432,6 +2519,7 @@ static void handle_command(char *line) {
         puts("[ALARM-AUDIO] alarm-audio jbl|local; alarm-audio; alarm-audio-test 1; alarm-stop");
         puts("[AUDIO-SETTINGS] audio-settings shows persisted preferences; change with audio-select, auto-audio, timer-audio, alarm-audio; save");
         puts("[AUDIO-HEALTH] audio-health shows read-only owner, queue and Bluetooth status");
+        puts("[ALARM-PENDING] alarm-pending, alarm-pending-test N, alarm-pending-clear (RAM only)");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
@@ -2463,6 +2551,26 @@ static void handle_command(char *line) {
         auto_status();
     } else if (strcmp(line, "alarm-status") == 0) {
         alarm_status();
+        alarm_pending_status(now);
+    } else if (strcmp(line, "alarm-pending") == 0) {
+        alarm_pending_status(now);
+    } else if (strcmp(line, "alarm-pending-clear") == 0) {
+        for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i)
+            deferred_alarms[i].pending = false;
+        puts("[ALARM-PENDING] cleared by user (RAM only, alarm schedule unchanged)");
+    } else if (strncmp(line, "alarm-pending-test ", 19) == 0) {
+        unsigned slot = 0;
+        char extra = 0;
+        if (sscanf(line + 19, "%u %c", &slot, &extra) != 1 ||
+            slot < 1u || slot > CLOCK_ALARM_COUNT) {
+            puts("[ALARM-PENDING] Usage: alarm-pending-test 1..5");
+        } else {
+            ds1302_datetime_t dt = {0};
+            if (!ds1302_read_datetime(&dt))
+                puts("[ALARM-PENDING] TEST refused: RTC unavailable");
+            else
+                alarm_pending_add(slot - 1u, dt.hour, dt.minute, now, true);
+        }
     } else if (strncmp(line, "alarm-config ", 13) == 0) {
         alarm_config(line + 13);
     } else if (strncmp(line, "alarm-enable ", 13) == 0) {
@@ -2519,6 +2627,7 @@ static void handle_command(char *line) {
             if (!ds1302_read_datetime(&dt))
                 puts("[ALARM-AUDIO] TEST refused: RTC unavailable");
             else
+                active_alarm_due_ms = now;
                 alarm_start_audio(slot - 1u, dt.hour, dt.minute, now, true);
         }
     } else if (strcmp(line, "alarm-stop") == 0) {
@@ -3013,6 +3122,8 @@ int main(void) {
                 puts("[RTC] Invalid/unavailable (run rtc-debug for raw bytes and error reasons)");
             }
         }
+
+        alarm_pending_service(now);
 
         char top[17], bottom[17];
         if (music_ui_open) {
