@@ -2,6 +2,8 @@
 
 The main project is C / Pico SDK firmware for **Pico 2 W (RP2350)**. MicroPython sources and the original Pico schematic are retained as historical material.
 
+Current release candidate: **1.0.0-rc.1**. See [release notes](CHANGELOG.md), the [current roadmap](doc/ROADMAP.md) and [verification instructions](doc/TESTING.md). New Wi-Fi/NTP and Flash v8 changes require on-device acceptance before the stable release.
+
 The clock uses an I2C LCD1602, DS1302 RTC, DFPlayer Mini, two rotary encoders and five additional buttons. For Bluetooth playback, Pico reads MP3 files from a separate SPI1 microSD card, decodes them with Helix and sends SBC audio to a Bluetooth Classic A2DP speaker.
 
 ## Features and validation
@@ -11,10 +13,13 @@ The clock uses an I2C LCD1602, DS1302 RTC, DFPlayer Mini, two rotary encoders an
 - Local DFPlayer and Bluetooth playback for speech, timer, alarms and music, with local fallback.
 - One volume encoder controls the active output. DFPlayer and Bluetooth volume levels are stored separately.
 - Bluetooth discovery, selection by name/MAC, automatic SSP pairing, up to four known devices and direct connection to the saved MAC.
-- Flash settings v7 reads formats v1-v6. BTstack stores pairing keys separately.
+- Optional Wi-Fi/NTP correction with Europe/Berlin CET/CEST and offline RTC fallback.
+- Flash settings v8 reads formats v1-v7, stores Wi-Fi provisioning and supports alarm music tracks through 255. BTstack stores pairing keys separately.
 - Read-only FAT32 and MP3 access on the SPI microSD card.
 
 Hardware tests confirm the relocated timer encoder, volume button, SPI SD/FAT32, MP3 reads and Bluetooth playback; see [test evidence](doc/HARDWARE_TEST_EVIDENCE.md). Registry v7 tests cover discovery, saving, Portable reconnection after power loss, deletion with autosave and Portable <-> Nest switching without scanning, followed by speech on both speakers. Switching initially returned status 0x56, then recovered through an automatic retry after five seconds; details are in the evidence summary. GP6 is reserved for external illumination; its PWM driver is not implemented.
+
+The release candidate adds unique device lists, saved-name retention and return to the preferred speaker after leaving discovery. The initial switch retry behavior is deliberately retained. New code validation is recorded separately from those earlier hardware passes.
 
 ## Current wiring
 
@@ -44,6 +49,8 @@ powershell -ExecutionPolicy Bypass -File .\update-pico.ps1 -Build -Bluetooth -Mp
 
 The default port is COM8; use `-Port COM7` to select another port. Software BOOTSEL entry requires firmware that already supports bootsel arm/confirm; the first installation requires manual BOOTSEL entry. The updater checks Flash and alarm responses after flashing, but does not test sound quality or pairing.
 
+Run `version` to see the firmware version and source build ID. Keep the generated `speaking_clock_c.build-id.txt` beside its UF2; the updater uses it to verify the installed source revision.
+
 ## Dependencies and build
 
 The script expects Pico SDK 2.3.1, pico-examples, CMake 4.3.4, ARM GCC, Ninja, pioasm and picotool under `%USERPROFILE%\.pico-sdk`. MP3 support requires:
@@ -56,6 +63,14 @@ powershell -ExecutionPolicy Bypass -File .\build-clock-bt.ps1 -Mp3
 
 Building does not flash the board. Output: `firmware/pico2w_c/build-bt/speaking_clock_c.uf2`. On Windows, use a short path without non-ASCII characters, such as `C:\Users\Flint123\projects\Speaking-Timer-Clock-Raspberry-Pi-Pico`.
 
+Wi-Fi is included by default. Provision credentials locally using:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\configure-wifi.ps1 -Port COM8
+```
+
+See [network setup and time correction](doc/NETWORK_TIME.md). Use `-NoWifi` with the build/updater script for a Bluetooth-only fallback build.
+
 ## Bluetooth
 
 1. Put the speaker in discovery mode, then select Scan devices in SETTINGS > Bluetooth or run `bt-scan`.
@@ -64,7 +79,7 @@ Building does not flash the board. Output: `firmware/pico2w_c/build-bt/speaking_
 4. After restart, the clock connects directly to the saved MAC without scanning. Retry intervals are 5, 10, then 30 seconds.
 5. `bt-known` shows saved names and pairing-key availability. `bt-forget N` removes a device and its key. Bare `bt-forget` prints usage and the device list.
 
-Menu and command numbering lists known devices first, then scan results. Devices with identical names require selection by number or MAC. When all four slots are occupied, the earliest added entry is replaced.
+Menu and command numbering lists known devices first, then new scanned addresses. Each MAC appears once. Devices with identical names require selection by number or MAC. When all four slots are occupied, the earliest added entry is replaced. Leaving discovery without selecting another speaker resumes the preferred target.
 
 The LCD shows the speaker name. If unavailable, it shows Saved speaker or Unknown device. MAC addresses remain in USB logs for diagnostics and are used internally for identification and connection.
 
@@ -76,6 +91,9 @@ Supported: Classic A2DP Sink/SBC. BLE-only, HFP and Google Cast are not supporte
 | --- | --- |
 | [firmware/pico2w_c](firmware/pico2w_c/) | Current C firmware and diagnostics |
 | [doc/HARDWARE_PICO2W.md](doc/HARDWARE_PICO2W.md) | Current wiring |
+| [doc/CONTROLS_AND_MODES.md](doc/CONTROLS_AND_MODES.md) | Current C firmware controls |
+| [doc/NETWORK_TIME.md](doc/NETWORK_TIME.md) | Wi-Fi/NTP and Europe/Berlin |
+| [doc/ROADMAP.md](doc/ROADMAP.md) | Prioritized current backlog |
 | [doc/history](doc/history/) | Previous READMEs and development history |
 | [source/v3](source/v3/) | Historical MicroPython firmware |
 | [experiments/bluetooth_a2dp_nest](experiments/bluetooth_a2dp_nest/) | BTstack A2DP integration generator |

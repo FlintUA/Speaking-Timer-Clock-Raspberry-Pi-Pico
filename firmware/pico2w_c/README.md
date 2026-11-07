@@ -1,5 +1,7 @@
 # Pico 2 W clock C firmware
 
+Release candidate: 1.0.0-rc.1. Current controls are documented in [CONTROLS_AND_MODES.md](../../doc/CONTROLS_AND_MODES.md), with network provisioning in [NETWORK_TIME.md](../../doc/NETWORK_TIME.md). See [TESTING.md](../../doc/TESTING.md) for native tests and release acceptance.
+
 This is the current project firmware. See the [main README](../../README.md) for build dependencies and updates, and the [current pin map](../../doc/HARDWARE_PICO2W.md) for wiring.
 
 ## On-device verification
@@ -23,7 +25,7 @@ SETTINGS opens the menu, the timer encoder selects an item, SETTINGS or the time
 
 ## Storage
 
-Clock Flash A/B occupies sectors -6/-5 from the end of Flash; legacy sector -4 is read for migration. BTstack uses -3/-2; the final sector is reserved. CRC-protected v7 records store settings and four names/MACs, while v1-v6 remain readable. BTstack stores pairing keys separately.
+Clock Flash A/B occupies sectors -6/-5 from the end of Flash; legacy sector -4 is read for migration. BTstack uses -3/-2; the final sector is reserved. CRC-protected v8 records store settings, four names/MACs and Wi-Fi credentials, while v1-v7 remain readable. v8 uses two programmed pages within each existing clock sector. BTstack stores pairing keys separately.
 
 A device is added only after an active A2DP stream with a matching MAC. Builds without Bluetooth preserve these fields when saving other settings. SPI SD access is read-only.
 
@@ -31,4 +33,4 @@ A device is added only after an active A2DP stream with a matching MAC. Builds w
 
 The previous accumulated README is in the [development history](../../doc/history/PICO2W_C_DEVELOPMENT.md). Its early wiring and descriptions of incomplete stages are historical.
 
-CMake flags CLOCK_ENABLE_A2DP and CLOCK_ENABLE_MP3 are opt-in. GP6 PWM is not implemented. Classic A2DP/SBC with automatic SSP confirmation is supported; legacy PIN pairing is not. Helix is checked out separately at the revision documented in the main README.
+CMake flags CLOCK_ENABLE_A2DP, CLOCK_ENABLE_MP3 and CLOCK_ENABLE_WIFI are explicit options. The standard build script enables A2DP/Wi-Fi and adds MP3 with -Mp3; -NoWifi preserves a Bluetooth-only fallback. GP6 PWM is not implemented. Classic A2DP/SBC with automatic SSP confirmation is supported; legacy PIN pairing is not. Helix is checked out separately at the revision documented in the main README.

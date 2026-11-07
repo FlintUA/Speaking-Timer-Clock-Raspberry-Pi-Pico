@@ -1,0 +1,22 @@
+name: Host tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S firmware/pico2w_c/tests -B build/host-tests -DCMAKE_BUILD_TYPE=Debug
+      - name: Build
+        run: cmake --build build/host-tests --config Debug
+      - name: Test
+        run: ctest --test-dir build/host-tests -C Debug --output-on-failure

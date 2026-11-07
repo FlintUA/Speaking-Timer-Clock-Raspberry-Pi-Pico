@@ -2,11 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "pico/stdlib.h"
-
-typedef struct {
-    uint16_t year;
-    uint8_t month, day, weekday, hour, minute, second;
-} ds1302_datetime_t;
+#include "clock_datetime.h"
 
 // Constructor order in production MicroPython: DS1302(Pin(2), Pin(5), Pin(4))
 // => CLK=GP2, DIO=GP5, CE=GP4.

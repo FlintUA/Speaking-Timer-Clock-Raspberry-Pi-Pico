@@ -15,7 +15,7 @@ void alarm_defaults(alarm_entry_t alarms[CLOCK_ALARM_COUNT]) {
 bool alarm_entry_valid(const alarm_entry_t *a) {
     return a && a->hour <= 23u && a->minute <= 59u &&
            (a->sound == ALARM_SOUND_SIGNAL || a->sound == ALARM_SOUND_MUSIC) &&
-           a->track >= 1u && a->track <= CLOCK_ALARM_MAX_TRACK;
+           a->track >= 1u; // uint8_t transport supports tracks 1..255.
 }
 
 void alarm_scheduler_init(alarm_scheduler_t *state) {

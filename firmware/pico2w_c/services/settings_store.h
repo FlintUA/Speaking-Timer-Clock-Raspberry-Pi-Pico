@@ -36,6 +36,9 @@ typedef struct {
     // v7: successful A2DP sinks. BTstack stores pairing keys separately.
     uint8_t bt_known_count;
     clock_bt_known_t bt_known[CLOCK_BT_KNOWN_MAX];
+    // v8: provisioned over USB; never printed by status/diagnostics.
+    char wifi_ssid[33];
+    char wifi_password[65];
 } clock_settings_t;
 
 typedef enum {
@@ -56,7 +59,6 @@ void settings_store_inspect(void);
 // Print the final 256 bytes of flash as hex and their CRC32; read-only.
 void settings_store_dump_tail(void);
 settings_store_result_t settings_store_load(clock_settings_t *out);
-// The current v3 implementation writes only when explicitly called by the app.
-// Loading v1/v2 never causes automatic migration.
-// The app should use settings_store_save for a deliberate v3 update only.
+// Writes occur only when requested by the application; load never migrates.
+// Current writes use v8; historical v1-v7 records remain readable.
 settings_store_result_t settings_store_save(const clock_settings_t *settings);

@@ -11,18 +11,24 @@ endif()
 include("${PICO_SDK_PATH}/external/pico_sdk_import.cmake")
 
 project(speaking_clock_c C CXX ASM)
+set(CLOCK_FIRMWARE_VERSION "1.0.0-rc.1" CACHE STRING "Firmware release version")
+set(CLOCK_BUILD_ID "unknown" CACHE STRING "Source revision used for this build")
+configure_file(firmware_version.h.in firmware_version.h @ONLY)
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/speaking_clock_c.build-id.txt"
+     CONTENT "${CLOCK_BUILD_ID}\n")
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
 pico_sdk_init()
 
-# First, deliberately BT-free, hardware bring-up. No RTC writes or flash settings.
+# Common clock target; optional radio and decoder profiles are configured below.
 add_executable(speaking_clock_c
     main.c
     drivers/ds1302.c
     drivers/lcd1602_i2c.c
     app/countdown.c
     app/alarm_engine.c
+    app/clock_time.c
     drivers/controls.c
     drivers/dfplayer.c
     drivers/sd_spi.c
@@ -35,11 +41,14 @@ add_executable(speaking_clock_c
     services/settings_store.c
 )
 target_include_directories(speaking_clock_c PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}
     ${CMAKE_CURRENT_LIST_DIR}/drivers
     ${CMAKE_CURRENT_LIST_DIR}/app
     ${CMAKE_CURRENT_LIST_DIR}/audio
     ${CMAKE_CURRENT_LIST_DIR}/services
 )
+# Use the full 4 KiB SCRATCH_Y bank for the main stack.
+target_compile_definitions(speaking_clock_c PRIVATE PICO_STACK_SIZE=0x1000)
 target_link_libraries(speaking_clock_c PRIVATE
     pico_stdlib
     hardware_i2c
@@ -55,6 +64,19 @@ pico_enable_stdio_uart(speaking_clock_c 0)
 pico_add_extra_outputs(speaking_clock_c)
 
 # The known-good production build keeps this OFF.
+option(CLOCK_ENABLE_WIFI "Nonblocking Wi-Fi/NTP and Europe/Berlin time" OFF)
+if(CLOCK_ENABLE_WIFI)
+    if(NOT PICO_BOARD STREQUAL "pico2_w")
+        message(FATAL_ERROR "Network time requires PICO_BOARD=pico2_w")
+    endif()
+    if(NOT EXISTS "${PICO_EXAMPLES_PATH}/pico_w/wifi/lwipopts_examples_common.h")
+        message(FATAL_ERROR "Set PICO_EXAMPLES_PATH for network configuration")
+    endif()
+    target_sources(speaking_clock_c PRIVATE services/network_time.c)
+    target_include_directories(speaking_clock_c PRIVATE "${PICO_EXAMPLES_PATH}/pico_w/wifi")
+    target_link_libraries(speaking_clock_c PRIVATE pico_cyw43_arch_lwip_threadsafe_background)
+    target_compile_definitions(speaking_clock_c PRIVATE CLOCK_ENABLE_WIFI=1)
+endif()
 option(CLOCK_ENABLE_A2DP "Experimental BTstack A2DP on Pico 2 W" OFF)
 if(CLOCK_ENABLE_A2DP)
     if(NOT PICO_BOARD STREQUAL "pico2_w")
@@ -83,6 +105,7 @@ if(CLOCK_ENABLE_A2DP)
         message(FATAL_ERROR "Could not prepare A2DP source from installed SDK")
     endif()
     target_sources(speaking_clock_c PRIVATE
+        services/bt_catalog.c
         "${_a2dp_generated}"
         "${PICO_SDK_PATH}/lib/btstack/src/btstack_audio_generator.c")
     target_include_directories(speaking_clock_c PRIVATE
@@ -91,13 +114,15 @@ if(CLOCK_ENABLE_A2DP)
         "${PICO_SDK_PATH}/lib/btstack/3rd-party/hxcmod-player"
         "${PICO_SDK_PATH}/lib/btstack/3rd-party/hxcmod-player/mods")
     target_link_libraries(speaking_clock_c PRIVATE
-        pico_cyw43_arch_none
         pico_btstack_cyw43
         pico_btstack_ble
         pico_btstack_classic
         pico_btstack_sbc_encoder)
+    if(NOT CLOCK_ENABLE_WIFI)
+        target_link_libraries(speaking_clock_c PRIVATE pico_cyw43_arch_none)
+    endif()
     target_compile_definitions(speaking_clock_c PRIVATE CLOCK_ENABLE_A2DP=1)
-    message(STATUS "Experimental A2DP enabled: test on spare Pico 2 W only")
+    message(STATUS "Bluetooth A2DP enabled")
 endif()
 
 # MP3 decoding is opt-in: keep the previously tested clock image unchanged
@@ -114,5 +139,5 @@ if(CLOCK_ENABLE_MP3)
     add_subdirectory("${CLOCK_HELIX_PATH}" "${CMAKE_CURRENT_BINARY_DIR}/helix_mp3_build")
     target_link_libraries(speaking_clock_c PRIVATE helix_mp3)
     target_compile_definitions(speaking_clock_c PRIVATE CLOCK_ENABLE_MP3=1)
-    message(STATUS "Experimental MP3 decode-only probe enabled; audio routing unchanged")
+    message(STATUS "SPI SD MP3 playback enabled")
 endif()

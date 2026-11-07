@@ -21,9 +21,19 @@
 #include "router.h"
 #include "speech.h"
 #include "settings_store.h"
+#include "clock_time.h"
+#include "firmware_version.h"
+#if defined(CLOCK_ENABLE_A2DP) || defined(CLOCK_ENABLE_WIFI)
+#include "pico/cyw43_arch.h"
+static bool radio_ready;
+#endif
+#ifdef CLOCK_ENABLE_WIFI
+#include "network_time.h"
+#endif
 #ifdef CLOCK_ENABLE_A2DP
 #include "pico/cyw43_arch.h"
 #include "clock_a2dp_control.h"
+#include "bt_catalog.h"
 int btstack_main(int argc, const char *argv[]);
 #endif
 
@@ -74,7 +84,7 @@ static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
                               uint64_t now, bool test);
 static void alarm_pending_service(uint64_t now);
 static void music_ui_close(const char *reason);
-static char command_line[48];
+static char command_line[160];
 static size_t command_length;
 // BOOTSEL is intentionally a two-step, time-limited serial operation.
 #define BOOTSEL_CONFIRM_WINDOW_MS 15000u
@@ -124,6 +134,8 @@ static uint8_t saved_audio_timer, saved_audio_alarm;
 #endif
 // Save selected Bluetooth sink MAC even in BT-free firmware builds.
 static uint8_t saved_bt_target_addr[6];
+static char saved_wifi_ssid[33], saved_wifi_password[65];
+static uint64_t rtc_replay_guard_until;
 static uint8_t bt_known_count;
 static clock_bt_known_t bt_known[CLOCK_BT_KNOWN_MAX];
 #ifdef CLOCK_ENABLE_A2DP
@@ -206,6 +218,7 @@ static bool music_ui_bluetooth;
 static bool music_ui_bt_started;
 static uint8_t music_ui_track = 1u;
 static uint8_t music_track_count = 45u; // Used only if DFPlayer folder count query fails.
+static uint8_t alarm_track_count = 45u;
 static uint8_t music_shuffle[255];
 static unsigned music_shuffle_size;
 static unsigned music_shuffle_next;
@@ -390,6 +403,9 @@ static void auto_test(uint8_t hour, uint8_t minute) {
 
 static void auto_service_rtc(const ds1302_datetime_t *dt) {
     if (!dt) return;
+    uint64_t civil_epoch;
+    if (rtc_replay_guard_until && clock_datetime_to_utc(dt,&civil_epoch) &&
+        civil_epoch < rtc_replay_guard_until) return;
     uint64_t observed_key = auto_minute_key(dt);
     bool reentered_minute = auto_last_observed_valid &&
                              auto_last_observed_minute_key != observed_key;
@@ -900,6 +916,8 @@ static clock_settings_t settings_snapshot(void) {
     memcpy(cfg.bt_target_addr, saved_bt_target_addr, sizeof(cfg.bt_target_addr));
     cfg.bt_known_count = bt_known_count;
     memcpy(cfg.bt_known, bt_known, sizeof(cfg.bt_known));
+    memcpy(cfg.wifi_ssid,saved_wifi_ssid,sizeof(cfg.wifi_ssid));
+    memcpy(cfg.wifi_password,saved_wifi_password,sizeof(cfg.wifi_password));
     return cfg;
 }
 
@@ -917,7 +935,8 @@ static bool settings_equal(clock_settings_t a, clock_settings_t b) {
         a.audio_alarm_jbl != b.audio_alarm_jbl ||
          memcmp(a.bt_target_addr, b.bt_target_addr, sizeof(a.bt_target_addr)) != 0 ||
          a.bt_known_count != b.bt_known_count ||
-         memcmp(a.bt_known, b.bt_known, sizeof(a.bt_known)) != 0)
+         memcmp(a.bt_known, b.bt_known, sizeof(a.bt_known)) != 0 ||
+         strcmp(a.wifi_ssid,b.wifi_ssid) || strcmp(a.wifi_password,b.wifi_password))
         return false;
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
         const alarm_entry_t *x = &a.alarms[i], *y = &b.alarms[i];
@@ -1401,6 +1420,15 @@ static void alarm_ui_open(uint64_t now) {
         return;
     }
     alarm_ui_index = 0u;
+    bool can_query = audio_queue_idle(&audio_queue) && !dfplayer_busy() &&
+                     !mp3_play_active() && !mp3_probe_active();
+#ifdef CLOCK_ENABLE_A2DP
+    can_query = can_query && !bt_speech_running && !bt_timer_running && !bt_alarm_running;
+#endif
+    uint8_t detected = can_query ? dfplayer_folder_count(8u,now) : 0u;
+    alarm_track_count = detected ? detected : music_track_count;
+    for (unsigned i=0;i<CLOCK_ALARM_COUNT;++i)
+        if (alarms[i].track > alarm_track_count) alarm_track_count=alarms[i].track;
     alarm_ui_state = ALARM_UI_LIST;
     alarm_ui_last_input_ms = now;
     timer_screen = false;
@@ -1507,7 +1535,7 @@ static void alarm_ui_rotate(int direction, uint64_t now) {
             break;
         case ALARM_UI_TRACK:
             alarm_ui_draft.track = wrap_u8(alarm_ui_draft.track, 1u,
-                                            CLOCK_ALARM_MAX_TRACK, direction);
+                                            alarm_track_count, direction);
             break;
         default: return;
     }
@@ -1549,33 +1577,30 @@ static int bt_known_find(const uint8_t address[6]) {
         if (memcmp(bt_known[i].address, address, 6) == 0) return (int)i;
     return -1;
 }
+// Main-loop scratch storage avoids putting two device arrays on the MCU stack.
+static clock_bt_device_t bt_catalog_cache[BT_CATALOG_CAPACITY];
+static clock_bt_device_t bt_scan_cache[CLOCK_BT_MAX_DEVICES];
+static unsigned bt_catalog_refresh(void) {
+    unsigned count = 0;
+    for (unsigned i = 0; i < clock_a2dp_scan_count() && count < CLOCK_BT_MAX_DEVICES; ++i)
+        if (clock_a2dp_scan_get(i, &bt_scan_cache[count])) ++count;
+    return (unsigned)bt_catalog_build(bt_known, bt_known_count, bt_scan_cache, count,
+                                     bt_catalog_cache, BT_CATALOG_CAPACITY);
+}
 static bool bt_menu_device(unsigned index, clock_bt_device_t *out) {
-    if (index == 0u || !out) return false;
-    if (index <= bt_known_count) {
-        const clock_bt_known_t *known = &bt_known[index - 1u];
-        snprintf(out->address, sizeof(out->address), "%02X:%02X:%02X:%02X:%02X:%02X",
-                 known->address[0], known->address[1], known->address[2],
-                 known->address[3], known->address[4], known->address[5]);
-        snprintf(out->name, sizeof(out->name), "%s", known->name);
-        out->rssi = 0;
-        return true;
-    }
-    return clock_a2dp_scan_get(index - bt_known_count - 1u, out);
+    if (!index || !out) return false;
+    unsigned count = bt_catalog_refresh();
+    if (index > count) return false;
+    *out = bt_catalog_cache[index - 1u];
+    return true;
 }
 static unsigned bt_menu_count(void) {
-    return 1u + bt_known_count + clock_a2dp_scan_count();
+    return 1u + bt_catalog_refresh();
 }
 static const char *bt_lcd_name(unsigned index, const clock_bt_device_t *device) {
     // Legacy saved entries and discovery fallbacks can contain a MAC.
     // Keep the original name/address for connection and USB diagnostics.
-    bool address_label = strlen(device->name) == 17u;
-    for (unsigned i = 0; address_label && i < 17u; ++i) {
-        if (i % 3u == 2u) address_label = device->name[i] == ':';
-        else address_label = isxdigit((unsigned char)device->name[i]) != 0;
-    }
-    if (device->name[0] && !address_label &&
-        strncmp(device->name, "Unknown ", 8u) != 0)
-        return device->name;
+    if (bt_name_usable(device->name)) return device->name;
     return index <= bt_known_count ? "Saved speaker" : "Unknown device";
 }
 static bool bt_sink_select(const char *mac){
@@ -1609,9 +1634,11 @@ static bool bt_sink_select(const char *mac){
         }
     }
     int known = bt_known_find(bt_pending_target_addr);
-    if (known >= 0 && strcmp(bt_pending_target_name, mac) == 0)
+    const char *preferred_name=bt_preferred_name(
+        known>=0?bt_known[known].name:NULL,bt_pending_target_name,mac);
+    if (preferred_name!=bt_pending_target_name)
         snprintf(bt_pending_target_name, sizeof(bt_pending_target_name), "%s",
-                 bt_known[known].name);
+                 preferred_name);
     bt_pending_target_valid = true;
     bt_pending_seen_disconnected = !was_active;
     // Do not persist a sink that never successfully negotiates A2DP.
@@ -1633,10 +1660,10 @@ static void bt_scan_list(void){
            clock_a2dp_scan_active() ? "YES" : "NO",
            clock_a2dp_target());
     clock_bt_device_t d;
-    for (unsigned i=0;i<clock_a2dp_scan_count();i++){
-        if (clock_a2dp_scan_get(i,&d))
+    for (unsigned i=bt_known_count;i+1u<bt_menu_count();i++){
+        if (bt_menu_device(i+1u,&d))
             printf("[BT-SCAN] %u address=%s name=%s rssi=%d\n",
-                    bt_known_count+i+1u,d.address,d.name,(int)d.rssi);
+                    i+1u,d.address,d.name,(int)d.rssi);
     }
 }
 #endif
@@ -1713,7 +1740,8 @@ static void menu_audio_apply(unsigned index, bool jbl) {
 static void menu_close(void) {
     if (menu_state == MENU_CLOSED) return;
 #ifdef CLOCK_ENABLE_A2DP
-    if (menu_state == MENU_BT_SCANNING) clock_a2dp_scan_stop();
+    if (menu_state == MENU_BT_SCANNING || menu_state == MENU_BT_LIST ||
+        menu_state == MENU_BT_CONFIRM) clock_a2dp_scan_stop();
 #endif
     menu_state = MENU_CLOSED;
     timer_screen = false;
@@ -1944,6 +1972,9 @@ static void menu_back(uint64_t now) {
         menu_state = MENU_BT_LIST;
         puts("[MENU-BT] Search cancelled");
     } else if (menu_state == MENU_BT_LIST) {
+#ifdef CLOCK_ENABLE_A2DP
+        clock_a2dp_scan_stop(); // Resume the saved target after browsing.
+#endif
         menu_state = MENU_LIST;
         puts("[MENU-BT] Back to settings");
     } else {
@@ -2104,6 +2135,8 @@ static void load_settings_at_boot(void) {
                sizeof(saved_bt_target_addr));
         bt_known_count = saved.bt_known_count;
         memcpy(bt_known, saved.bt_known, sizeof(bt_known));
+        memcpy(saved_wifi_ssid,saved.wifi_ssid,sizeof(saved_wifi_ssid));
+        memcpy(saved_wifi_password,saved.wifi_password,sizeof(saved_wifi_password));
         // v5/v6 stored only the preferred MAC. Keep it selectable by MAC
         // until a fresh scan supplies its advertised name.
         bool legacy_target = false, cleared_target = true;
@@ -2396,6 +2429,9 @@ static void alarm_service_playback(uint64_t now) {
 
 static void alarm_service_rtc(const ds1302_datetime_t *dt, uint64_t now) {
     if (!dt) return;
+    uint64_t civil_epoch;
+    if (rtc_replay_guard_until && clock_datetime_to_utc(dt,&civil_epoch) &&
+        civil_epoch < rtc_replay_guard_until) return;
     if (!alarm_boot_seeded) {
         // Never replay an RTC minute that was already in progress at boot.
         alarm_boot_seeded = true;
@@ -2448,7 +2484,7 @@ static void alarm_set(char *args) {
     bool music = fields == 4 && strcmp(kind, "music") == 0 &&
                  track >= 1u && track <= CLOCK_ALARM_MAX_TRACK;
     if (hh > 23u || mm > 59u || (!signal && !music)) {
-        puts("[ALARM] Use alarm-set HH MM signal OR alarm-set HH MM music TRACK(1..45)");
+        puts("[ALARM] Use alarm-set HH MM signal OR alarm-set HH MM music TRACK(1..255)");
         return;
     }
     if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED ||
@@ -2714,21 +2750,10 @@ static void handle_command(char *line) {
             // multiple devices advertise the same name.
             clock_bt_device_t device, selected;
             unsigned matches = 0;
-            for (unsigned i = 0; i < clock_a2dp_scan_count(); ++i) {
-                if (clock_a2dp_scan_get(i, &device) &&
-                    strcmp(device.name, argument) == 0) {
+            for (unsigned i = 1u; i < bt_menu_count(); ++i) {
+                if (bt_menu_device(i, &device) && strcmp(device.name, argument) == 0) {
                     selected = device;
                     ++matches;
-                }
-            }
-            for (unsigned i = 0; i < bt_known_count; ++i) {
-                if (strcmp(bt_known[i].name, argument) == 0) {
-                    clock_bt_device_t known;
-                    bt_menu_device(i + 1u, &known);
-                    if (matches == 0u || strcmp(selected.address, known.address) != 0) {
-                        selected = known;
-                        ++matches;
-                    }
                 }
             }
             if (matches == 1u) {
@@ -3127,8 +3152,51 @@ static void handle_command(char *line) {
         puts("[AUDIO-HEALTH] audio-health shows read-only owner, queue and Bluetooth status");
         puts("[ALARM-PENDING] alarm-pending, alarm-pending-test N, alarm-pending-clear (RAM only)");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
+        puts("[NETWORK] wifi-config SSID|password; wifi-clear; ntp-status; ntp-sync; version");
         puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
+    } else if (strcmp(line, "version") == 0) {
+        printf("[VERSION] %s build=%s board=pico2_w\n",
+               CLOCK_FIRMWARE_VERSION,CLOCK_BUILD_ID);
+    } else if (strcmp(line, "wifi-config") == 0) {
+        puts("[WIFI] Usage: wifi-config SSID|password (empty password for an open network)");
+    } else if (strncmp(line, "wifi-config ",12) == 0) {
+#ifdef CLOCK_ENABLE_WIFI
+        const char *ssid=line+12, *separator=strchr(ssid,'|');
+        size_t n=separator?(size_t)(separator-ssid):0;
+        size_t key_size=separator?strlen(separator+1):0;
+        if (timer.running || alarm_active_index>=0 || mp3_play_active() ||
+            !audio_queue_idle(&audio_queue) || dfplayer_busy()) {
+            puts("[WIFI] Configuration blocked while timer/alarm/audio is busy");
+        } else if (!separator || n<1 || n>32 || key_size>64 ||
+            (key_size>0 && key_size<8) ||
+            (key_size==64 && strspn(separator+1,"0123456789abcdefABCDEF")!=64)) {
+            puts("[WIFI] Invalid configuration; SSID 1..32, password empty or 8..64 characters");
+        } else {
+            memset(saved_wifi_ssid,0,sizeof(saved_wifi_ssid));
+            memset(saved_wifi_password,0,sizeof(saved_wifi_password));
+            memcpy(saved_wifi_ssid,ssid,n);
+            memcpy(saved_wifi_password,separator+1,key_size);
+            settings_mark_changed();
+            network_time_configure(saved_wifi_ssid,saved_wifi_password);
+        }
+#else
+        puts("[WIFI] Network support is disabled in this build");
+#endif
+    } else if (strcmp(line,"wifi-clear") == 0) {
+        memset(saved_wifi_ssid,0,sizeof(saved_wifi_ssid));
+        memset(saved_wifi_password,0,sizeof(saved_wifi_password));
+        settings_mark_changed();
+#ifdef CLOCK_ENABLE_WIFI
+        network_time_configure("","");
+#endif
+    } else if (strcmp(line,"ntp-status") == 0 || strcmp(line,"ntp-sync") == 0) {
+#ifdef CLOCK_ENABLE_WIFI
+        if (strcmp(line,"ntp-sync")==0) network_time_request();
+        network_time_status();
+#else
+        puts("[NTP] Network support is disabled in this build");
+#endif
     } else if (strcmp(line, "rtc-debug") == 0) {
         print_rtc_debug();
     } else if (strcmp(line, "rtc-reset-stats") == 0) {
@@ -3390,13 +3458,18 @@ static void handle_command(char *line) {
 
 static void poll_serial(void) {
     int ch;
+    static bool discard_line;
     while ((ch = getchar_timeout_us(0)) != PICO_ERROR_TIMEOUT) {
         if (ch == '\r' || ch == '\n') {
-            if (command_length) {
+            if (command_length && !discard_line) {
                 command_line[command_length] = 0;
                 handle_command(command_line);
-                command_length = 0;
             }
+            memset(command_line,0,sizeof(command_line));
+            command_length=0;
+            discard_line=false;
+        } else if (discard_line) {
+            continue;
         } else if (ch == 8 || ch == 127) {
             if (command_length) --command_length;
         } else if (ch >= 32 && ch < 127) {
@@ -3404,6 +3477,8 @@ static void poll_serial(void) {
                 command_line[command_length++] = (char)ch;
             } else {
                 command_length = 0;
+                memset(command_line,0,sizeof(command_line));
+                discard_line=true;
                 puts("[CMD] Input too long");
             }
         }
@@ -3547,7 +3622,7 @@ static void on_control_event(const control_event_t *event, void *context) {
 int main(void) {
     stdio_init_all();
     sleep_ms(3000); // Give VS Code Serial Monitor time to attach.
-    printf("\n[BOOT] Speaking Clock C bring-up 0.1 (Pico 2 W)\n");
+    printf("\n[BOOT] Speaking Clock %s build=%s (Pico 2 W)\n",CLOCK_FIRMWARE_VERSION,CLOCK_BUILD_ID);
 #ifdef CLOCK_ENABLE_MP3
     // Initialize SD before starting Bluetooth, avoiding a long missing-card
     // command sequence while an A2DP media stream is already running.
@@ -3555,18 +3630,12 @@ int main(void) {
     if (!sd_spi_ensure_fat32())
         puts("[SD-AUTO] Boot will continue with LOCAL audio fallback");
 #endif
+#if defined(CLOCK_ENABLE_A2DP) || defined(CLOCK_ENABLE_WIFI)
+    radio_ready=cyw43_arch_init()==PICO_OK;
+    puts(radio_ready?"[RADIO] Initialized":"[RADIO] Unavailable; clock continues offline");
 #ifdef CLOCK_ENABLE_A2DP
-    puts("[BOOT] EXPERIMENTAL A2DP active; LOCAL DFPlayer still primary output");
-    int bt_error = cyw43_arch_init();
-    printf("[BT] cyw43_arch_init=%d\n", bt_error);
-    if (bt_error == PICO_OK) {
-        int result = btstack_main(0, NULL);
-        printf("[BT] btstack_main=%d\n", result);
-    } else {
-        puts("[BT] radio init failed, clock continues without remote audio");
-    }
-#else
-    printf("[BOOT] DS1302 manual datetime writes only; LCD1602 scan; no Bluetooth\n");
+    if (radio_ready) printf("[BT] btstack_main=%d\n",btstack_main(0,NULL));
+#endif
 #endif
 
     i2c_init(i2c0, 400 * 1000);
@@ -3591,6 +3660,10 @@ int main(void) {
     alarm_defaults(alarms);
     alarm_scheduler_init(&alarm_scheduler);
     load_settings_at_boot();
+#ifdef CLOCK_ENABLE_WIFI
+    network_time_init(radio_ready);
+    network_time_configure(saved_wifi_ssid,saved_wifi_password);
+#endif
     audio_queue_set_volume(&audio_queue, volume);
     puts("[AUDIO] DFPlayer UART0 GP16/17 BUSY GP18");
     puts("[AUTO] runtime=ON after boot; first observed RTC boundary will be consumed");
@@ -3743,6 +3816,39 @@ int main(void) {
         } else {
             previous_remaining = UINT32_MAX;
         }
+#ifdef CLOCK_ENABLE_WIFI
+        static uint64_t network_next_ms;
+        if (now >= network_next_ms) {
+            network_next_ms=now+250;
+            bool idle=!timer.running && alarm_active_index<0 &&
+                menu_state==MENU_CLOSED && alarm_ui_state==ALARM_UI_CLOSED &&
+                !music_ui_open && audio_queue_idle(&audio_queue) && !dfplayer_busy() &&
+                !mp3_play_active() && !mp3_probe_active() && !sd_fat32_stream_active();
+#ifdef CLOCK_ENABLE_A2DP
+            idle=idle && !bt_speech_running && !bt_timer_running &&
+                 !bt_alarm_running && !routed_test_pending && !clock_a2dp_scan_active();
+#endif
+            ds1302_datetime_t local, old;
+            if (network_time_service(now,idle,&local)) {
+                uint64_t previous=0, corrected=0;
+                bool have_old=ds1302_read_datetime(&old) && clock_datetime_to_utc(&old,&previous);
+                clock_datetime_to_utc(&local,&corrected);
+                uint64_t difference=have_old ? (previous>corrected?previous-corrected:corrected-previous) : UINT64_MAX;
+                bool ok=difference<=1 || ds1302_write_datetime(&local);
+                if (ok && difference>5) {
+                    clock_adjustment_t adjustment=clock_adjustment_plan(
+                        have_old,previous,corrected,network_time_is_dst_change());
+                    rtc_replay_guard_until=adjustment.suppress_before;
+                    auto_boot_seeded=adjustment.allow_boundary;
+                    auto_seen_key_valid=false;
+                    alarm_boot_seeded=adjustment.allow_boundary;
+                    alarm_scheduler_init(&alarm_scheduler);
+                }
+                network_time_applied(ok);
+                next_rtc_ms=0;
+            }
+        }
+#endif
         if (now >= next_rtc_ms) {
             next_rtc_ms = now + 1000u;
             ds1302_datetime_t dt = {0};

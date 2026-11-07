@@ -8,6 +8,7 @@ param(
     [switch]$Build,
     [switch]$Bluetooth,
     [switch]$Mp3,
+    [switch]$NoWifi,
     [string]$JblAddress = '',
     [switch]$VerifyOnly,
     [int]$TimeoutSeconds = 45,
@@ -16,12 +17,19 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+$expectedBuild = ''
 if (-not $Uf2) {
     $buildFolder = if ($Bluetooth) { 'build-bt' } else { 'build-ninja' }
     $Uf2 = Join-Path $root "firmware\pico2w_c\$buildFolder\speaking_clock_c.uf2"
 }
 if (-not [System.IO.Path]::IsPathRooted($Uf2)) { $Uf2 = Join-Path $root $Uf2 }
 $Uf2 = [System.IO.Path]::GetFullPath($Uf2)
+if ($VerifyOnly) {
+    $identity = [IO.Path]::ChangeExtension($Uf2, '.build-id.txt')
+    if (Test-Path -LiteralPath $identity) {
+        $expectedBuild = (Get-Content -LiteralPath $identity -Raw).Trim()
+    }
+}
 if ($TimeoutSeconds -lt 10) { throw 'TimeoutSeconds must be at least 10.' }
 
 function Wait-Until([scriptblock]$Predicate, [int]$Seconds, [string]$Description) {
@@ -86,9 +94,19 @@ function Test-PicoFirmware([string]$PortName, [bool]$IncludeAlarms) {
         $flash = Read-PicoReply $serial 'flash-info' '\[FLASH\] slot1=' 4
         Write-Host '[VERIFY] flash-info'
         Write-Host $flash
+        $validSlot = $flash -match '\[FLASH\] (slot[01]|legacy_slot0)=VALID'
+        $blankSlots = [regex]::Matches($flash, '\[FLASH\] (slot[01]|legacy_slot0)=BLANK').Count
         if ($flash -notmatch '\[FLASH\][^\r\n]*guard=OK' -or
-            $flash -notmatch '\[FLASH\] (slot[01]|legacy_slot0)=VALID') {
+            (-not $validSlot -and $blankSlots -ne 3)) {
             throw 'Flash guard or configuration slot verification failed.'
+        }
+        if ($expectedBuild) {
+            $version = Read-PicoReply $serial 'version' '\[VERSION\]' 4
+            Write-Host $version
+            $buildPattern = 'build=' + [regex]::Escape($expectedBuild) + '(\s|$)'
+            if ($version -notmatch $buildPattern) {
+                throw 'Firmware build identity does not match the selected UF2.'
+            }
         }
 
         if ($IncludeAlarms) {
@@ -130,7 +148,7 @@ if ($Build) {
             throw "Bluetooth build script missing: $buildBt"
         }
         Write-Host '[UPDATE] Building Bluetooth A2DP firmware (build-bt) ...'
-        & $buildBt -JblAddress $JblAddress -Mp3:$Mp3
+        & $buildBt -JblAddress $JblAddress -Mp3:$Mp3 -NoWifi:$NoWifi
         if (-not $?) { throw 'Bluetooth build failed. Nothing was flashed.' }
     } else {
         if (-not (Test-Path -LiteralPath $Cmake -PathType Leaf)) {
@@ -146,6 +164,10 @@ if (-not (Test-Path -LiteralPath $Uf2 -PathType Leaf)) {
     throw "UF2 not found: $Uf2. Build first or use -Build."
 }
 $file = Get-Item -LiteralPath $Uf2
+$buildIdentity = [IO.Path]::ChangeExtension($Uf2, '.build-id.txt')
+if (Test-Path -LiteralPath $buildIdentity) {
+    $expectedBuild = (Get-Content -LiteralPath $buildIdentity -Raw).Trim()
+}
 if ($file.Length -lt 512 -or $file.Length % 512 -ne 0) {
     throw "UF2 size looks invalid ($($file.Length) bytes). Nothing was flashed."
 }
@@ -199,7 +221,7 @@ while ($timer.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
     Start-Sleep -Milliseconds 500
     if ($Port -notin [System.IO.Ports.SerialPort]::GetPortNames()) { continue }
     try {
-        $null = Test-PicoFirmware $Port $false
+        $null = Test-PicoFirmware $Port $true
         $verified = $true
         break
     } catch {

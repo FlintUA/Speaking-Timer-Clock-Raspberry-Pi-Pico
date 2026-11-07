@@ -3,9 +3,9 @@
 #include <stdint.h>
 
 // Mirrors source/v3/config.py: five daily alarms, default OFF at 07..11:00.
-// Music tracks are 1..45, from DFPlayer music folder 08.
+// Music tracks are 1..255, from folder 08; the editor uses detected count.
 #define CLOCK_ALARM_COUNT 5u
-#define CLOCK_ALARM_MAX_TRACK 45u
+#define CLOCK_ALARM_MAX_TRACK 255u
 
 typedef enum {
     ALARM_SOUND_SIGNAL = 0,
@@ -17,7 +17,7 @@ typedef struct {
     uint8_t hour;   // 0..23
     uint8_t minute; // 0..59
     alarm_sound_t sound;
-    uint8_t track;  // 1..45, used only for music
+    uint8_t track;  // 1..255, used only for music
 } alarm_entry_t;
 
 // Uses the entire calendar date and clock minute. This state is RAM-only.
