@@ -579,3 +579,23 @@ Still pending: firmware SDK compile, audible multi-track alarm,
 button stop, failover on real BT loss, live RTC-scheduled trigger,
 non-Bluetooth regression tests. Do not use the new audio path for
 critical waking until failure scenarios have been exercised.
+
+
+## PCM over-consumption diagnosis - first fault capture
+
+After successful shared-sequence regression on COM8 at 11:41-11:42,
+the independent PCM produced counter established two transient faults:
+`55036 written / 55676 consumed`, and
+`362879 written / 364159 consumed`, both buffered=0 with
+underruns=0. The ring pop source only counts real PCM frames read; SBC
+zero padding cannot directly explain `consumed > produced`.
+
+Added first-fault state capture to `pcm_ring.c`, with no stdout inside
+the BTstack callback; new `clock_pcm_ring_diagnostics()` returns a
+snapshot and MP3 status logs it as `[PCM-DIAG] FIRST_FAULT`.
+First-fault code 1=invariant, 2=reentrant pop, 3=reset overlap,
+4=invalid ring bounds; phase 1=push entry, 2=pop entry,
+3=pop exit, 4=reset; also records request/take, indices and
+max callback depth. Exact primary root cause remains unknown.
+The audio transport, MP3 decoder, gain, SBC rate, fallback and alarm
+priority are unchanged. Needs fresh COM8 run and SDK build check.
