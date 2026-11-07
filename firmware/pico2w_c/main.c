@@ -2233,7 +2233,7 @@ static void handle_command(char *line) {
         printf("[AUTO-AUDIO] Hourly VOICE output=JBL_PREFERRED, stream=%s; "
                "LOCAL fallback (RAM only)\n",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
-        puts("[AUTO-AUDIO] Chime, half-hour, timer, alarms and music still LOCAL");
+        puts("[AUTO-AUDIO] Chime/half-hour/music stay LOCAL; timer/alarm have independent opt-in");
 #else
         puts("[AUTO-AUDIO] Requires Bluetooth A2DP");
 #endif
@@ -2262,7 +2262,7 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "audio-select jbl") == 0) {
         audio_router_select(&audio_router, AUDIO_OUTPUT_BT_JBL);
         audio_router_bluetooth_state(&audio_router, clock_a2dp_stream_active());
-        puts("[AUDIO-ROUTE] Requested BT_JBL (manual say and route-test only; automatic alarms remain LOCAL)");
+        puts("[AUDIO-ROUTE] Requested BT_JBL for manual say and route-test only (alarm-audio separate)");
 #endif
     } else if (strncmp(line, "audio-route-test ", 17) == 0) {
         // Explicit test of one queued track through the selected audio output.
@@ -2315,7 +2315,7 @@ static void handle_command(char *line) {
                audio_router_name(audio_router.requested),
                audio_router_name(audio_router.effective),
                audio_router.bt_connected ? "STREAM_ACTIVE" : "OFFLINE");
-        puts("[AUDIO-ROUTE] NOTE: manual say + audio-route-test use selected output; automatic speech/music/alarms stay LOCAL");
+        puts("[AUDIO-ROUTE] NOTE: manual say + route-test use this preference; auto/timer/alarm have independent settings");
 #ifdef CLOCK_ENABLE_A2DP
         printf("[BT-ALARM] preferred=%s running=%s segment=%u/%u\n",
                alarm_audio_jbl_enabled ? "JBL" : "LOCAL",
