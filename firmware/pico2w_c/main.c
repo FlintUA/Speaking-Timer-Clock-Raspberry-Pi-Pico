@@ -3285,7 +3285,7 @@ int main(void) {
             snprintf(bottom, sizeof(bottom), "%s",
                      menu_audio_name(menu_audio_index));
         } else if (menu_state == MENU_EDIT_AUDIO_OUTPUT) {
-            snprintf(top, sizeof(top), "OUTPUT %s",
+            snprintf(top, sizeof(top), "OUT %s",
                      menu_audio_name(menu_audio_index));
             snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
                      menu_audio_jbl_choice ? "JBL" : "LOCAL");
