@@ -2727,6 +2727,9 @@ static void handle_command(char *line) {
                 puts("[BT-SELECT] Use bt-use N, bt-use <exact discovered name>, or bt-use XX:XX:XX:XX:XX:XX");
             }
         }
+    } else if (strcmp(line, "bt-forget") == 0) {
+        puts("[BT-KNOWN] Usage: bt-forget <known device number or MAC>; run bt-known first");
+        bt_scan_list();
     } else if (strncmp(line, "bt-forget ", 10) == 0) {
         const char *argument = line + 10;
         unsigned index = 0u;
