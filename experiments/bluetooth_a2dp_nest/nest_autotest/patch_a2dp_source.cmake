@@ -18,10 +18,6 @@ set(_new_scan_function [=[
 #include "clock_a2dp_control.h"
 // Flash v5 overrides the legacy build-time default at boot.
 static char clock_autoconnect_target[18] = "__CLOCK_AUTO_TARGET__";
-// Independent BT volume 0..30. No unsolicited AVRCP volume changes on connect.
-static uint8_t clock_bt_volume = 16u;
-static bool clock_bt_pcm_fallback = true;
-static uint8_t clock_bt_remote_volume = 255u;
 bool clock_a2dp_avrcp_available(void){ return media_tracker.avrcp_cid != 0; }
 uint8_t clock_a2dp_volume(void){ return clock_bt_volume; }
 uint8_t clock_a2dp_remote_volume(void){ return clock_bt_remote_volume; }
@@ -336,6 +332,11 @@ static void produce_audio(int16_t * pcm_buffer, int num_samples){
 #ifdef VOLUME_REDUCTION
 ]=])
 set(_new_produce [=[
+// Independent BT volume 0..30. No unsolicited AVRCP volume changes on connect.
+static uint8_t clock_bt_volume = 16u;
+static bool clock_bt_pcm_fallback = true;
+static uint8_t clock_bt_remote_volume = 255u;
+
 /* Clock A2DP experiment: 300 ms tone followed by PCM silence. */
 static uint32_t clock_tone_samples_remaining;
 static bool clock_tone_finished_logged;
