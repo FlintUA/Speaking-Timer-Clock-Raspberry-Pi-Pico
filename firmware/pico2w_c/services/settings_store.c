@@ -33,7 +33,8 @@ _Static_assert(LEGACY_SLOT_OFFSET + FLASH_SECTOR_SIZE <= PICO_FLASH_BANK_STORAGE
                "Legacy clock Flash overlaps BTstack storage");
 #endif
 #define RECORD_MAGIC 0x53434c4bu /* SCLK */
-#define RECORD_VERSION 4u
+#define RECORD_VERSION 5u
+#define RECORD_V4 4u
 #define RECORD_V3 3u
 #define RECORD_V1 1u
 #define RECORD_V2 2u
@@ -85,10 +86,27 @@ typedef struct {
     uint32_t crc32;
 } settings_record_v4_t;
 
+// v5 extends v4 by a six-byte Bluetooth sink address. Two reserved bytes
+// keep the CRC naturally aligned; v1-v4 are still read using their own CRC.
+typedef struct {
+    uint32_t magic, version, sequence;
+    uint8_t language, volume, exact_hour, quiet_enabled;
+    uint8_t quiet_start, quiet_end, half_hour_enabled, clock_mode;
+    uint8_t alarms[CLOCK_ALARM_COUNT][5];
+    uint8_t reserved[3];
+    uint8_t audio_manual_jbl, audio_hourly_jbl;
+    uint8_t audio_timer_jbl, audio_alarm_jbl;
+    uint8_t bt_target_addr[6];
+    uint8_t reserved_v5[2];
+    uint32_t crc32;
+} settings_record_v5_t;
+
 _Static_assert(sizeof(settings_record_t) == 52, "Unexpected v3 size");
 _Static_assert(offsetof(settings_record_t, crc32) == 48, "Unexpected v3 CRC offset");
 _Static_assert(sizeof(settings_record_v4_t) == 56, "Unexpected v4 size");
 _Static_assert(offsetof(settings_record_v4_t, crc32) == 52, "Unexpected v4 CRC offset");
+_Static_assert(sizeof(settings_record_v5_t) == 64, "Unexpected v5 size");
+_Static_assert(offsetof(settings_record_v5_t, crc32) == 60, "Unexpected v5 CRC offset");
 
 static uint32_t record_crc_bytes(const void *data, size_t length) {
     uint32_t crc = 0xffffffffu;
@@ -111,7 +129,7 @@ static const uint8_t *slot_bytes(unsigned slot) {
     return (const uint8_t *)(uintptr_t)(XIP_BASE + slot_offset(slot));
 }
 
-static bool record_valid(const settings_record_v4_t *r) {
+static bool record_valid(const settings_record_v5_t *r) {
     if (r->magic != RECORD_MAGIC || r->language > 1u ||
         r->volume > 30u || r->exact_hour > 1u) return false;
     if (r->version == RECORD_V1) {
@@ -127,7 +145,8 @@ static bool record_valid(const settings_record_v4_t *r) {
                (old.reserved == 0xffu || old.reserved <= 1u) &&
                old.crc32 == record_crc_bytes(&old, offsetof(settings_record_v2_t, crc32));
     }
-    if (r->version != RECORD_V3 && r->version != RECORD_VERSION) return false;
+    if (r->version != RECORD_V3 && r->version != RECORD_V4 &&
+        r->version != RECORD_VERSION) return false;
     if (r->quiet_enabled > 1u || r->quiet_start > 23u ||
         r->quiet_end > 23u || r->half_hour_enabled > 1u ||
         r->clock_mode > 1u) return false;
@@ -145,14 +164,22 @@ static bool record_valid(const settings_record_v4_t *r) {
     }
     if (r->audio_manual_jbl > 1u || r->audio_hourly_jbl > 1u ||
         r->audio_timer_jbl > 1u || r->audio_alarm_jbl > 1u) return false;
-    return r->crc32 == record_crc_bytes(r, offsetof(settings_record_v4_t, crc32));
+    if (r->version == RECORD_V4) {
+        settings_record_v4_t old;
+        memcpy(&old, r, sizeof(old));
+        return old.crc32 == record_crc_bytes(&old, offsetof(settings_record_v4_t, crc32));
+    }
+    if (r->reserved_v5[0] != 0xffu || r->reserved_v5[1] != 0xffu)
+        return false;
+    return r->crc32 == record_crc_bytes(r, offsetof(settings_record_v5_t, crc32));
 }
 
-static size_t record_size(const settings_record_v4_t *r) {
+static size_t record_size(const settings_record_v5_t *r) {
     if (r->version == RECORD_V1) return sizeof(settings_record_v1_t);
     if (r->version == RECORD_V2) return sizeof(settings_record_v2_t);
     if (r->version == RECORD_V3) return sizeof(settings_record_t);
-    return sizeof(settings_record_v4_t);
+    if (r->version == RECORD_V4) return sizeof(settings_record_v4_t);
+    return sizeof(settings_record_v5_t);
 }
 
 static bool sector_blank(unsigned slot) {
@@ -166,7 +193,7 @@ static bool sector_blank(unsigned slot) {
 static bool sector_owned(unsigned slot) {
     // A valid header alone is insufficient: don't erase a sector containing
     // unrelated data after our record page (e.g. a legacy filesystem).
-    settings_record_v4_t r;
+    settings_record_v5_t r;
     const uint8_t *bytes = slot_bytes(slot);
     memcpy(&r, bytes, sizeof(r));
     if (!record_valid(&r)) return false;
@@ -185,13 +212,13 @@ bool settings_store_layout_safe(void) {
            image_end < limit;
 }
 
-static bool newest_valid(unsigned *slot, settings_record_v4_t *result) {
+static bool newest_valid(unsigned *slot, settings_record_v5_t *result) {
     // Include the old slot0 as a read-only fallback so the existing clock
     // configuration survives its first firmware upgrade with the new map.
     bool have = false;
     for (unsigned candidate = 0u; candidate < 3u; ++candidate) {
         if (!sector_owned(candidate)) continue;
-        settings_record_v4_t record;
+        settings_record_v5_t record;
         memcpy(&record, slot_bytes(candidate), sizeof(record));
         if (!have || (int32_t)(record.sequence - result->sequence) > 0) {
             *slot = candidate; // 2 means legacy, never a write target.
@@ -222,7 +249,7 @@ void settings_store_print_info(void) {
            (unsigned long)(uintptr_t)&__flash_binary_end,
            settings_store_layout_safe() ? "OK" : "FAIL");
     for (unsigned i = 0; i < 3u; ++i) {
-        settings_record_v4_t r;
+        settings_record_v5_t r;
         memcpy(&r, slot_bytes(i), sizeof(r));
         bool owned = sector_owned(i);
         printf("[FLASH] %s=%s sequence=%lu version=%lu offset=0x%08lx%s\n",
@@ -309,7 +336,7 @@ void settings_store_dump_tail(void) {
 settings_store_result_t settings_store_load(clock_settings_t *out) {
     if (!settings_store_layout_safe()) return SETTINGS_STORE_IMAGE_OVERLAP;
     unsigned slot;
-    settings_record_v4_t r;
+    settings_record_v5_t r;
     if (!newest_valid(&slot, &r)) return SETTINGS_STORE_EMPTY;
     if (out) {
         // Older versions have no audio preferences. Zero all fields before
@@ -328,7 +355,8 @@ settings_store_result_t settings_store_load(clock_settings_t *out) {
         out->clock_mode = r.version == RECORD_V1 || r.clock_mode == 0xffu
                               ? 0u : r.clock_mode;
         alarm_defaults(out->alarms);
-        if ((r.version == RECORD_V3 || r.version == RECORD_VERSION)) {
+        if (r.version == RECORD_V3 || r.version == RECORD_V4 ||
+            r.version == RECORD_VERSION) {
             for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
                 const uint8_t *src = r.alarms[i];
                 out->alarms[i].enabled = src[0] != 0u;
@@ -338,12 +366,14 @@ settings_store_result_t settings_store_load(clock_settings_t *out) {
                 out->alarms[i].track = src[4];
             }
         }
-        if (r.version == RECORD_VERSION) {
+        if (r.version == RECORD_V4 || r.version == RECORD_VERSION) {
             out->audio_manual_jbl = r.audio_manual_jbl;
             out->audio_hourly_jbl = r.audio_hourly_jbl;
             out->audio_timer_jbl = r.audio_timer_jbl;
             out->audio_alarm_jbl = r.audio_alarm_jbl;
         }
+        if (r.version == RECORD_VERSION)
+            memcpy(out->bt_target_addr, r.bt_target_addr, sizeof(out->bt_target_addr));
     }
     return SETTINGS_STORE_OK;
 }
@@ -371,14 +401,14 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
         if (!alarm_entry_valid(&cfg->alarms[i])) return SETTINGS_STORE_UNSUPPORTED;
     }
     unsigned active_slot;
-    settings_record_v4_t current;
+    settings_record_v5_t current;
     bool valid = newest_valid(&active_slot, &current);
     // A legacy record is never a destination: first new save targets slot0.
     unsigned dest = valid && active_slot < 2u ? (1u - active_slot) : 0u;
     // Never erase unknown content; applies even after a first good save.
     // In particular, never touch BTstack -3/-2 or the legacy -4 sector.
     if (!sector_blank(dest)) {
-        settings_record_v4_t existing;
+        settings_record_v5_t existing;
         memcpy(&existing, slot_bytes(dest), sizeof(existing));
         if (!sector_owned(dest)) return SETTINGS_STORE_OCCUPIED;
     }
@@ -387,7 +417,7 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
         .offset = dest ? SLOT1_OFFSET : SLOT0_OFFSET
     };
     memset(context.page, 0xff, sizeof(context.page));
-    settings_record_v4_t r = {
+    settings_record_v5_t r = {
         .magic = RECORD_MAGIC,
         .version = RECORD_VERSION,
         .sequence = valid ? current.sequence + 1u : 1u,
@@ -403,7 +433,8 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
         .audio_hourly_jbl = cfg->audio_hourly_jbl,
         .audio_timer_jbl = cfg->audio_timer_jbl,
         .audio_alarm_jbl = cfg->audio_alarm_jbl,
-        .reserved = {0xffu, 0xffu, 0xffu}
+        .reserved = {0xffu, 0xffu, 0xffu},
+        .reserved_v5 = {0xffu, 0xffu}
     };
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
         const alarm_entry_t *a = &cfg->alarms[i];
@@ -413,13 +444,14 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
         r.alarms[i][3] = (uint8_t)a->sound;
         r.alarms[i][4] = a->track;
     }
-    r.crc32 = record_crc_bytes(&r, offsetof(settings_record_v4_t, crc32));
+    memcpy(r.bt_target_addr, cfg->bt_target_addr, sizeof(r.bt_target_addr));
+    r.crc32 = record_crc_bytes(&r, offsetof(settings_record_v5_t, crc32));
     memcpy(context.page, &r, sizeof(r));
 
     int rc = flash_safe_execute(flash_write_callback, &context, 5000u);
     if (rc != PICO_OK) return SETTINGS_STORE_FLASH_ERROR;
 
-    settings_record_v4_t verify;
+    settings_record_v5_t verify;
     memcpy(&verify, slot_bytes(dest), sizeof(verify));
     if (!sector_owned(dest) || verify.sequence != r.sequence ||
         memcmp(&verify, &r, sizeof(r)) != 0) return SETTINGS_STORE_VERIFY_ERROR;
