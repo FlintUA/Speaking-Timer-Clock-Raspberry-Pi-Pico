@@ -1270,3 +1270,60 @@ test without replay. Reboot starts in LOCAL mode. Test an actual
 disconnect only after the normal JBL vs local test passes. Physical
 compilation/COM8 and disconnection recovery **still unverified** for this
 new revision. Do not test with a critical pending alarm.
+
+
+## Manual multi-fragment speech on JBL (experimental, 2026-11-07)
+
+The selected `audio_router_t` is now used for **manual spoken time**
+(`say HH MM`, `say`, and the MODE-triggered manual announcement).
+The established speech planner selects the same RU/DE hour/minute MP3
+filenames as the DFPlayer queue, but the manual JBL path plays each
+fragment through the existing Helix -> stereo PCM ring -> 44.1kHz
+resampler -> BTstack A2DP path. The next fragment does not start until
+the previous decoder has completed and its PCM ring has drained.
+Bluetooth gain remains **53.3%**, independent of DFPlayer volume.
+
+**Only manual speech is routed in this stage.** Automatic hourly time
+announcements, timer messages, scheduled alarms, chimes and music
+continue through DFPlayer. The router remains RAM-only and defaults to
+LOCAL after boot. Use the following COM8 sequence:
+
+```text
+sd-test
+bt-status
+audio-select jbl
+audio-route
+say 08 25
+audio-route
+mp3-status
+audio-select local
+say 08 25
+```
+
+Expected logs for the Bluetooth case:
+
+```text
+[BT-SPEECH] START 08:25 segments=2, gain=53.3%
+[BT-SPEECH] SEGMENT 1/2 01/008.mp3
+[MP3-PLAY] COMPLETE; resuming A2DP silence
+[BT-SPEECH] SEGMENT 2/2 02/025.mp3
+[MP3-PLAY] COMPLETE; resuming A2DP silence
+[BT-SPEECH] COMPLETE, all segments delivered
+```
+
+If JBL is unavailable at `say` time, manual speech uses the existing
+DFPlayer queue. If Bluetooth disconnects during a sequence, the active
+fragment is replayed **from the start**, followed by any remaining
+fragments through DFPlayer. Audio priority checks cancel the Bluetooth
+sequence if a timer/alarm/music/local playback takes precedence.
+`audio-select local` while a manual JBL sequence plays requeues its
+remaining segments on DFPlayer. `mp3-stop` cancels the manual sequence.
+Starting another MP3 or route-test during a pending speech sequence
+is refused.
+
+The `status 0x04` A2DP connection failure reported during prior
+experiments is still not root-caused. Bluetooth ready means an actual
+running 44.1kHz A2DP stream, not merely an accepted reconnect request.
+Please test normal two-fragment playback before testing disconnect
+fallback. This new sequence-routing change is committed but **not yet
+built or tested on the physical board**.
