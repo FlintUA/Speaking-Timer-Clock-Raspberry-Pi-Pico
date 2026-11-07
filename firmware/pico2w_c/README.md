@@ -1494,3 +1494,51 @@ failure but deserves a separate instrumentation review.
 **Not yet hardware verified**: new compile, simulated alarm audio
 through both outputs, physical ALARM press during Bluetooth MP3,
 live scheduled alarm at RTC boundary, mid-track disconnect fallback.
+
+
+## Audio stabilization refactor - shared BT sequence executor (2026-11-07)
+
+After COM8 validated physical ALARM-button stop and A2DP-loss failover
+with DFPlayer replay, the three MP3 multi-track owners (manual/hourly
+speech, timer and alarm) now use a **single** `bt_sequence_step()`
+executor in `main.c`. That function handles exactly one MP3 file
+start, advances only after `mp3_play_active()` clears at EOF and logs
+`SEGMENT N/M`. Owner-specific priority, stop, fallback, completion,
+and `alarm_stop` semantics remain separate. This deliberately narrow
+first refactor avoids changing tested alarm safety and local fallback.
+Log tags `[BT-SPEECH]`, `[BT-TIMER]`, `[BT-ALARM]` are preserved.
+
+The PCM ring now tracks successful writes in an independent
+`clock_pcm_ring_produced()` counter. Each active `mp3_play_status`
+snapshot compares:
+- decoder output/pushed frames against independently counted ring writes
+- ring reads against ring writes
+- writes minus reads against current buffered frames
+
+If those invariants disagree, log:
+```text
+[PCM-DIAG] INVARIANT_MISMATCH pushed=... ring_written=... read=... buffered=...
+```
+This is diagnostic-only: no changes to MP3 decode, resampling, SBC
+packet data, audio gain or underrun detection. It is designed to
+investigate the previously observed `consumed > output` values
+without pretending that EOF padding explains the difference.
+
+**Test after recompilation**:
+```text
+sd-test
+bt-status
+audio-select jbl
+say 08 25
+timer-audio jbl
+t 8
+start
+alarm-audio jbl
+alarm-audio-test 1
+```
+Run each test after previous playback/timeout has completed. The
+simulated alarm can be stopped via ALARM button or `alarm-stop`.
+Check `[PCM-DIAG]` lines and report the full MP3 status records.
+Try the loss-of-JBL test only after normal output remains correct.
+No flash preferences were added and no real-time RTC settings changed.
+These changes are committed but **not yet compiled or tested on Pico**.
