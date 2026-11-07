@@ -2037,6 +2037,18 @@ static void handle_command(char *line) {
         puts("[MP3-PLAY] SD diagnostics blocked while MP3 playback is active");
         return;
     }
+    // A ringtone must never be interrupted by a diagnostic PCM command.
+    // alarm-stop, physical ALARM button, and switching to LOCAL remain valid.
+#ifdef CLOCK_ENABLE_A2DP
+    if (alarm_active_index >= 0 &&
+        (strcmp(line, "bt-tone") == 0 || strcmp(line, "bt-clip") == 0 ||
+         strcmp(line, "bt-silence") == 0 ||
+         strcmp(line, "mp3-stop") == 0 || strcmp(line, "mp3-pause") == 0 ||
+         strcmp(line, "mp3-resume") == 0)) {
+        puts("[BT-ALARM] Diagnostic playback blocked while alarm rings; use alarm-stop");
+        return;
+    }
+#endif
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "bootsel arm") == 0) {
         bootsel_command("arm", now);
