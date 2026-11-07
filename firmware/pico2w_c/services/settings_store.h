@@ -14,8 +14,14 @@ typedef struct {
     uint8_t quiet_start; // 0..23
     uint8_t quiet_end;   // 0..23
     bool half_hour_enabled;
-    uint8_t clock_mode; // 0=VOICE, 1=CHIME (v2 reserved byte, FF=legacy VOICE)
-    alarm_entry_t alarms[CLOCK_ALARM_COUNT]; // v3 only; old v1/v2 load as defaults OFF
+    uint8_t clock_mode; // 0=VOICE, 1=CHIME
+    alarm_entry_t alarms[CLOCK_ALARM_COUNT]; // v3/v4; old v1/v2 defaults OFF
+    // v4: independent preferred output flags. 0=LOCAL, 1=A2DP JBL.
+    // Flash stores preferences, not connection state; LOCAL fallback remains mandatory.
+    uint8_t audio_manual_jbl;
+    uint8_t audio_hourly_jbl;
+    uint8_t audio_timer_jbl;
+    uint8_t audio_alarm_jbl;
 } clock_settings_t;
 
 typedef enum {
