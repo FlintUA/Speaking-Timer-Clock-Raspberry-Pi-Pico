@@ -338,3 +338,16 @@ User tested assembled Pico 2 W via COM8 with optional `-Build -Bluetooth -Mp3` i
 **Verified:** Helix decodes MP3 bytes read directly from SPI/FAT32 into RAM while A2DP stays connected and RTC advances. The 4096 frames represent 85.33 ms of 48kHz source stereo audio. The measured ~100.42 ms includes ~90.35 ms initial frame decoding and setup, so the incremental 16-block phase cost was ~10.07 ms (not an end-to-end continuous real-time benchmark).
 
 **Next engineering work:** buffer decoded PCM outside BT callback, avoid synchronous SPI/MP3 decode inside BTstack, convert source 48000 Hz to negotiated 44100 Hz via a bounded resampler, integrate a ring-buffer consumer with A2DP and track underruns/CPU budget. Keep 10% initial volume and DFPlayer fallback. Need continuous 30-60s test; initial probe alone does not establish glitch-free playback. New clock A/B slots remain BLANK with valid read-only legacy record.
+
+
+## MP3-to-JBL PCM ring integration staged (2026-11-07)
+
+After successful on-device Helix decode-only test (48kHz / 192kbps, 4096 frames, ~100ms including initialization), committed an **experimental five-second** MP3 playback path:
+- New `audio/pcm_ring.c/.h`: 8192-frame stereo PCM queue at the Bluetooth sink's 44100Hz (~186ms capacity), underrun and consumed-frame counters.
+- `audio/mp3_probe.c` now includes a separate `mp3-play` mode, decoding at most five seconds from FAT32 using 256-source-frame batches in the cooperative main loop. It skips the Helix MP3 probe mode while playing, and does not perform SD/MP3 decode inside the A2DP callback.
+- Fixed-point/integer phase linear interpolation between source samples converts 48000 Hz or accepts 44100 Hz; decoded PCM is queued as two-channel signed 16-bit. Intermediate multiplication uses 64-bit integer arithmetic to avoid overflow. Only 44.1kHz negotiated A2DP is accepted.
+- The BTstack generated-source patch now pops ready PCM from ring in `produce_audio` (ahead of test tone/clip), still applies the existing global 10% PCM output amplitude before SBC.
+- Commands: `mp3-play 07/001.mp3`, `mp3-status`, `mp3-stop`. Playback refuses if Bluetooth inactive, sound muted, timer/alarm/music/DFPlayer audio active, and is stopped if these higher-priority clock states arise or A2DP disconnects. SD diagnostic commands refuse during playback, because FAT32 uses a shared sector buffer.
+- Startup prebuffer target 4096 stereo frames, max test duration five seconds. Ring underruns and CPU decode time are reported. Source stops and transitions to SBC silence after draining.
+- Existing MP3-free build remains functional with no file output; `-Build -Bluetooth -Mp3` is required for the new experiment. Same external pinned Helix decoder checkout.
+- **Not yet verified**: compilation, UF2 update, actual JBL audio, audible level, timer priority in live use, underrun counts and longer-session stability. Keep rollback UF2. Before playback run `sd-test` and confirm A2DP stream ACTIVE. Use `mp3-stop` if anomalies arise. No Flash writes, changes to DFPlayer mapping, or mandatory startup MP3 playback.
