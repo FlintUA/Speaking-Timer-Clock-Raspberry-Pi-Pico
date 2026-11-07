@@ -194,6 +194,11 @@ static bool clock_clip_finished_logged;
 // Short, flash-resident original two-note chime as signed 8-bit PCM.
 // The sample data are not a synthesized oscillator in the A2DP callback.
 #include "clock_pcm_clip.h"
+// Cooperative PCM ring: the BTstack callback consumes only ready RAM samples.
+// Never touch SD SPI or Helix from this callback.
+#include "pcm_ring.h"
+
+uint32_t clock_a2dp_current_rate(void){ return (uint32_t)current_sample_rate; }
 
 bool clock_a2dp_play_clip(void){
     if (!clock_a2dp_stream_running || !audio_generator_state.initialized) return false;
@@ -233,12 +238,14 @@ bool clock_a2dp_stream_active(void){
 void clock_a2dp_print_status(void){
     printf("[INFO] A2DP stream: %s; audio: %s; sample rate: %d Hz; samples remaining: %lu\n",
            clock_a2dp_stream_running ? "ACTIVE" : "INACTIVE",
-           clock_clip_playing ? "PCM_CLIP" : (clock_tone_samples_remaining ? "TONE" : "SILENCE"),
+           clock_pcm_ring_active() ? "MP3_PCM" : (clock_clip_playing ? "PCM_CLIP" : (clock_tone_samples_remaining ? "TONE" : "SILENCE")),
            current_sample_rate, (unsigned long)clock_tone_samples_remaining);
 }
 
 static void produce_audio(int16_t * pcm_buffer, int num_samples){
-    if (clock_clip_playing){
+    if (clock_pcm_ring_active()){
+        clock_pcm_ring_pop(pcm_buffer, (uint32_t)num_samples);
+    } else if (clock_clip_playing){
         int i = 0;
         while (i < num_samples && clock_clip_playing){
             uint32_t sample_position = (uint32_t)(((uint64_t)clock_clip_frames_played * CLOCK_CLIP_RATE) /
@@ -339,6 +346,7 @@ set(_new_stop [=[
             clock_a2dp_stream_running = false;
             clock_tone_samples_remaining = 0;
             clock_clip_playing = false;
+            clock_pcm_ring_set_active(false);
             a2dp_demo_timer_stop(&media_tracker);
             break;
 ]=])
