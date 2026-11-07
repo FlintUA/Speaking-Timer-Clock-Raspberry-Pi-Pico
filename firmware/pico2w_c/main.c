@@ -1008,8 +1008,15 @@ static void set_clock_mode(uint8_t requested, uint64_t now) {
 static bool volume_for_bluetooth(void) {
 #ifdef CLOCK_ENABLE_A2DP
     if (!clock_a2dp_stream_active()) return false;
+    // An active Bluetooth audio owner has priority over LOCAL standby
+    // states. The MUSIC-UI itself is DFPlayer-only even if the user's
+    // manual output preference remains Bluetooth.
     if (bt_timer_running || bt_alarm_running || bt_speech_running ||
         routed_test_pending || mp3_play_active()) return true;
+    if (music_ui_open || music_ui_playing) return false;
+    // Other active DFPlayer output must not accidentally adjust a remote
+    // speaker just because A2DP stays connected and idle.
+    if (!audio_queue_idle(&audio_queue) || dfplayer_busy()) return false;
     if (timer.running && !timer_audio_jbl_enabled) return false;
     if (alarm_active_index >= 0 && !alarm_audio_jbl_enabled) return false;
     return audio_router.requested == AUDIO_OUTPUT_BT_JBL;
