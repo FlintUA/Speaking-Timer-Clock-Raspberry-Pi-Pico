@@ -202,11 +202,11 @@ static void mp3_play_service(void) {
                 // Integer phase prevents drift across decoder blocks.
                 while (play_phase < play_dst_rate) {
                     int32_t l = (int32_t)play_prev_l +
-                        ((int32_t)(left - (int32_t)play_prev_l) *
-                         (int32_t)play_phase) / (int32_t)play_dst_rate;
+                        ((int64_t)((int32_t)left - (int32_t)play_prev_l) *
+                         (int64_t)play_phase) / (int64_t)play_dst_rate;
                     int32_t r = (int32_t)play_prev_r +
-                        ((int32_t)(right - (int32_t)play_prev_r) *
-                         (int32_t)play_phase) / (int32_t)play_dst_rate;
+                        ((int64_t)((int32_t)right - (int32_t)play_prev_r) *
+                         (int64_t)play_phase) / (int64_t)play_dst_rate;
                     if (!clock_pcm_ring_push((int16_t)l, (int16_t)r)) {
                         puts("[MP3-PLAY] Ring overflow; stopping playback");
                         mp3_play_stop();
