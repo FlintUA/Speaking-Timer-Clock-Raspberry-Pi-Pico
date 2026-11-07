@@ -1892,6 +1892,9 @@ static void handle_command(char *line) {
         } else if (!sound_enabled || timer.running || alarm_active_index >= 0 ||
                    music_ui_open || !audio_queue_idle(&audio_queue) ||
                    dfplayer_busy() || mp3_play_active() ||
+#ifdef CLOCK_ENABLE_A2DP
+                   bt_speech_running || routed_test_pending ||
+#endif
                    mp3_probe_active() || sd_fat32_stream_active()) {
             puts("[AUTO-AUDIO] Test refused: clock/audio busy");
         } else {
