@@ -2833,6 +2833,13 @@ int main(void) {
     stdio_init_all();
     sleep_ms(3000); // Give VS Code Serial Monitor time to attach.
     printf("\n[BOOT] Speaking Clock C bring-up 0.1 (Pico 2 W)\n");
+#ifdef CLOCK_ENABLE_MP3
+    // Initialize SD before starting Bluetooth, avoiding a long missing-card
+    // command sequence while an A2DP media stream is already running.
+    // Failures are nonfatal; playback falls back to local DFPlayer.
+    if (!sd_spi_ensure_fat32())
+        puts("[SD-AUTO] Boot will continue with LOCAL audio fallback");
+#endif
 #ifdef CLOCK_ENABLE_A2DP
     puts("[BOOT] EXPERIMENTAL A2DP active; LOCAL DFPlayer still primary output");
     int bt_error = cyw43_arch_init();
@@ -2869,13 +2876,6 @@ int main(void) {
     alarm_defaults(alarms);
     alarm_scheduler_init(&alarm_scheduler);
     load_settings_at_boot();
-#ifdef CLOCK_ENABLE_MP3
-    // Autonomous remote audio: initialize the separate SPI1 microSD once
-    // before any timer/alarm/hourly playback. Failure is nonfatal since
-    // DFPlayer remains the local audio fallback.
-    if (!sd_spi_ensure_fat32())
-        puts("[SD-AUTO] Boot will continue with LOCAL audio fallback");
-#endif
     audio_queue_set_volume(&audio_queue, volume);
     puts("[AUDIO] DFPlayer UART0 GP16/17 BUSY GP18");
     puts("[AUTO] runtime=ON after boot; first observed RTC boundary will be consumed");
