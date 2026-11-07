@@ -1542,3 +1542,63 @@ Check `[PCM-DIAG]` lines and report the full MP3 status records.
 Try the loss-of-JBL test only after normal output remains correct.
 No flash preferences were added and no real-time RTC settings changed.
 These changes are committed but **not yet compiled or tested on Pico**.
+
+
+## First-fault PCM ring instrumentation (2026-11-07)
+
+COM8 regression logs on the shared `bt_sequence_step()` code:
+- Manual voice sequence 08:25 PASS (both MP3, zero underruns).
+- Timer start/end PASS; `[PCM-DIAG] INVARIANT_MISMATCH`
+  - folder 07/007: produced 55036, consumed 55676 (+640 frames)
+  - folder 07/013: produced 362879, consumed 364159 (+1280 frames)
+- Alarm 4-segment sequence PASS, no mismatch in that run.
+
+Review of `pcm_ring.c` established that `clock_pcm_ring_pop()`
+increments `consumed` by actual `take` only, not by silence padded to an
+SBC packet. This makes observed over-consumption an internal accounting
+violation, not an ordinary expected EOF padding total. A2DP generates
+PCM in `produce_audio()`, which calls `clock_pcm_ring_pop()` when
+the ring is active. The root cause has **not** been established.
+
+Diagnostic-only follow-up instrumented in `audio/pcm_ring.c` and
+`audio/mp3_probe.c`: record the **first** fault (only) as a bounded
+snapshot in the PCM ring without `printf` in the A2DP callback.
+Capture fault code, operation phase, produced/consumed/buffered values,
+head/tail, callback request/take, total pop calls, maximum nested pop
+depth and reset-overlap count. The next `mp3_play_status()` displays:
+
+```text
+[PCM-DIAG] FIRST_FAULT code=... phase=... written=... read=... buffered=... head=... tail=... request=... take=... calls=... max_depth=... reset_overlap=...
+```
+
+Codes:
+- 1: ring invariant `produced - consumed == buffered` broken
+- 2: reentrant `clock_pcm_ring_pop()` detected
+- 3: `clock_pcm_ring_reset()` called during active pop
+- 4: ring index/count out of bounds
+
+Phases: 1 before a PCM push, 2 before a pop, 3 after pop, 4 reset.
+When no mismatch occurs, `FIRST_FAULT` will not print. The old
+`INVARIANT_MISMATCH` line remains for backwards compatibility.
+Nothing is repaired/overwritten automatically - this is **diagnostics
+only** and is deliberately not enough to establish a root cause.
+
+Hardware check after rebuilding:
+```text
+sd-test
+bt-status
+audio-select jbl
+say 08 25
+timer-audio jbl
+t 8
+start
+```
+Allow each event to complete and capture **every** `[PCM-DIAG]` line.
+In particular, repeat the 07/007 and 07/013 timer cases 2-3 times.
+Avoid deliberate A2DP disconnect for this instrumentation baseline.
+If `max_depth` is greater than 1, investigate reentrant BTstack callbacks;
+if `reset_overlap` is nonzero, investigate PCM reset ownership; if
+neither appears, inspect first-fault phase and head/tail before proposing
+a fix.
+
+**Pending:** build/hardware verification and causal diagnosis.
