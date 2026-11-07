@@ -1602,3 +1602,39 @@ neither appears, inspect first-fault phase and head/tail before proposing
 a fix.
 
 **Pending:** build/hardware verification and causal diagnosis.
+
+## PCM shared count race fix - hardware verification required (2026-11-07)
+
+The 11:51-11:52 COM8 logs show deterministic `FIRST_FAULT code=1` with
+`max_depth=1 reset_overlap=0`. At the first fault on 07/007.mp3:
+`produced=29421, consumed=22272, count=7661`, even though
+`produced-consumed=7149`. Both `head` and `tail` independently agree
+with produced/consumed, so `count` was inflated by 512 frames.
+Repeats produced mismatches of 128-aligned lengths and no audio
+underruns. Evidence favors lost read-modify-write updates on the
+**shared** `count` variable as the ISR/BTstack callback consumes
+while the main loop produces. It does *not* prove exact interrupt
+timing; the new fix must be verified on actual Pico.
+
+In `audio/pcm_ring.c`, count and corresponding produced/consumed
+updates now run in the shortest possible
+`save_and_disable_interrupts()/restore_interrupts()` pair. PCM sample
+copying, resampling, A2DP callbacks and SBC encoding remain outside
+critical sections. `pcm_diag_check()` runs inside the same short
+section to prevent false positives from observing a partially updated
+counter pair. Added `hardware_sync` to `CMakeLists.txt`.
+
+**Next regression run**:
+```text
+sd-test
+bt-status
+timer-audio jbl
+t 8
+start
+```
+Repeat the timer test 3-5 times, allowing each finish clip to end.
+Expected: zero `[PCM-DIAG] INVARIANT_MISMATCH` or `FIRST_FAULT`
+messages, `output=consumed` at EOF, `underruns=0`.
+Then run `audio-select jbl` / `say 08 25` and
+`alarm-audio jbl` / `alarm-audio-test 1` to confirm other paths.
+**Not yet built or tested on Pico.**
