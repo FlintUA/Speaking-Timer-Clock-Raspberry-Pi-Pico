@@ -1375,3 +1375,62 @@ automatic feature is source-committed but **not yet compiled or
 hardware-verified**. Test simulated output before relying on an actual
 hour boundary. Never treat a Bluetooth announcement as a guaranteed
 alarm until explicit disconnect/preemption tests are completed.
+
+
+## Experimental timer audio routing (2026-11-07)
+
+Volatile opt-in `timer-audio jbl|local` controls only the timer's
+**start**, **cancel**, and **finish** speech. Default LOCAL on every reboot.
+The same `speech_enqueue_timer_start/cancel/finish` planners generate
+source folder/track numbers, including the existing German fallback for
+timer completion (folder 07, track 013). No changes to RTC, countdown
+timing, flash config, alarm audio or Bluetooth PCM gain (53.3%).
+
+The scheduler can now distinguish an MP3 file *owned by the timer*
+from an ordinary MP3 diagnostic: `timer.running` cancels unrelated
+experimental MP3 playback, but **not** the timer's own start voice.
+The Bluetooth timer producer runs in the cooperative main loop, not
+inside the BTstack callback; the next MP3 begins only after the
+previous MP3 drains completely. Before streaming it waits for the
+existing DFPlayer pause command/BUSY to clear, avoiding mixed playback.
+
+If Bluetooth isn't ready at event start, the existing DFPlayer queue
+plays the entire event. If it drops mid-event, `[BT-TIMER] LOCAL fallback`
+replays the interrupted fragment and the remainder locally. Alarm
+preemption cancels optional timer audio; actual timer counting is not
+cancelled by audio routing. `timer-audio local` during BT playback
+requeues unfinished timer speech on DFPlayer. All destination selection
+is RAM-only. Bluetooth manual speech and hourly speech still use their
+own independent preference controls.
+
+COM8 hardware sequence (first verify connected A2DP and microSD):
+```text
+sd-test
+bt-status
+timer-audio
+timer-audio jbl
+t 15
+start
+status
+```
+Allow 15 seconds for timer completion. Expect `[BT-TIMER] START
+output=JBL` / `SEGMENT` / `COMPLETE`, then `[TIMER] FINISHED` and
+`[BT-TIMER] FINISH output=JBL`. For cancel test:
+```text
+t 30
+start
+cancel
+```
+And verify the DFPlayer path:
+```text
+timer-audio local
+t 8
+start
+```
+Wait for `[TIMER] FINISHED`, listen for the local timer finish signal.
+Do not run the last three sequences simultaneously. With a charged
+speaker only, optionally force a disconnect during a **long enough**
+timer announcement to observe failover. Alarm events remain LOCAL.
+
+**Not yet confirmed on Pico:** new firmware compilation, real countdown
+trigger, event audio, mid-stream disconnect, alarm preemption.
