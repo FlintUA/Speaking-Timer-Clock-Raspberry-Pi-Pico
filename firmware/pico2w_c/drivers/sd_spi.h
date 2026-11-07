@@ -17,3 +17,8 @@ bool sd_spi_init_card(void);
 bool sd_spi_read_sector(uint32_t lba, uint8_t *sector512);
 const sd_spi_info_t *sd_spi_info(void);
 bool sd_spi_probe_fat(void);
+// Boot/playback preparation: initialize + FAT32 probe on demand.
+// Reuses an already ready card; failed attempts are rate-limited (30 s).
+// Safe only from the cooperative main loop, never an A2DP callback.
+bool sd_spi_ensure_fat32(void);
+
