@@ -11,6 +11,8 @@ bool mp3_probe_active(void);
  * Decoding happens only in main loop. A2DP drains a 44.1 kHz PCM ring.
  */
 bool mp3_play_start(const char *path, uint32_t a2dp_rate);
+// Hands-free pause/resume validation for short (~2 s) MP3 recordings.
+bool mp3_play_pause_test_start(const char *path, uint32_t a2dp_rate);
 void mp3_play_stop(void);
 bool mp3_play_pause(void);
 bool mp3_play_resume(void);
