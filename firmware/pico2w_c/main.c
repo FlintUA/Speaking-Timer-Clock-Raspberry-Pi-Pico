@@ -547,27 +547,15 @@ static void bt_timer_service(void) {
         bt_timer_fallback("LOCAL_AUDIO_PRIORITY");
         return;
     }
-    if (bt_timer_started) {
-        if (mp3_play_active()) return;
-        ++bt_timer_index;
-        bt_timer_started = false;
-    }
-    if (bt_timer_index >= bt_timer_count) {
+    bt_sequence_result_t step = bt_sequence_step(bt_timer_tracks, bt_timer_count,
+                                                  &bt_timer_index, &bt_timer_started,
+                                                  "BT-TIMER");
+    if (step == BT_SEQUENCE_COMPLETE) {
         bt_timer_running = false;
         puts("[BT-TIMER] COMPLETE");
-        return;
-    }
-    audio_track_t t = bt_timer_tracks[bt_timer_index];
-    char path[20];
-    snprintf(path, sizeof(path), "%02u/%03u.mp3",
-             (unsigned)t.folder, (unsigned)t.track);
-    if (!mp3_play_start(path, clock_a2dp_current_rate())) {
+    } else if (step == BT_SEQUENCE_FAILED) {
         bt_timer_fallback("MP3_OPEN_FAILED");
-        return;
     }
-    bt_timer_started = true;
-    printf("[BT-TIMER] SEGMENT %u/%u %s\n",
-           (unsigned)(bt_timer_index + 1u), (unsigned)bt_timer_count, path);
 }
 static void bt_speech_cancel(const char *reason) {
     if (!bt_speech_running) return;
@@ -637,27 +625,15 @@ static void bt_speech_service(void) {
         bt_speech_fallback("A2DP_UNAVAILABLE");
         return;
     }
-    if (bt_speech_track_started) {
-        if (mp3_play_active()) return;
-        ++bt_speech_index;
-        bt_speech_track_started = false;
-    }
-    if (bt_speech_index >= bt_speech_count) {
+    bt_sequence_result_t step = bt_sequence_step(bt_speech_tracks, bt_speech_count,
+                                                  &bt_speech_index, &bt_speech_track_started,
+                                                  "BT-SPEECH");
+    if (step == BT_SEQUENCE_COMPLETE) {
         bt_speech_running = false;
         puts("[BT-SPEECH] COMPLETE, all segments delivered");
-        return;
-    }
-    audio_track_t t = bt_speech_tracks[bt_speech_index];
-    char path[20];
-    snprintf(path, sizeof(path), "%02u/%03u.mp3", (unsigned)t.folder,
-             (unsigned)t.track);
-    if (!mp3_play_start(path, clock_a2dp_current_rate())) {
+    } else if (step == BT_SEQUENCE_FAILED) {
         bt_speech_fallback("MP3_OPEN_FAILED");
-        return;
     }
-    bt_speech_track_started = true;
-    printf("[BT-SPEECH] SEGMENT %u/%u %s\n",
-           (unsigned)(bt_speech_index + 1u), (unsigned)bt_speech_count, path);
 }
 #endif
 
@@ -1593,6 +1569,36 @@ static void alarm_status(void) {
 #ifdef CLOCK_ENABLE_A2DP
 // Alarm owns the MP3 playback while active. Playback state does not alter
 // the one-shot RTC scheduler or the persisted settings.
+// Shared MP3 sequence executor. Owners retain priority/fallback decisions.
+// Returns WAIT, STARTED, COMPLETE or FAILED; all disk/decoder work is in
+// the cooperative main loop, never in the A2DP callback.
+typedef enum {
+    BT_SEQUENCE_WAIT = 0,
+    BT_SEQUENCE_STARTED,
+    BT_SEQUENCE_COMPLETE,
+    BT_SEQUENCE_FAILED
+} bt_sequence_result_t;
+static bt_sequence_result_t bt_sequence_step(const audio_track_t *tracks,
+                                               uint8_t count, uint8_t *index,
+                                               bool *track_started,
+                                               const char *log_tag) {
+    if (*track_started) {
+        if (mp3_play_active()) return BT_SEQUENCE_WAIT;
+        ++*index;
+        *track_started = false;
+    }
+    if (*index >= count) return BT_SEQUENCE_COMPLETE;
+    audio_track_t track = tracks[*index];
+    char path[20];
+    snprintf(path, sizeof(path), "%02u/%03u.mp3",
+             (unsigned)track.folder, (unsigned)track.track);
+    if (!mp3_play_start(path, clock_a2dp_current_rate()))
+        return BT_SEQUENCE_FAILED;
+    *track_started = true;
+    printf("[%s] SEGMENT %u/%u %s\\n",
+           log_tag, (unsigned)(*index + 1u), (unsigned)count, path);
+    return BT_SEQUENCE_STARTED;
+}
 static void bt_alarm_stop(const char *reason) {
     if (!bt_alarm_running) return;
     if (bt_alarm_started && mp3_play_active()) mp3_play_stop();
@@ -1648,27 +1654,15 @@ static void bt_alarm_service(void) {
         bt_alarm_fallback("LOCAL_AUDIO_PRIORITY");
         return;
     }
-    if (bt_alarm_started) {
-        if (mp3_play_active()) return;
-        ++bt_alarm_index;
-        bt_alarm_started = false;
-    }
-    if (bt_alarm_index >= bt_alarm_count) {
+    bt_sequence_result_t step = bt_sequence_step(bt_alarm_tracks, bt_alarm_count,
+                                                  &bt_alarm_index, &bt_alarm_started,
+                                                  "BT-ALARM");
+    if (step == BT_SEQUENCE_COMPLETE) {
         bt_alarm_running = false;
         puts("[BT-ALARM] COMPLETE");
-        return;
-    }
-    audio_track_t t = bt_alarm_tracks[bt_alarm_index];
-    char path[20];
-    snprintf(path, sizeof(path), "%02u/%03u.mp3",
-             (unsigned)t.folder, (unsigned)t.track);
-    if (!mp3_play_start(path, clock_a2dp_current_rate())) {
+    } else if (step == BT_SEQUENCE_FAILED) {
         bt_alarm_fallback("MP3_OPEN_FAILED");
-        return;
     }
-    bt_alarm_started = true;
-    printf("[BT-ALARM] SEGMENT %u/%u %s\n",
-           (unsigned)(bt_alarm_index + 1u), (unsigned)bt_alarm_count, path);
 }
 #endif
 
