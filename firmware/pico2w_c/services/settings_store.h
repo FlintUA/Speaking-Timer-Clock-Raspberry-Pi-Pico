@@ -24,6 +24,8 @@ typedef struct {
     uint8_t audio_alarm_jbl;
     // v5: selected A2DP sink Bluetooth MAC (all zeros = legacy build target).
     uint8_t bt_target_addr[6];
+    // v6: independent Bluetooth volume step 0..30, legacy defaults to 16.
+    uint8_t bt_volume;
 } clock_settings_t;
 
 typedef enum {
