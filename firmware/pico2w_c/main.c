@@ -75,12 +75,12 @@ static audio_track_t bt_speech_tracks[2];
 static uint8_t bt_speech_count, bt_speech_index;
 static bool bt_speech_running, bt_speech_track_started;
 // Timer sounds have an independent nonblocking Bluetooth playback owner.
-// This preference is volatile and defaults to LOCAL after each reboot.
+// Persisted in Flash v4; older records default LOCAL.
 static bool timer_audio_jbl_enabled;
 static audio_track_t bt_timer_tracks[AUDIO_QUEUE_CAPACITY];
 static uint8_t bt_timer_count, bt_timer_index;
 static bool bt_timer_running, bt_timer_started;
-static bool alarm_audio_jbl_enabled; // RAM-only, defaults LOCAL.
+static bool alarm_audio_jbl_enabled; // Persisted in Flash v4; default LOCAL.
 static audio_track_t bt_alarm_tracks[AUDIO_QUEUE_CAPACITY];
 static uint8_t bt_alarm_count, bt_alarm_index;
 static bool bt_alarm_running, bt_alarm_started;
@@ -94,7 +94,7 @@ static void bt_timer_fallback(const char *reason);
 static bool bt_timer_prepare(const audio_queue_t *plan, const char *event);
 static void bt_speech_cancel(const char *reason);
 
-static bool auto_voice_jbl_enabled; // RAM-only opt-in; default false after reboot.
+static bool auto_voice_jbl_enabled; // Flash v4 preference; default LOCAL for old records.
 static bool bt_speech_start(uint8_t hour, uint8_t minute, bool automatic);
 #endif
 // In BT-free builds, preserve saved v4 choices opaquely on subsequent
@@ -294,7 +294,7 @@ static void auto_status(void) {
     printf("[AUTO] clock_mode=%s (folder 18, 1..12 strikes)\n",
            clock_mode ? "CHIME" : "VOICE");
 #ifdef CLOCK_ENABLE_A2DP
-    printf("[AUTO] voice_output=%s (RAM-only; chime/half/timer/alarm LOCAL)\n",
+    printf("[AUTO] voice_output=%s (Flash v4; chime/half stay LOCAL)\n",
            auto_voice_jbl_enabled ? "JBL_PREFERRED" : "LOCAL");
 #endif
 }
@@ -2201,6 +2201,32 @@ static void handle_command(char *line) {
         } else {
             puts("[SD] FAIL: check GP8/9/10/11, 3V3, GND and card seating");
         }
+    } else if (strcmp(line, "audio-health") == 0) {
+        // Read-only snapshot for hardware priority/collision regression tests.
+        // Never changes clock, audio owner, saved preferences or Flash.
+        printf("[AUDIO-HEALTH] timer=%s alarm=%d sound=%s local_queue=%u local_started=%s df_busy=%s\\n",
+               timer.running ? "RUNNING" : "IDLE", alarm_active_index + 1,
+               sound_enabled ? "ON" : "OFF", (unsigned)audio_queue.size,
+               audio_queue.track_started ? "YES" : "NO",
+               dfplayer_busy() ? "YES" : "NO");
+        printf("[AUDIO-HEALTH] auto=%s clock_mode=%s saved_pending=%s menu=%s music=%s\\n",
+               auto_enabled ? "ON" : "OFF", clock_mode ? "CHIME" : "VOICE",
+               autosave_pending ? "YES" : "NO",
+               menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED
+                 ? "OPEN" : "CLOSED", music_ui_open ? "OPEN" : "CLOSED");
+#ifdef CLOCK_ENABLE_A2DP
+        printf("[AUDIO-HEALTH] BT stream=%s rate=%lu MP3=%s speech=%s (%u/%u) timer=%s (%u/%u) alarm=%s (%u/%u) route_test=%s\\n",
+               clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE",
+               (unsigned long)clock_a2dp_current_rate(),
+               mp3_play_active() ? "YES" : "NO",
+               bt_speech_running ? "YES" : "NO",
+               (unsigned)(bt_speech_index + 1u), (unsigned)bt_speech_count,
+               bt_timer_running ? "YES" : "NO",
+               (unsigned)(bt_timer_index + 1u), (unsigned)bt_timer_count,
+               bt_alarm_running ? "YES" : "NO",
+               (unsigned)(bt_alarm_index + 1u), (unsigned)bt_alarm_count,
+               routed_test_pending ? "YES" : "NO");
+#endif
     } else if (strcmp(line, "audio-settings") == 0) {
         printf("[AUDIO-SETTINGS] manual=%s hourly=%s timer=%s alarm=%s\n",
                audio_router.requested == AUDIO_OUTPUT_BT_JBL ? "JBL" : "LOCAL",
@@ -2405,6 +2431,7 @@ static void handle_command(char *line) {
         puts("[TIMER-AUDIO] timer-audio jbl|local; timer-audio - timer start/cancel/finish routing");
         puts("[ALARM-AUDIO] alarm-audio jbl|local; alarm-audio; alarm-audio-test 1; alarm-stop");
         puts("[AUDIO-SETTINGS] audio-settings shows persisted preferences; change with audio-select, auto-audio, timer-audio, alarm-audio; save");
+        puts("[AUDIO-HEALTH] audio-health shows read-only owner, queue and Bluetooth status");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
