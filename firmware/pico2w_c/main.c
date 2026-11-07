@@ -141,12 +141,16 @@ typedef enum {
     MENU_EDIT_QUIET_START,
     MENU_EDIT_QUIET_END,
     MENU_EDIT_HALF_HOUR,
-    MENU_EDIT_EXACT
+    MENU_EDIT_EXACT,
+    MENU_AUDIO_LIST,
+    MENU_EDIT_AUDIO_OUTPUT
 } menu_state_t;
 static menu_state_t menu_state;
 static uint8_t menu_index;
 static speech_language_t menu_language_choice;
 static uint8_t menu_volume_choice;
+static uint8_t menu_audio_index; // 0=manual 1=hourly 2=timer 3=alarm
+static bool menu_audio_jbl_choice; // draft, committed on button confirmation
 static bool menu_exact_choice;
 static bool menu_quiet_enabled_choice;
 static uint8_t menu_quiet_start_choice;
@@ -155,7 +159,8 @@ static bool menu_half_hour_choice;
 static ds1302_datetime_t menu_rtc_choice;
 static uint64_t menu_last_input_ms;
 #define SETTINGS_MENU_TIMEOUT_MS 20000u
-#define SETTINGS_MENU_ITEMS 7u
+#define SETTINGS_MENU_ITEMS 8u
+#define SETTINGS_AUDIO_ITEMS 4u
 // Alarm editor is separate from settings; changes stay in draft until DONE.
 typedef enum {
     ALARM_UI_CLOSED = 0,
@@ -1384,9 +1389,69 @@ static void alarm_ui_back(uint64_t now) {
 static const char *menu_item_name(unsigned index) {
     static const char *names[SETTINGS_MENU_ITEMS] = {
         "Language", "Time", "Date", "Quiet mode",
-        "Half-hour beep", "Exact-hour word", "Volume"
+        "Half-hour beep", "Exact-hour word", "Volume", "Audio Output"
     };
     return index < SETTINGS_MENU_ITEMS ? names[index] : "?";
+}
+
+static const char *menu_audio_name(unsigned index) {
+    static const char *names[SETTINGS_AUDIO_ITEMS] = {
+        "Manual", "Hourly voice", "Timer", "Alarm"
+    };
+    return index < SETTINGS_AUDIO_ITEMS ? names[index] : "?";
+}
+
+static bool menu_audio_selected_jbl(unsigned index) {
+#ifdef CLOCK_ENABLE_A2DP
+    switch (index) {
+        case 0: return audio_router.requested == AUDIO_OUTPUT_BT_JBL;
+        case 1: return auto_voice_jbl_enabled;
+        case 2: return timer_audio_jbl_enabled;
+        case 3: return alarm_audio_jbl_enabled;
+        default: return false;
+    }
+#else
+    (void)index;
+    return false; // BT-free firmware exposes only LOCAL.
+#endif
+}
+
+static void menu_audio_apply(unsigned index, bool jbl) {
+#ifdef CLOCK_ENABLE_A2DP
+    if (menu_audio_selected_jbl(index) == jbl) return;
+    switch (index) {
+        case 0:
+            if (!jbl) {
+                if (bt_speech_running) bt_speech_fallback("MENU_SELECT_LOCAL");
+                if (routed_test_pending && mp3_play_active()) {
+                    mp3_play_stop();
+                    routed_test_pending = false;
+                }
+            }
+            audio_router_select(&audio_router,
+                                jbl ? AUDIO_OUTPUT_BT_JBL : AUDIO_OUTPUT_LOCAL);
+            audio_router_bluetooth_state(&audio_router, clock_a2dp_stream_active());
+            break;
+        case 1:
+            auto_voice_jbl_enabled = jbl;
+            break;
+        case 2:
+            timer_audio_jbl_enabled = jbl;
+            if (!jbl && bt_timer_running) bt_timer_fallback("MENU_SELECT_LOCAL");
+            break;
+        case 3:
+            alarm_audio_jbl_enabled = jbl;
+            if (!jbl && bt_alarm_running) bt_alarm_fallback("MENU_SELECT_LOCAL");
+            break;
+        default:
+            return;
+    }
+    settings_mark_changed();
+#else
+    (void)index;
+    (void)jbl;
+    puts("[MENU-AUDIO] JBL unavailable in this firmware; LOCAL only");
+#endif
 }
 
 static void menu_close(void) {
@@ -1441,6 +1506,13 @@ static void menu_begin_edit(uint64_t now) {
             menu_volume_choice = volume;
             menu_state = MENU_EDIT_VOLUME;
             break;
+        case 7:
+            menu_audio_index = 0u;
+            menu_state = MENU_AUDIO_LIST;
+            printf("[MENU-AUDIO] Open: %s preferred=%s\n",
+                   menu_audio_name(menu_audio_index),
+                   menu_audio_selected_jbl(menu_audio_index) ? "JBL" : "LOCAL");
+            return;
         default:
             return;
     }
@@ -1523,6 +1595,20 @@ static void menu_commit(uint64_t now) {
             }
             printf("[MENU] Exact-hour selected: %s\n", exact_hour_phrase ? "ON" : "OFF");
             break;
+        case MENU_AUDIO_LIST:
+            menu_audio_jbl_choice = menu_audio_selected_jbl(menu_audio_index);
+            menu_state = MENU_EDIT_AUDIO_OUTPUT;
+            printf("[MENU-AUDIO] Edit %s current=%s\n",
+                   menu_audio_name(menu_audio_index),
+                   menu_audio_jbl_choice ? "JBL" : "LOCAL");
+            return;
+        case MENU_EDIT_AUDIO_OUTPUT:
+            menu_audio_apply(menu_audio_index, menu_audio_jbl_choice);
+            printf("[MENU-AUDIO] Saved %s=%s (Flash autosave)\n",
+                   menu_audio_name(menu_audio_index),
+                   menu_audio_selected_jbl(menu_audio_index) ? "JBL" : "LOCAL");
+            menu_state = MENU_AUDIO_LIST;
+            return;
         default:
             return;
     }
@@ -1535,6 +1621,12 @@ static void menu_back(uint64_t now) {
     menu_last_input_ms = now;
     if (menu_state == MENU_LIST) {
         menu_close();
+    } else if (menu_state == MENU_EDIT_AUDIO_OUTPUT) {
+        puts("[MENU-AUDIO] Choice discarded");
+        menu_state = MENU_AUDIO_LIST;
+    } else if (menu_state == MENU_AUDIO_LIST) {
+        menu_state = MENU_LIST;
+        puts("[MENU-AUDIO] Back to settings");
     } else {
         printf("[MENU] Cancelled edit: %s\n", menu_item_name(menu_index));
         menu_state = MENU_LIST;
@@ -1554,6 +1646,24 @@ static void menu_rotate(int direction, uint64_t now) {
         case MENU_EDIT_LANGUAGE:
             menu_language_choice = menu_language_choice == SPEECH_RU ? SPEECH_DE : SPEECH_RU;
             printf("[MENU] Language candidate: %s\n", speech_language_name(menu_language_choice));
+            break;
+        case MENU_AUDIO_LIST:
+            menu_audio_index = (uint8_t)((menu_audio_index + SETTINGS_AUDIO_ITEMS +
+                                (direction > 0 ? 1u : SETTINGS_AUDIO_ITEMS - 1u)) %
+                                SETTINGS_AUDIO_ITEMS);
+            printf("[MENU-AUDIO] Item=%s preferred=%s\n",
+                   menu_audio_name(menu_audio_index),
+                   menu_audio_selected_jbl(menu_audio_index) ? "JBL" : "LOCAL");
+            break;
+        case MENU_EDIT_AUDIO_OUTPUT:
+#ifdef CLOCK_ENABLE_A2DP
+            menu_audio_jbl_choice = !menu_audio_jbl_choice;
+#else
+            menu_audio_jbl_choice = false;
+#endif
+            printf("[MENU-AUDIO] %s candidate=%s\n",
+                   menu_audio_name(menu_audio_index),
+                   menu_audio_jbl_choice ? "JBL" : "LOCAL");
             break;
         case MENU_EDIT_TIME_H:
             menu_rtc_choice.hour = wrap_u8(menu_rtc_choice.hour, 0, 23, direction);
@@ -3167,6 +3277,18 @@ int main(void) {
             snprintf(top, sizeof(top), "SETTINGS %u/%u",
                      (unsigned)(menu_index + 1u), (unsigned)SETTINGS_MENU_ITEMS);
             snprintf(bottom, sizeof(bottom), "%s", menu_item_name(menu_index));
+        } else if (menu_state == MENU_AUDIO_LIST) {
+            snprintf(top, sizeof(top), "AUDIO %u/%u %s",
+                     (unsigned)(menu_audio_index + 1u),
+                     (unsigned)SETTINGS_AUDIO_ITEMS,
+                     menu_audio_selected_jbl(menu_audio_index) ? "JBL" : "LOCAL");
+            snprintf(bottom, sizeof(bottom), "%s",
+                     menu_audio_name(menu_audio_index));
+        } else if (menu_state == MENU_EDIT_AUDIO_OUTPUT) {
+            snprintf(top, sizeof(top), "OUTPUT %s",
+                     menu_audio_name(menu_audio_index));
+            snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
+                     menu_audio_jbl_choice ? "JBL" : "LOCAL");
         } else if (menu_state == MENU_EDIT_LANGUAGE) {
             snprintf(top, sizeof(top), "LANGUAGE SETTING");
             snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
