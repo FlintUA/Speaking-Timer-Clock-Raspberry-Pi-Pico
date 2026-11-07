@@ -525,15 +525,15 @@ endif()
 string(REPLACE "        case GAP_EVENT_INQUIRY_COMPLETE:" "${_bt_new_inquiry_done}" _source "${_source}")
 
 set(_bt_new_working [=[
-        case BTSTACK_EVENT_STATE:
+        case  BTSTACK_EVENT_STATE:
             if (btstack_event_state_get_state(packet) == HCI_STATE_WORKING)
                 clock_bt_stack_ready = true;
 ]=])
-string(FIND "${_source}" "        case BTSTACK_EVENT_STATE:" _bt_ready_found)
+string(FIND "${_source}" "        case  BTSTACK_EVENT_STATE:" _bt_ready_found)
 if(_bt_ready_found EQUAL -1)
     message(FATAL_ERROR "BTstack working state anchor changed")
 endif()
-string(REPLACE "        case BTSTACK_EVENT_STATE:" "${_bt_new_working}" _source "${_source}")
+string(REPLACE "        case  BTSTACK_EVENT_STATE:" "${_bt_new_working}" _source "${_source}")
 
 file(WRITE "${PATCHED_SOURCE}" "${_source}")
 message(STATUS "Generated locally patched A2DP source: ${PATCHED_SOURCE}")
