@@ -1509,6 +1509,9 @@ static void menu_audio_apply(unsigned index, bool jbl) {
 
 static void menu_close(void) {
     if (menu_state == MENU_CLOSED) return;
+#ifdef CLOCK_ENABLE_A2DP
+    if (menu_state == MENU_BT_SCANNING) clock_a2dp_scan_stop();
+#endif
     menu_state = MENU_CLOSED;
     timer_screen = false;
     puts("[MENU] Closed");
@@ -1565,6 +1568,16 @@ static void menu_begin_edit(uint64_t now) {
             printf("[MENU-AUDIO] Open: %s preferred=%s\n",
                    menu_audio_name(menu_audio_index),
                    menu_audio_selected_jbl(menu_audio_index) ? "JBL" : "LOCAL");
+            return;
+        case 8:
+            menu_bt_index = 0;
+            menu_state = MENU_BT_LIST;
+#ifdef CLOCK_ENABLE_A2DP
+            printf("[MENU-BT] Open preferred=%s; select Scan devices\n",
+                   clock_a2dp_target());
+#else
+            puts("[MENU-BT] Bluetooth not enabled in this build");
+#endif
             return;
         default:
             return;
@@ -1662,6 +1675,45 @@ static void menu_commit(uint64_t now) {
                    menu_audio_selected_jbl(menu_audio_index) ? "JBL" : "LOCAL");
             menu_state = MENU_AUDIO_LIST;
             return;
+        case MENU_BT_LIST:
+#ifdef CLOCK_ENABLE_A2DP
+            if (menu_bt_index == 0u) {
+                if (!bt_sink_change_allowed()) {
+                    puts("[MENU-BT] Scan blocked: timer/alarm/audio busy");
+                } else if (clock_a2dp_scan_start()) {
+                    menu_state = MENU_BT_SCANNING;
+                    puts("[MENU-BT] Scanning; previous sink disconnected");
+                } else {
+                    puts("[MENU-BT] Scan rejected: Bluetooth not ready");
+                }
+            } else {
+                clock_bt_device_t d;
+                if (clock_a2dp_scan_get(menu_bt_index - 1u, &d)) {
+                    menu_state = MENU_BT_CONFIRM;
+                    printf("[MENU-BT] Confirm connect %s (%s)\n", d.name, d.address);
+                }
+            }
+#else
+            puts("[MENU-BT] Bluetooth disabled");
+#endif
+            return;
+        case MENU_BT_CONFIRM:
+#ifdef CLOCK_ENABLE_A2DP
+            {
+                clock_bt_device_t d;
+                if (menu_bt_index > 0u &&
+                    clock_a2dp_scan_get(menu_bt_index - 1u, &d) &&
+                    bt_sink_select(d.address))
+                    printf("[MENU-BT] Connecting %s\n", d.name);
+                else
+                    puts("[MENU-BT] Selection failed; retry");
+            }
+#endif
+            menu_state = MENU_BT_LIST;
+            return;
+        case MENU_BT_SCANNING:
+            // Search is asynchronous. Wait or cancel with MINUS.
+            return;
         default:
             return;
     }
@@ -1680,6 +1732,18 @@ static void menu_back(uint64_t now) {
     } else if (menu_state == MENU_AUDIO_LIST) {
         menu_state = MENU_LIST;
         puts("[MENU-AUDIO] Back to settings");
+    } else if (menu_state == MENU_BT_CONFIRM) {
+        menu_state = MENU_BT_LIST;
+        puts("[MENU-BT] Connection choice cancelled");
+    } else if (menu_state == MENU_BT_SCANNING) {
+#ifdef CLOCK_ENABLE_A2DP
+        clock_a2dp_scan_stop();
+#endif
+        menu_state = MENU_BT_LIST;
+        puts("[MENU-BT] Search cancelled");
+    } else if (menu_state == MENU_BT_LIST) {
+        menu_state = MENU_LIST;
+        puts("[MENU-BT] Back to settings");
     } else {
         printf("[MENU] Cancelled edit: %s\n", menu_item_name(menu_index));
         menu_state = MENU_LIST;
@@ -1699,6 +1763,17 @@ static void menu_rotate(int direction, uint64_t now) {
         case MENU_EDIT_LANGUAGE:
             menu_language_choice = menu_language_choice == SPEECH_RU ? SPEECH_DE : SPEECH_RU;
             printf("[MENU] Language candidate: %s\n", speech_language_name(menu_language_choice));
+            break;
+        case MENU_BT_LIST:
+#ifdef CLOCK_ENABLE_A2DP
+            {
+                unsigned count = 1u + clock_a2dp_scan_count();
+                menu_bt_index = (uint8_t)((menu_bt_index + count +
+                                 (direction > 0 ? 1u : count - 1u)) % count);
+                printf("[MENU-BT] index=%u/%u\n",
+                       (unsigned)(menu_bt_index + 1u), count);
+            }
+#endif
             break;
         case MENU_AUDIO_LIST:
             menu_audio_index = (uint8_t)((menu_audio_index + SETTINGS_AUDIO_ITEMS +
@@ -3310,6 +3385,15 @@ int main(void) {
         }
 
         alarm_pending_service(now);
+#ifdef CLOCK_ENABLE_A2DP
+        if (menu_state == MENU_BT_SCANNING && !clock_a2dp_scan_active()) {
+            menu_state = MENU_BT_LIST;
+            menu_bt_index = clock_a2dp_scan_count() ? 1u : 0u;
+            menu_last_input_ms = now;
+            printf("[MENU-BT] scan complete, devices=%u\n",
+                   clock_a2dp_scan_count());
+        }
+#endif
 
         char top[17], bottom[17];
         if (music_ui_open) {
@@ -3349,6 +3433,43 @@ int main(void) {
             snprintf(top, sizeof(top), "SETTINGS %u/%u",
                      (unsigned)(menu_index + 1u), (unsigned)SETTINGS_MENU_ITEMS);
             snprintf(bottom, sizeof(bottom), "%s", menu_item_name(menu_index));
+        } else if (menu_state == MENU_BT_SCANNING) {
+#ifdef CLOCK_ENABLE_A2DP
+            snprintf(top, sizeof(top), "BT SCANNING");
+            snprintf(bottom, sizeof(bottom), "Wait or MINUS");
+#else
+            snprintf(top, sizeof(top), "BLUETOOTH OFF");
+            snprintf(bottom, sizeof(bottom), "MINUS=BACK");
+#endif
+        } else if (menu_state == MENU_BT_CONFIRM) {
+#ifdef CLOCK_ENABLE_A2DP
+            clock_bt_device_t d;
+            snprintf(top, sizeof(top), "BT CONNECT?");
+            if (menu_bt_index && clock_a2dp_scan_get(menu_bt_index - 1u, &d))
+                snprintf(bottom, sizeof(bottom), "%.16s", d.name);
+            else snprintf(bottom, sizeof(bottom), "Device missing");
+#else
+            snprintf(top, sizeof(top), "BLUETOOTH OFF");
+            snprintf(bottom, sizeof(bottom), "MINUS=BACK");
+#endif
+        } else if (menu_state == MENU_BT_LIST) {
+#ifdef CLOCK_ENABLE_A2DP
+            unsigned count = clock_a2dp_scan_count();
+            snprintf(top, sizeof(top), "BT %u/%u %s",
+                     (unsigned)(menu_bt_index + 1u), (unsigned)(count + 1u),
+                     clock_a2dp_stream_active() ? "ON" : "OFF");
+            if (menu_bt_index == 0u)
+                snprintf(bottom, sizeof(bottom), "Scan devices");
+            else {
+                clock_bt_device_t d;
+                if (clock_a2dp_scan_get(menu_bt_index - 1u, &d))
+                    snprintf(bottom, sizeof(bottom), "%.16s", d.name);
+                else snprintf(bottom, sizeof(bottom), "No device");
+            }
+#else
+            snprintf(top, sizeof(top), "BLUETOOTH OFF");
+            snprintf(bottom, sizeof(bottom), "MINUS=BACK");
+#endif
         } else if (menu_state == MENU_AUDIO_LIST) {
             snprintf(top, sizeof(top), "AUDIO %u/%u %s",
                      (unsigned)(menu_audio_index + 1u),
