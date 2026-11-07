@@ -2185,6 +2185,7 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "timer-audio jbl") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
         timer_audio_jbl_enabled = true;
+        settings_mark_changed();
         printf("[TIMER-AUDIO] output=JBL_PREFERRED BT=%s LOCAL fallback (RAM only)\n",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
 #else
@@ -2193,6 +2194,7 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "timer-audio local") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
         timer_audio_jbl_enabled = false;
+        settings_mark_changed();
         if (bt_timer_running) bt_timer_fallback("SELECT_LOCAL");
 #endif
         puts("[TIMER-AUDIO] output=LOCAL (RAM only)");
@@ -2240,6 +2242,7 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "auto-audio local") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
         auto_voice_jbl_enabled = false;
+        settings_mark_changed();
         puts("[AUTO-AUDIO] Hourly VOICE output=LOCAL (RAM only; timers/alarms unchanged)");
 #else
         puts("[AUTO-AUDIO] Bluetooth disabled; hourly announcements always LOCAL");
@@ -2247,6 +2250,7 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "auto-audio jbl") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
         auto_voice_jbl_enabled = true;
+        settings_mark_changed();
         printf("[AUTO-AUDIO] Hourly VOICE output=JBL_PREFERRED, stream=%s; "
                "LOCAL fallback (RAM only)\n",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
@@ -2274,11 +2278,13 @@ static void handle_command(char *line) {
         }
 #endif
         audio_router_select(&audio_router, AUDIO_OUTPUT_LOCAL);
+        settings_mark_changed();
         puts("[AUDIO-ROUTE] Requested LOCAL (audio-route-test uses DFPlayer; normal clock output unchanged)");
 #ifdef CLOCK_ENABLE_A2DP
     } else if (strcmp(line, "audio-select jbl") == 0) {
         audio_router_select(&audio_router, AUDIO_OUTPUT_BT_JBL);
         audio_router_bluetooth_state(&audio_router, clock_a2dp_stream_active());
+        settings_mark_changed();
         puts("[AUDIO-ROUTE] Requested BT_JBL for manual say and route-test only (alarm-audio separate)");
 #endif
     } else if (strncmp(line, "audio-route-test ", 17) == 0) {
@@ -2410,6 +2416,7 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "alarm-audio jbl") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
         alarm_audio_jbl_enabled = true;
+        settings_mark_changed();
         puts("[ALARM-AUDIO] preferred=JBL, LOCAL fallback; RAM-only");
 #else
         puts("[ALARM-AUDIO] Bluetooth unavailable");
@@ -2417,6 +2424,7 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "alarm-audio local") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
         alarm_audio_jbl_enabled = false;
+        settings_mark_changed();
         if (bt_alarm_running) bt_alarm_fallback("SELECT_LOCAL");
 #endif
         puts("[ALARM-AUDIO] preferred=LOCAL, RAM-only");
