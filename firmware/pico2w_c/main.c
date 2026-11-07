@@ -1013,8 +1013,8 @@ static bool volume_for_bluetooth(void) {
 #ifdef CLOCK_ENABLE_A2DP
     if (!clock_a2dp_stream_active()) return false;
     // An active Bluetooth audio owner has priority over LOCAL standby
-    // states. The MUSIC-UI itself is DFPlayer-only even if the user's
-    // manual output preference remains Bluetooth.
+    // states. MUSIC-UI can use either BT (SPI card) or LOCAL (DFPlayer)
+    // and its selected output must govern volume during playback.
     if (bt_timer_running || bt_alarm_running || bt_speech_running ||
         routed_test_pending || mp3_play_active()) return true;
     if (music_ui_open || music_ui_playing) return music_ui_bluetooth;
