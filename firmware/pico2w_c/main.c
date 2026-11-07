@@ -1655,6 +1655,19 @@ static void handle_command(char *line) {
         if (mp3_play_active()) mp3_play_stop();
         clock_a2dp_stop_tone();
 #endif
+    } else if (strncmp(line, "mp3-pause-test ", 15) == 0) {
+#ifdef CLOCK_ENABLE_A2DP
+        if (!clock_a2dp_stream_active() || !sound_enabled ||
+            timer.running || alarm_active_index >= 0 || music_ui_open ||
+            sd_fat32_stream_active() || mp3_probe_active() ||
+            !audio_queue_idle(&audio_queue)) {
+            puts("[MP3-TEST] Refused: A2DP not ready or clock/audio busy");
+        } else if (!mp3_play_pause_test_start(line + 15, clock_a2dp_current_rate())) {
+            puts("[MP3-TEST] Start failed");
+        }
+#else
+        puts("[MP3-TEST] Requires Bluetooth A2DP");
+#endif
     } else if (strncmp(line, "mp3-play ", 9) == 0) {
 #ifdef CLOCK_ENABLE_A2DP
         if (!clock_a2dp_stream_active() || !sound_enabled ||
@@ -1735,6 +1748,7 @@ static void handle_command(char *line) {
         puts("[SD] sd-stream 07/001.mp3 - nonblocking complete file CRC32; sd-stop - cancel");
         puts("[MP3] mp3-test 07/001.mp3 - experimental decode to RAM (no JBL output)");
         puts("[MP3] mp3-play 07/001.mp3 - full file on JBL; mp3-pause; mp3-resume; mp3-stop; mp3-status");
+        puts("[MP3] mp3-pause-test 07/001.mp3 - auto pause at 300ms, auto resume after 1s");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
