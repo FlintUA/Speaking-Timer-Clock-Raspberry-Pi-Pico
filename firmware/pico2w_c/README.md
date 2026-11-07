@@ -2041,3 +2041,38 @@ Safety: Start with a low speaker setting when testing; AVRCP scales
 0..30 to the remote 0..127 range and remote speakers may interpret
 absolute volume nonlinearly. The initial pairing or reconnection
 should **not** issue a new volume request.
+
+## MUSIC-UI selectable Bluetooth playback (2026-11-07)
+
+The interactive MUSIC PLAYER now follows the **manual** Audio Output preference:
+when Manual=JBL/BT and A2DP is active, it attempts MP3 playback of
+`08/NNN.mp3` from the **separate SPI1 FAT32 microSD**, with SBC output to the
+selected Bluetooth sink. When Manual=LOCAL or A2DP is unavailable, it plays
+folder 08 using the DFPlayer as before. If the chosen SPI file is missing or
+cannot be opened, the player logs an explicit fallback and plays locally.
+
+**Important physical limitation:** The DFPlayer's private microSD is not
+addressable by the Pico over its ordinary UART control interface. The MP3 files
+from its folder 08 must be copied to folder `08` on the second SPI microSD
+if Bluetooth music playback is desired. The DFPlayer folder-count query still
+supplies the existing shuffled playlist (78 tracks in recent hardware tests).
+For consistent shuffle, mirror the same numbered `001.mp3`, `002.mp3`, etc.
+files to both cards. Check via `sd-list 08` and `sd-file 08/013.mp3`
+before testing. This feature does NOT stream audio from the DFPlayer chip.
+
+COM8 test:
+1. Connect Nest; verify `bt-status` reports ACTIVE.
+2. Set `audio-select jbl` (manual route), inspect `audio-settings`.
+3. Check SPI card content with `sd-list 08`.
+4. Open Music Player using long ALARM, select a mirrored track with TIMER
+   encoder, then TIMER to start playback. Expect
+   `[MUSIC-UI] output=BT`, `[MP3-PLAY] START /08/NNN.mp3`,
+   `[MUSIC-UI] playing BT ...`. The Nest should play the audio, and the
+   VOLUME encoder should log `[BT-VOL]`.
+5. TIMER pauses/stops, MINUS exits, track change cancels active Bluetooth MP3.
+   When a track ends the shuffle advances to the next track as before.
+6. Repeat with Manual=LOCAL: output/volume must use DFPlayer only.
+
+If MP3 files were not mirrored, an explicit `[MUSIC-UI] ... LOCAL fallback`
+log is expected, not a Bluetooth stream. This code change needs a build and
+on-device test before marking Bluetooth music complete.
