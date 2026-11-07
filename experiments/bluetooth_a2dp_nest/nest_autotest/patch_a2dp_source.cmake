@@ -18,6 +18,30 @@ set(_new_scan_function [=[
 #include "clock_a2dp_control.h"
 // Flash v5 overrides the legacy build-time default at boot.
 static char clock_autoconnect_target[18] = "__CLOCK_AUTO_TARGET__";
+// Independent BT volume 0..30. No unsolicited AVRCP volume changes on connect.
+static uint8_t clock_bt_volume = 16u;
+static bool clock_bt_pcm_fallback = true;
+static uint8_t clock_bt_remote_volume = 255u;
+bool clock_a2dp_avrcp_available(void){ return media_tracker.avrcp_cid != 0; }
+uint8_t clock_a2dp_volume(void){ return clock_bt_volume; }
+uint8_t clock_a2dp_remote_volume(void){ return clock_bt_remote_volume; }
+bool clock_a2dp_pcm_volume_fallback(void){ return clock_bt_pcm_fallback; }
+void clock_a2dp_set_volume(uint8_t level){
+    if (level > 30u) level = 30u;
+    clock_bt_volume = level;
+    if (!media_tracker.avrcp_cid){
+        clock_bt_pcm_fallback = true;
+        printf("[BT-VOL] %u/30 PCM fallback (AVRCP unavailable)\n", level);
+        return;
+    }
+    uint8_t absolute = (uint8_t)(((uint16_t)level * 127u + 15u) / 30u);
+    uint8_t status = avrcp_controller_set_absolute_volume(media_tracker.avrcp_cid,
+                                                           absolute);
+    clock_bt_pcm_fallback = status != ERROR_CODE_SUCCESS;
+    printf("[BT-VOL] %u/30 AVRCP absolute=%u status=0x%02x mode=%s\n",
+           level, absolute, status, clock_bt_pcm_fallback ? "PCM" : "AVRCP");
+}
+
 static bool clock_bt_stack_ready;
 static bool clock_bt_scan_requested;
 static bool clock_bt_scan_running;
@@ -423,12 +447,19 @@ static void produce_audio(int16_t * pcm_buffer, int num_samples){
     // Apply the gain after ring consumption, before SBC encoding. Division
     // attenuates all signed 16-bit samples without clipping/overflow.
     const bool clock_mp3_gain = clock_pcm_ring_active();
-    // For MP3 use *8/15 (53.333%); the other outputs remain at 10%.
-
+    // AVRCP changes sink volume; otherwise adjust outgoing PCM. Limit
+    // gain to unity to avoid overflowing int16_t samples.
+    // Fallback level 16 retains original fixed MP3/test gain.
+    uint32_t gain_num = clock_mp3_gain ? 8u : 1u;
+    uint32_t gain_den = clock_mp3_gain ? 15u : 10u;
+    if (clock_bt_pcm_fallback){
+        gain_num *= clock_bt_volume;
+        gain_den *= 16u;
+    }
+    if (gain_num > gain_den) gain_num = gain_den;
     for (int sample = 0; sample < num_samples * NUM_CHANNELS; ++sample){
-        pcm_buffer[sample] = clock_mp3_gain
-            ? (int16_t)(((int32_t)pcm_buffer[sample] * 8) / 15)
-            : (int16_t)(pcm_buffer[sample] / 10);
+        pcm_buffer[sample] = (int16_t)(((int32_t)pcm_buffer[sample] *
+                                        (int32_t)gain_num) / (int32_t)gain_den);
     }
 #ifdef VOLUME_REDUCTION
 ]=])
@@ -538,6 +569,64 @@ if(_bt_ready_found EQUAL -1)
     message(FATAL_ERROR "BTstack working state anchor changed")
 endif()
 string(REPLACE "        case  BTSTACK_EVENT_STATE:" "${_bt_new_working}" _source "${_source}")
+
+
+# Apply AVRCP callbacks to the upstream generated source. These do not
+# overwrite the BTstack example in the SDK checkout.
+set(_clock_avrcp_connect_old [=[
+            media_tracker.avrcp_cid = local_cid;
+            avrcp_subevent_connection_established_get_bd_addr(packet, event_addr);
+]=])
+set(_clock_avrcp_connect_new [=[
+            media_tracker.avrcp_cid = local_cid;
+            clock_bt_pcm_fallback = false;
+            clock_bt_remote_volume = 255u;
+            avrcp_subevent_connection_established_get_bd_addr(packet, event_addr);
+]=])
+string(FIND "${_source}" "${_clock_avrcp_connect_old}" _clock_avrcp_conn_at)
+if(_clock_avrcp_conn_at EQUAL -1)
+    message(FATAL_ERROR "BTstack AVRCP connected handler changed")
+endif()
+string(REPLACE "${_clock_avrcp_connect_old}" "${_clock_avrcp_connect_new}" _source "${_source}")
+
+set(_clock_avrcp_release_old [=[
+        case AVRCP_SUBEVENT_CONNECTION_RELEASED:
+            printf("AVRCP Target: Disconnected, avrcp_cid 0x%02x\n", avrcp_subevent_connection_released_get_avrcp_cid(packet));
+            media_tracker.avrcp_cid = 0;
+            return;
+]=])
+set(_clock_avrcp_release_new [=[
+        case AVRCP_SUBEVENT_CONNECTION_RELEASED:
+            printf("AVRCP Target: Disconnected, avrcp_cid 0x%02x\n", avrcp_subevent_connection_released_get_avrcp_cid(packet));
+            media_tracker.avrcp_cid = 0;
+            clock_bt_pcm_fallback = true;
+            clock_bt_remote_volume = 255u;
+            return;
+]=])
+string(FIND "${_source}" "${_clock_avrcp_release_old}" _clock_avrcp_rel_at)
+if(_clock_avrcp_rel_at EQUAL -1)
+    message(FATAL_ERROR "BTstack AVRCP release handler changed")
+endif()
+string(REPLACE "${_clock_avrcp_release_old}" "${_clock_avrcp_release_new}" _source "${_source}")
+
+set(_clock_avrcp_notify_old [=[
+        case AVRCP_SUBEVENT_NOTIFICATION_VOLUME_CHANGED:
+            printf("AVRCP Controller: Notification Absolute Volume %d %%\n", avrcp_subevent_notification_volume_changed_get_absolute_volume(packet) * 100 / 127);
+            break;
+]=])
+set(_clock_avrcp_notify_new [=[
+        case AVRCP_SUBEVENT_NOTIFICATION_VOLUME_CHANGED:
+            clock_bt_remote_volume =
+                avrcp_subevent_notification_volume_changed_get_absolute_volume(packet);
+            printf("AVRCP Controller: Notification Absolute Volume %d %%\n",
+                   clock_bt_remote_volume * 100 / 127);
+            break;
+]=])
+string(FIND "${_source}" "${_clock_avrcp_notify_old}" _clock_avrcp_not_at)
+if(_clock_avrcp_not_at EQUAL -1)
+    message(FATAL_ERROR "BTstack AVRCP volume notification handler changed")
+endif()
+string(REPLACE "${_clock_avrcp_notify_old}" "${_clock_avrcp_notify_new}" _source "${_source}")
 
 file(WRITE "${PATCHED_SOURCE}" "${_source}")
 message(STATUS "Generated locally patched A2DP source: ${PATCHED_SOURCE}")
