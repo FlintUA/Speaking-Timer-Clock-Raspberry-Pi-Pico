@@ -514,3 +514,35 @@ This is not the pre-existing dry-run-only `auto-test`. The
 `auto-audio` status command shows selected preference and A2DP
 readiness. Physical compilation, audible test, real xx:00
 boundary and BT-loss fallback still require validation.
+
+
+## BT timer routing - staged source changes, pending COM8 validation
+
+After the user validated simulated hourly voice playback on both JBL
+and DFPlayer at 10:54-10:55 on 2026-11-07, implemented a separate
+Bluetooth timer playback owner with bounded 16-track storage copied
+from the existing canonical C timer speech planners. Added RAM-only
+`timer-audio jbl|local` and `timer-audio` status commands.
+Default is LOCAL after reboot. All timer countdown arithmetic and
+persistent flash settings remain unchanged.
+
+Three events - start, cancel, finish - invoke the normal local queue
+or an opt-in MP3/A2DP multi-file sequence when the stream is ACTIVE at
+44100 Hz. The MP3 driver remains single-owner. A timer start preempts
+optional manual Bluetooth speech and route tests; timer cancellation
+and finish supersede previous timer announcement. A2DP loss requeues
+the interrupted and remaining fragments on DFPlayer. Critical alarm
+speech still preempts timer playback and stays LOCAL. The generic MP3
+guard now exempts `timer.running` when the active track belongs to the
+BT timer state machine; it preserves normal non-Bluetooth builds.
+
+User bench procedure: `sd-test`, `bt-status`,
+`timer-audio jbl`, `t 15`, `start` then observe expiration;
+`t 30`, `start`, `cancel`; `timer-audio local`, `t 8`,
+`start` then completion. Check both speakers and RTC logs; inspect
+`[BT-TIMER]` event and fallback messages.
+
+**Not verified:** Pico SDK compilation, sequential playback timings,
+resumed behavior after A2DP disconnection, scheduled alarm priority,
+non-Bluetooth build regression. The previous 128-frame over-consumption
+observation remains to be investigated separately.
