@@ -73,6 +73,7 @@ static void alarm_stop(const char *reason);
 static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
                               uint64_t now, bool test);
 static void alarm_pending_service(uint64_t now);
+static void music_ui_close(const char *reason);
 static char command_line[48];
 static size_t command_length;
 // BOOTSEL is intentionally a two-step, time-limited serial operation.
@@ -793,6 +794,10 @@ static void alarm_pending_service(uint64_t now) {
             p->queued_ms < deferred_alarms[first].queued_ms)
             first = (int)i;
     }
+    if (first >= 0 && !timer.running && alarm_active_index < 0 &&
+        sound_enabled && menu_state == MENU_CLOSED &&
+        alarm_ui_state == ALARM_UI_CLOSED && music_ui_open)
+        music_ui_close("DEFERRED_ALARM_PRIORITY");
     if (first < 0 || timer.running || alarm_active_index >= 0 ||
         (finished_screen_until_ms && now < finished_screen_until_ms) ||
         menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED ||
@@ -803,7 +808,6 @@ static void alarm_pending_service(uint64_t now) {
            sd_fat32_stream_active() || routed_test_pending
 #endif
        ) return;
-    if (music_ui_open) music_ui_close("DEFERRED_ALARM_PRIORITY");
     deferred_alarm_t pending = deferred_alarms[first];
     deferred_alarms[first].pending = false;
     printf("[ALARM-PENDING] dispatch=%d waited=%llus%s\n",
