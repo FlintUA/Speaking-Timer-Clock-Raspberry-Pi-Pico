@@ -2207,7 +2207,7 @@ static void handle_command(char *line) {
 #ifdef CLOCK_ENABLE_A2DP
         timer_audio_jbl_enabled = true;
         settings_mark_changed();
-        printf("[TIMER-AUDIO] output=JBL_PREFERRED BT=%s LOCAL fallback (RAM only)\n",
+        printf("[TIMER-AUDIO] output=JBL_PREFERRED BT=%s LOCAL fallback (Flash autosave)\n",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
 #else
         puts("[TIMER-AUDIO] Bluetooth support disabled; LOCAL only");
@@ -2218,10 +2218,10 @@ static void handle_command(char *line) {
         settings_mark_changed();
         if (bt_timer_running) bt_timer_fallback("SELECT_LOCAL");
 #endif
-        puts("[TIMER-AUDIO] output=LOCAL (RAM only)");
+        puts("[TIMER-AUDIO] output=LOCAL (Flash autosave)");
     } else if (strcmp(line, "timer-audio") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
-        printf("[TIMER-AUDIO] preferred=%s active=%s BT=%s (RAM only)\n",
+        printf("[TIMER-AUDIO] preferred=%s active=%s BT=%s (Flash autosave)\n",
                timer_audio_jbl_enabled ? "JBL" : "LOCAL",
                bt_timer_running ? "YES" : "NO",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
@@ -2264,7 +2264,7 @@ static void handle_command(char *line) {
 #ifdef CLOCK_ENABLE_A2DP
         auto_voice_jbl_enabled = false;
         settings_mark_changed();
-        puts("[AUTO-AUDIO] Hourly VOICE output=LOCAL (RAM only; timers/alarms unchanged)");
+        puts("[AUTO-AUDIO] Hourly VOICE output=LOCAL (Flash autosave; timers/alarms unchanged)");
 #else
         puts("[AUTO-AUDIO] Bluetooth disabled; hourly announcements always LOCAL");
 #endif
@@ -2273,7 +2273,7 @@ static void handle_command(char *line) {
         auto_voice_jbl_enabled = true;
         settings_mark_changed();
         printf("[AUTO-AUDIO] Hourly VOICE output=JBL_PREFERRED, stream=%s; "
-               "LOCAL fallback (RAM only)\n",
+               "LOCAL fallback (Flash autosave)\n",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
         puts("[AUTO-AUDIO] Chime/half-hour/music stay LOCAL; timer/alarm have independent opt-in");
 #else
@@ -2282,7 +2282,7 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "auto-audio") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
         printf("[AUTO-AUDIO] hourly_voice=%s stream=%s "
-               "(RAM-only; other automatic events LOCAL)\n",
+               "(Flash autosave; other automatic events LOCAL)\n",
                auto_voice_jbl_enabled ? "JBL_PREFERRED" : "LOCAL",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
 #else
@@ -2434,7 +2434,7 @@ static void handle_command(char *line) {
         }
     } else if (strcmp(line, "alarm-audio") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
-        printf("[ALARM-AUDIO] preferred=%s BT=%s running=%s (RAM-only)\n",
+        printf("[ALARM-AUDIO] preferred=%s BT=%s running=%s (Flash autosave)\n",
                alarm_audio_jbl_enabled ? "JBL" : "LOCAL",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE",
                bt_alarm_running ? "YES" : "NO");
@@ -2455,7 +2455,7 @@ static void handle_command(char *line) {
         settings_mark_changed();
         if (bt_alarm_running) bt_alarm_fallback("SELECT_LOCAL");
 #endif
-        puts("[ALARM-AUDIO] preferred=LOCAL, RAM-only");
+        puts("[ALARM-AUDIO] preferred=LOCAL, Flash autosave");
     } else if (strncmp(line, "alarm-audio-test ", 17) == 0) {
         unsigned int slot = 0u;
         char extra = 0;
