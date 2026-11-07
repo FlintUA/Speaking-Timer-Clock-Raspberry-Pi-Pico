@@ -3,13 +3,13 @@
 
 // Consumed and produced in one BTstack cooperative run-loop context.
 static int16_t samples[CLOCK_PCM_RING_FRAMES * 2u];
-static uint32_t head, tail, count, underruns, consumed;
+static uint32_t head, tail, count, underruns, consumed, produced;
 static bool active, paused, source_eof;
 void clock_pcm_ring_reset(void) {
     active = false;
     paused = false;
     source_eof = false;
-    head = tail = count = underruns = consumed = 0;
+    head = tail = count = underruns = consumed = produced = 0;
 }
 uint32_t clock_pcm_ring_available(void) { return count; }
 uint32_t clock_pcm_ring_free(void) { return CLOCK_PCM_RING_FRAMES - count; }
@@ -19,6 +19,7 @@ bool clock_pcm_ring_push(int16_t l, int16_t r) {
     samples[2u * head + 1u] = r;
     head = (head + 1u) % CLOCK_PCM_RING_FRAMES;
     ++count;
+    ++produced;
     return true;
 }
 uint32_t clock_pcm_ring_pop(int16_t *dst, uint32_t frames) {
@@ -50,3 +51,4 @@ bool clock_pcm_ring_eof(void) { return source_eof; }
 bool clock_pcm_ring_active(void) { return active; }
 uint32_t clock_pcm_ring_underruns(void) { return underruns; }
 uint32_t clock_pcm_ring_consumed(void) { return consumed; }
+uint32_t clock_pcm_ring_produced(void) { return produced; }
