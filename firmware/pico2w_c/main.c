@@ -80,6 +80,14 @@ static bool timer_audio_jbl_enabled;
 static audio_track_t bt_timer_tracks[AUDIO_QUEUE_CAPACITY];
 static uint8_t bt_timer_count, bt_timer_index;
 static bool bt_timer_running, bt_timer_started;
+static bool alarm_audio_jbl_enabled; // RAM-only, defaults LOCAL.
+static audio_track_t bt_alarm_tracks[AUDIO_QUEUE_CAPACITY];
+static uint8_t bt_alarm_count, bt_alarm_index;
+static bool bt_alarm_running, bt_alarm_started;
+static void bt_alarm_stop(const char *reason);
+static void bt_alarm_service(void);
+static void bt_alarm_fallback(const char *reason);
+static bool bt_alarm_prepare(const audio_queue_t *plan);
 static void bt_timer_cancel(const char *reason);
 static void bt_timer_service(void);
 static void bt_timer_fallback(const char *reason);
@@ -1582,12 +1590,67 @@ static void alarm_status(void) {
     }
 }
 
+static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
+                              uint64_t now, bool test) {
+#ifdef CLOCK_ENABLE_A2DP
+    bt_speech_cancel("ALARM_PRIORITY");
+    bt_timer_cancel("ALARM_PRIORITY");
+    if (routed_test_pending) {
+        if (mp3_play_active()) mp3_play_stop();
+        routed_test_pending = false;
+    }
+    if (mp3_play_active()) mp3_play_stop();
+#endif
+    audio_queue_clear(&audio_queue, true);
+    audio_queue_t plan = {0};
+    bool queued = true;
+    if (language == SPEECH_RU)
+        queued = audio_queue_enqueue(&plan, 7u, (uint8_t)(index + 1u));
+    else
+        puts("[ALARM] DE number phrase unavailable; skipping RU number");
+    if (queued)
+        queued = speech_enqueue_time(&plan, language, hour, minute, exact_hour_phrase);
+    if (queued) {
+        if (alarms[index].sound == ALARM_SOUND_MUSIC)
+            queued = audio_queue_enqueue(&plan, 8u, alarms[index].track);
+        else
+            queued = audio_queue_enqueue(&plan, 7u, 13u);
+    }
+    if (!queued || !plan.size) {
+        puts("[ALARM] skipped=QUEUE_FULL or empty plan");
+        return;
+    }
+    alarm_active_index = (int)index;
+    alarm_deadline_ms = now + ALARM_SAFETY_TIMEOUT_MS;
+    alarm_audio_armed = true;
+#ifdef CLOCK_ENABLE_A2DP
+    if (bt_alarm_prepare(&plan)) {
+        printf("[ALARM-AUDIO] output=JBL%s\n", test ? " TEST" : "");
+    } else
+#endif
+    {
+        for (unsigned i = 0; i < plan.size; ++i) {
+            audio_track_t t = plan.items[(plan.head + i) % AUDIO_QUEUE_CAPACITY];
+            if (!audio_queue_enqueue(&audio_queue, t.folder, t.track))
+                puts("[ALARM] CRITICAL: local enqueue failed");
+        }
+        printf("[ALARM-AUDIO] output=LOCAL%s\n", test ? " TEST" : "");
+    }
+    printf("[ALARM] %u RINGING %02u:%02u sound=%s track=%u%s\n",
+           index + 1u, (unsigned)hour, (unsigned)minute,
+           alarms[index].sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL",
+           (unsigned)alarms[index].track, test ? " TEST" : "");
+}
+
 static void alarm_stop(const char *reason) {
     if (alarm_active_index < 0) {
         puts("[ALARM] no active alarm");
         return;
     }
     int number = alarm_active_index + 1;
+#ifdef CLOCK_ENABLE_A2DP
+    bt_alarm_stop(reason);
+#endif
     audio_queue_clear(&audio_queue, true);
     alarm_active_index = -1;
     alarm_audio_armed = false;
@@ -1603,7 +1666,11 @@ static void alarm_service_playback(uint64_t now) {
     }
     // Do not assume playback is complete before the queued DFPlayer
     // command actually starts; BUSY must also return inactive.
-    if (alarm_audio_armed && audio_queue_idle(&audio_queue) && !dfplayer_busy()) {
+    if (alarm_audio_armed && audio_queue_idle(&audio_queue) && !dfplayer_busy()
+#ifdef CLOCK_ENABLE_A2DP
+        && !bt_alarm_running
+#endif
+       ) {
         alarm_active_index = -1;
         alarm_audio_armed = false;
         alarm_deadline_ms = 0u;
@@ -1668,36 +1735,7 @@ static void alarm_service_rtc(const ds1302_datetime_t *dt, uint64_t now) {
 #ifdef CLOCK_ENABLE_A2DP
     bt_timer_cancel("ALARM_PRIORITY");
 #endif
-    audio_queue_clear(&audio_queue, true);
-    bool queued = true;
-    if (language == SPEECH_RU) {
-        queued = audio_queue_enqueue(&audio_queue, 7u, (uint8_t)(index + 1));
-    } else {
-        puts("[ALARM] DE number phrase unavailable; skipping RU number");
-    }
-    if (queued) {
-        queued = speech_enqueue_time(&audio_queue, language, dt->hour,
-                                     dt->minute, exact_hour_phrase);
-    }
-    if (queued) {
-        if (alarms[index].sound == ALARM_SOUND_MUSIC) {
-            queued = audio_queue_enqueue(&audio_queue, 8u, alarms[index].track);
-        } else {
-            queued = audio_queue_enqueue(&audio_queue, 7u, 13u);
-        }
-    }
-    if (!queued) {
-        audio_queue_clear(&audio_queue, true);
-        puts("[ALARM] skipped=QUEUE_FULL");
-        return;
-    }
-    alarm_active_index = index;
-    alarm_deadline_ms = now + ALARM_SAFETY_TIMEOUT_MS;
-    alarm_audio_armed = true;
-    printf("[ALARM] %d RINGING %02u:%02u sound=%s track=%u\n",
-           index + 1, (unsigned)dt->hour, (unsigned)dt->minute,
-           alarms[index].sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL",
-           (unsigned)alarms[index].track);
+    alarm_start_audio((unsigned)index, dt->hour, dt->minute, now, false);
 }
 
 static void alarm_set(char *args) {
