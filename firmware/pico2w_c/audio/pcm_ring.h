@@ -23,3 +23,22 @@ uint32_t clock_pcm_ring_underruns(void);
 uint32_t clock_pcm_ring_consumed(void);
 // Monotonic successful pushes since reset; used to diagnose accounting drift.
 uint32_t clock_pcm_ring_produced(void);
+
+// Captures the *first* violation without printing inside the A2DP callback.
+// Zero fault_code means no invariant violation was captured since reset.
+// phase: 1=push-entry, 2=pop-entry, 3=pop-exit, 4=reset-during-pop.
+typedef struct {
+    uint32_t fault_code;
+    uint32_t phase;
+    uint32_t produced;
+    uint32_t consumed;
+    uint32_t buffered;
+    uint32_t head;
+    uint32_t tail;
+    uint32_t request;
+    uint32_t take;
+    uint32_t pop_calls;
+    uint32_t max_pop_depth;
+    uint32_t resets_during_pop;
+} clock_pcm_ring_diag_t;
+void clock_pcm_ring_diagnostics(clock_pcm_ring_diag_t *snapshot);
