@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stdint.h>
 // Experimental optional Helix MP3 diagnostic: decodes at most 16 * 256
 // stereo PCM frames to RAM and reports metadata/benchmark, no audio output.
 bool mp3_probe_start(const char *path);
