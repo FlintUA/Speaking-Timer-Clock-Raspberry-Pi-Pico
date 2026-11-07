@@ -154,7 +154,7 @@ bool sd_spi_read_sector(uint32_t lba,uint8_t *dst){
     if(!sd_info.ready || dst==NULL)return false;
     uint32_t addr=sd_info.high_capacity ? lba : lba*512u;
     uint8_t r=command(17,addr,0x01);
-    if(r!=0){printf("[SD] CMD17 lba=%lu R1=0x%02x\n",(unsigned long)lba,r);deselect();return false;}
+    if(r!=0){printf("[SD] CMD17 lba=%lu R1=0x%02x\n",(unsigned long)lba,r);deselect();sd_info.ready=false;return false;}
     uint8_t token=0xff;
     // 4 MHz, around 250 ms timeout, leave an upper bound even on absent card.
     for(unsigned i=0;i<125000;i++){
@@ -163,7 +163,7 @@ bool sd_spi_read_sector(uint32_t lba,uint8_t *dst){
     }
     if(token!=0xfe){
         printf("[SD] Read token lba=%lu: 0x%02x\n",(unsigned long)lba,token);
-        deselect();return false;
+        deselect();sd_info.ready=false;return false;
     }
     for(int i=0;i<512;i++)dst[i]=xfer(0xff);
     xfer(0xff);xfer(0xff); // CRC16 discarded in first read-only test
