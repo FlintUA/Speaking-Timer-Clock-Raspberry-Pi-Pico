@@ -1590,6 +1590,88 @@ static void alarm_status(void) {
     }
 }
 
+#ifdef CLOCK_ENABLE_A2DP
+// Alarm owns the MP3 playback while active. Playback state does not alter
+// the one-shot RTC scheduler or the persisted settings.
+static void bt_alarm_stop(const char *reason) {
+    if (!bt_alarm_running) return;
+    if (bt_alarm_started && mp3_play_active()) mp3_play_stop();
+    bt_alarm_running = false;
+    bt_alarm_started = false;
+    printf("[BT-ALARM] STOP reason=%s\n", reason);
+}
+static bool bt_alarm_prepare(const audio_queue_t *plan) {
+    if (!alarm_audio_jbl_enabled || !plan || !plan->size ||
+        plan->size > AUDIO_QUEUE_CAPACITY ||
+        !clock_a2dp_stream_active() || clock_a2dp_current_rate() != 44100u ||
+        mp3_play_active() || mp3_probe_active() || sd_fat32_stream_active()) {
+        if (alarm_audio_jbl_enabled)
+            puts("[BT-ALARM] JBL unavailable/busy; choosing LOCAL");
+        return false;
+    }
+    for (unsigned i = 0; i < plan->size; ++i)
+        bt_alarm_tracks[i] = plan->items[(plan->head + i) % AUDIO_QUEUE_CAPACITY];
+    bt_alarm_count = plan->size;
+    bt_alarm_index = 0u;
+    bt_alarm_started = false;
+    bt_alarm_running = true;
+    printf("[BT-ALARM] START segments=%u gain=53.3%%\n",
+           (unsigned)bt_alarm_count);
+    return true;
+}
+static void bt_alarm_fallback(const char *reason) {
+    if (!bt_alarm_running) return;
+    if (bt_alarm_started && mp3_play_active()) mp3_play_stop();
+    unsigned queued = 0u;
+    for (unsigned i = bt_alarm_index; i < bt_alarm_count; ++i) {
+        audio_track_t t = bt_alarm_tracks[i];
+        if (!audio_queue_enqueue(&audio_queue, t.folder, t.track)) break;
+        ++queued;
+    }
+    bt_alarm_running = false;
+    bt_alarm_started = false;
+    printf("[BT-ALARM] LOCAL fallback reason=%s queued=%u/%u\n",
+           reason, queued, (unsigned)(bt_alarm_count - bt_alarm_index));
+}
+static void bt_alarm_service(void) {
+    if (!bt_alarm_running) return;
+    if (alarm_active_index < 0 || !sound_enabled) {
+        bt_alarm_stop("ALARM_STOPPED_OR_MUTED");
+        return;
+    }
+    if (!clock_a2dp_stream_active() || clock_a2dp_current_rate() != 44100u) {
+        bt_alarm_fallback("A2DP_UNAVAILABLE");
+        return;
+    }
+    if (audio_queue.pause_pending || dfplayer_busy()) return;
+    if (audio_queue.size || audio_queue.track_started) {
+        bt_alarm_fallback("LOCAL_AUDIO_PRIORITY");
+        return;
+    }
+    if (bt_alarm_started) {
+        if (mp3_play_active()) return;
+        ++bt_alarm_index;
+        bt_alarm_started = false;
+    }
+    if (bt_alarm_index >= bt_alarm_count) {
+        bt_alarm_running = false;
+        puts("[BT-ALARM] COMPLETE");
+        return;
+    }
+    audio_track_t t = bt_alarm_tracks[bt_alarm_index];
+    char path[20];
+    snprintf(path, sizeof(path), "%02u/%03u.mp3",
+             (unsigned)t.folder, (unsigned)t.track);
+    if (!mp3_play_start(path, clock_a2dp_current_rate())) {
+        bt_alarm_fallback("MP3_OPEN_FAILED");
+        return;
+    }
+    bt_alarm_started = true;
+    printf("[BT-ALARM] SEGMENT %u/%u %s\n",
+           (unsigned)(bt_alarm_index + 1u), (unsigned)bt_alarm_count, path);
+}
+#endif
+
 static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
                               uint64_t now, bool test) {
 #ifdef CLOCK_ENABLE_A2DP
@@ -2709,6 +2791,7 @@ int main(void) {
         // Bluetooth timer is an independent owner: allow timer.running while
         // its own start announcement plays. The upcoming generic MP3 guard
         // must not accidentally cancel this playback.
+        bt_alarm_service();
         bt_timer_service();
         bt_speech_service();
 #endif
@@ -2718,7 +2801,11 @@ int main(void) {
 #ifdef CLOCK_ENABLE_A2DP
               && !bt_timer_running
 #endif
-             ) || alarm_active_index >= 0 || music_ui_open ||
+             ) || (alarm_active_index >= 0
+#ifdef CLOCK_ENABLE_A2DP
+              && !bt_alarm_running
+#endif
+             ) || music_ui_open ||
              !sound_enabled || !audio_queue_idle(&audio_queue)
 #ifdef CLOCK_ENABLE_A2DP
              || !clock_a2dp_stream_active()
