@@ -45,6 +45,7 @@ target_link_libraries(speaking_clock_c PRIVATE
     hardware_i2c
     hardware_spi
     hardware_uart
+    hardware_sync
     hardware_flash
     pico_flash
     pico_bootrom
