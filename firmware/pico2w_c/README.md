@@ -1203,3 +1203,29 @@ a running 44100Hz A2DP stream. The feature is optional and requires
 compiled or tested on physical Pico 2 W. First test a short MP3 and then
 a longer one, observing `mp3-status`, RTC ticks and audio stability.
 Do not change persistent clock settings during initial experiment.
+
+
+## Hands-free pause test on existing short sound files (2026-11-07)
+
+Because the user's 07/001.mp3 and 07/002.mp3 files are each about two seconds,
+manual COM8 pause commands normally arrive after their playback has finished.
+New optional diagnostic command:
+```text
+sd-test
+bt-status
+mp3-pause-test 07/001.mp3
+mp3-status
+```
+The first command starts the normal 53.3%-gain JBL MP3 playback; when 300ms
+of 44.1kHz output has been consumed it automatically pauses the PCM ring for
+1000ms (A2DP keeps sending SBC silence). Afterwards it resumes the preserved
+buffer and decoder, then plays the remainder of the MP3. UART emits
+`[MP3-TEST] Auto pause triggered`, `[MP3-PLAY] PAUSED`,
+`[MP3-PLAY] RESUMED`, `[MP3-TEST] Auto resume completed`,
+and `[MP3-PLAY] COMPLETE`. This avoids having to copy a long test file.
+
+`mp3-status` after the file ends now retains the last playback's
+`consumed` and `underruns` counters (the live ring remains reset).
+Usual DFPlayer output and Flash settings are unchanged. Use
+`mp3-stop` to abort an unexpected test. This update requires recompiling
+and is **not yet verified** on the physical Pico.
