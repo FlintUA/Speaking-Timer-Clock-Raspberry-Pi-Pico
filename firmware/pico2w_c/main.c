@@ -1782,7 +1782,7 @@ static void handle_command(char *line) {
         if (!clock_a2dp_stream_active() || !sound_enabled ||
             timer.running || alarm_active_index >= 0 || music_ui_open ||
             sd_fat32_stream_active() || mp3_probe_active() ||
-            !audio_queue_idle(&audio_queue)) {
+            bt_speech_running || !audio_queue_idle(&audio_queue)) {
             puts("[MP3-TEST] Refused: A2DP not ready or clock/audio busy");
         } else if (!mp3_play_pause_test_start(line + 15, clock_a2dp_current_rate())) {
             puts("[MP3-TEST] Start failed");
@@ -1795,7 +1795,7 @@ static void handle_command(char *line) {
         if (!clock_a2dp_stream_active() || !sound_enabled ||
             timer.running || alarm_active_index >= 0 || music_ui_open ||
             sd_fat32_stream_active() || mp3_probe_active() ||
-            !audio_queue_idle(&audio_queue)) {
+            bt_speech_running || !audio_queue_idle(&audio_queue)) {
             puts("[MP3-PLAY] Refused: A2DP not ready, sound muted or timer/alarm/audio busy");
         } else if (!mp3_play_start(line + 9, clock_a2dp_current_rate())) {
             puts("[MP3-PLAY] Start failed");
@@ -1883,6 +1883,9 @@ static void handle_command(char *line) {
             puts("[AUDIO-ROUTE] Usage: audio-route-test <folder 1..99> <track 1..255>");
         } else if (!sound_enabled || timer.running || alarm_active_index >= 0 ||
                    music_ui_open || mp3_play_active() || mp3_probe_active() ||
+#ifdef CLOCK_ENABLE_A2DP
+                   bt_speech_running ||
+#endif
                    sd_fat32_stream_active() || !audio_queue_idle(&audio_queue) ||
                    dfplayer_busy()) {
             puts("[AUDIO-ROUTE] Test refused: sound disabled or clock/audio busy");
@@ -1922,6 +1925,12 @@ static void handle_command(char *line) {
                audio_router_name(audio_router.effective),
                audio_router.bt_connected ? "STREAM_ACTIVE" : "OFFLINE");
         puts("[AUDIO-ROUTE] NOTE: manual say + audio-route-test use selected output; automatic speech/music/alarms stay LOCAL");
+#ifdef CLOCK_ENABLE_A2DP
+        printf("[BT-SPEECH] running=%s segment=%u/%u\n",
+               bt_speech_running ? "YES" : "NO",
+               (unsigned)(bt_speech_running ? bt_speech_index + 1u : 0u),
+               (unsigned)(bt_speech_running ? bt_speech_count : 0u));
+#endif
     } else if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
         puts("[SD] sd-test - initialize/read SD card read-only; sd-info - last detection result");
         puts("[SD] sd-list [folder] - show FAT32 8.3 names; sd-file 07/001.mp3 - read first bytes");
