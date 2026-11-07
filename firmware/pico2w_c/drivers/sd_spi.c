@@ -13,6 +13,27 @@
 
 static sd_spi_info_t sd_info;
 static uint8_t sector[SD_SECTOR_SIZE];
+#define SD_AUTO_RETRY_MS 30000u
+static bool sd_auto_attempted;
+static uint32_t sd_auto_last_attempt_ms;
+
+bool sd_spi_ensure_fat32(void) {
+    if (sd_info.ready && sd_info.fat_type == 32u) return true;
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    // Do not repeatedly block the clock loop for up to 1.5 seconds if
+    // the card is absent. Wrap-safe uint32_t elapsed subtraction.
+    if (sd_auto_attempted &&
+        (uint32_t)(now - sd_auto_last_attempt_ms) < SD_AUTO_RETRY_MS)
+        return false;
+    sd_auto_attempted = true;
+    sd_auto_last_attempt_ms = now;
+    puts("[SD-AUTO] Initializing SPI microSD + FAT32 (read-only)");
+    bool ok = sd_spi_init_card() && sd_spi_probe_fat();
+    printf("[SD-AUTO] %s%s\n", ok ? "READY" : "FAILED",
+           ok ? "" : " - using LOCAL audio; retry on later playback");
+    return ok;
+}
+
 
 static uint8_t xfer(uint8_t b){
     uint8_t rx = 0xff;
