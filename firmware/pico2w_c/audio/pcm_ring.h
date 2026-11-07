@@ -21,3 +21,5 @@ bool clock_pcm_ring_eof(void);
 bool clock_pcm_ring_active(void);
 uint32_t clock_pcm_ring_underruns(void);
 uint32_t clock_pcm_ring_consumed(void);
+// Monotonic successful pushes since reset; used to diagnose accounting drift.
+uint32_t clock_pcm_ring_produced(void);
