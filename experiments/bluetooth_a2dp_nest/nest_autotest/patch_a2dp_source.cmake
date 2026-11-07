@@ -157,6 +157,8 @@ bool clock_a2dp_select_target(const char *address){
     clock_bt_scan_requested = false;
     scan_active = false;
     clock_reconnect_cancel();
+    char previous_target[18];
+    memcpy(previous_target, clock_autoconnect_target, sizeof(previous_target));
     memcpy(clock_autoconnect_target, address, 18u);
     printf("[BT] Selected sink %s\n", clock_autoconnect_target);
     if (!clock_bt_stack_ready) return true;
@@ -165,7 +167,9 @@ bool clock_a2dp_select_target(const char *address){
         uint8_t rc = a2dp_source_disconnect(media_tracker.a2dp_cid);
         if (rc != ERROR_CODE_SUCCESS){
             clock_bt_switch_requested = false;
+            memcpy(clock_autoconnect_target, previous_target, sizeof(previous_target));
             printf("[BT] switch disconnect failed 0x%02x\n", rc);
+            clock_reconnect_schedule();
             return false;
         }
         return true;
@@ -222,7 +226,7 @@ set(_new_boot_scan [=[
                     clock_reconnect_schedule();
                 }
             } else {
-                a2dp_source_demo_start_scanning();
+                puts("[BT] No saved sink; select a discoverable speaker using SETTINGS > Bluetooth");
             }
 ]=])
 string(FIND "${_source}" "${_old_boot_scan}" _boot_scan_pos)
