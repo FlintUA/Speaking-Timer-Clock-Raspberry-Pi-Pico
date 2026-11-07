@@ -131,6 +131,7 @@ static bool bt_pending_target_valid, bt_pending_seen_disconnected;
 static uint8_t volume = 10; // Local DFPlayer 0..30.
 static uint8_t bt_volume = 16; // Independent Bluetooth output 0..30.
 static bool volume_overlay_bluetooth;
+static bool bt_volume_remote_synced;
 static bool menu_volume_bluetooth;
 static bool sound_enabled = true;
 static speech_language_t language = SPEECH_RU;
@@ -1021,8 +1022,9 @@ static void set_output_volume(bool bluetooth, uint8_t level) {
     if (level > 30u) level = 30u;
 #ifdef CLOCK_ENABLE_A2DP
     if (bluetooth) {
-        if (bt_volume == level) return;
+        if (bt_volume == level && bt_volume_remote_synced) return;
         bt_volume = level;
+        bt_volume_remote_synced = true;
         clock_a2dp_set_volume(bt_volume);
         settings_mark_changed();
         printf("[AUDIO] Bluetooth volume=%u/30 output=%s\n",
@@ -1050,7 +1052,8 @@ static void change_volume(int direction) {
     // the clock manages the 0..30 setting independently.
     if (bluetooth && clock_a2dp_avrcp_available()) {
         uint8_t remote = clock_a2dp_remote_volume();
-        if (remote <= 127u && !clock_a2dp_pcm_volume_fallback())
+        if (!bt_volume_remote_synced && remote <= 127u &&
+            !clock_a2dp_pcm_volume_fallback())
             current = (uint8_t)(((unsigned)remote * 30u + 63u) / 127u);
     }
 #endif
@@ -3370,6 +3373,7 @@ int main(void) {
         // Persist a newly selected sink only after it has REALLY established
         // an A2DP stream. Observe the old link going down first so the old
         // ACTIVE state cannot accidentally commit a failed selection.
+        if (!clock_a2dp_stream_active()) bt_volume_remote_synced = false;
         if (bt_pending_target_valid) {
             if (!clock_a2dp_stream_active()) bt_pending_seen_disconnected = true;
             if (bt_pending_seen_disconnected && clock_a2dp_stream_active()) {
