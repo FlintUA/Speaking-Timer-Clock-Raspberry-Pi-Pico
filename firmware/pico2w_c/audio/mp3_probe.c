@@ -162,7 +162,7 @@ bool mp3_play_start(const char *path, uint32_t a2dp_rate) {
     play_frames_decoded = play_frames_pushed = 0;
     play_decode_time_us = init_elapsed;
     play_budget_frames = play_src_rate * MP3_PLAY_LIMIT_SECONDS;
-    printf("[MP3-PLAY] START /%s: %luHz %lu bps -> 44100Hz, max %u seconds, gain 20%%\n",
+    printf("[MP3-PLAY] START /%s: %luHz %lu bps -> 44100Hz, max %u seconds, gain 40%%\n",
            path, (unsigned long)play_src_rate,
            (unsigned long)helix_mp3_get_bitrate(&decoder),
            MP3_PLAY_LIMIT_SECONDS);
