@@ -2680,9 +2680,9 @@ static void handle_command(char *line) {
         } else if (menu_state != MENU_CLOSED) menu_close();
         else menu_open(now);
     } else if (strcmp(line, "start") == 0) {
-        if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED ||
-            music_ui_open) {
-            puts("[TIMER] start blocked: alarm ringing or UI open");
+        // Timer is tactical: it can preempt and defer a ringing alarm.
+        if (alarm_ui_state != ALARM_UI_CLOSED || music_ui_open) {
+            puts("[TIMER] start blocked: close editor/player first");
         } else {
             if (menu_state != MENU_CLOSED) menu_close();
             timer_start_now(now);
