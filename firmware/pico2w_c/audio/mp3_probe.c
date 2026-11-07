@@ -89,6 +89,15 @@ static uint32_t play_src_rate, play_dst_rate, play_phase;
 static uint32_t play_frames_decoded, play_frames_pushed;
 static uint64_t play_decode_time_us;
 static int16_t play_prev_l, play_prev_r;
+static bool auto_pause_test, auto_pause_done;
+static uint64_t auto_resume_at_us;
+static uint32_t last_consumed, last_underruns;
+static bool last_valid;
+static void capture_play_stats(void) {
+    last_consumed = clock_pcm_ring_consumed();
+    last_underruns = clock_pcm_ring_underruns();
+    last_valid = true;
+}
 
 bool mp3_play_active(void) { return playing; }
 void mp3_play_status(void) {
@@ -98,8 +107,10 @@ void mp3_play_status(void) {
            (unsigned long)play_src_rate, (unsigned long)play_dst_rate,
            (unsigned long)play_frames_decoded,
            (unsigned long)play_frames_pushed,
-           (unsigned long)clock_pcm_ring_consumed(),
-           (unsigned long)clock_pcm_ring_underruns(),
+           (unsigned long)(playing ? clock_pcm_ring_consumed() :
+                           (last_valid ? last_consumed : 0u)),
+           (unsigned long)(playing ? clock_pcm_ring_underruns() :
+                           (last_valid ? last_underruns : 0u)),
            play_eof ? "YES" : "NO",
            (unsigned long long)play_decode_time_us);
 }
@@ -113,9 +124,11 @@ void mp3_play_stop(void) {
             play_decoder_open = false;
         }
     }
+    if (playing) capture_play_stats();
     playing = false;
     play_paused = false;
     play_eof = false;
+    auto_pause_test = false;
     clock_pcm_ring_reset();
 }
 bool mp3_play_pause(void) {
@@ -171,6 +184,9 @@ bool mp3_play_start(const char *path, uint32_t a2dp_rate) {
     play_decoder_open = true;
     play_eof = false;
     play_paused = false;
+    auto_pause_test = false;
+    auto_pause_done = false;
+    last_valid = false;
     play_first = true;
     play_phase = 0;
     play_frames_decoded = play_frames_pushed = 0;
@@ -180,8 +196,33 @@ bool mp3_play_start(const char *path, uint32_t a2dp_rate) {
            (unsigned long)helix_mp3_get_bitrate(&decoder));
     return true;
 }
+bool mp3_play_pause_test_start(const char *path, uint32_t a2dp_rate) {
+    if (!mp3_play_start(path, a2dp_rate)) return false;
+    auto_pause_test = true;
+    auto_pause_done = false;
+    puts("[MP3-TEST] Auto pause at 300 ms of output; resume after 1000 ms");
+    return true;
+}
 static void mp3_play_service(void) {
-    if (!playing || play_paused) return;
+    if (!playing) return;
+    if (auto_pause_test && play_paused && auto_pause_done &&
+        time_us_64() >= auto_resume_at_us) {
+        if (mp3_play_resume()) {
+            auto_pause_test = false;
+            puts("[MP3-TEST] Auto resume completed");
+        }
+    }
+    if (play_paused) return;
+    if (auto_pause_test && !auto_pause_done &&
+        clock_pcm_ring_active() &&
+        clock_pcm_ring_consumed() >= (44100u * 300u / 1000u)) {
+        if (mp3_play_pause()) {
+            auto_pause_done = true;
+            auto_resume_at_us = time_us_64() + 1000000u;
+            puts("[MP3-TEST] Auto pause triggered; will resume after 1000 ms");
+        }
+        return;
+    }
     if (!play_eof && clock_pcm_ring_free() >= MP3_PLAY_BLOCK + 4u &&
         clock_pcm_ring_available() <= CLOCK_PCM_RING_FRAMES - 512u) {
         uint64_t now = time_us_64();
@@ -241,7 +282,9 @@ static void mp3_play_service(void) {
     if (play_eof && clock_pcm_ring_available() == 0u) {
         mp3_play_status();
         puts("[MP3-PLAY] COMPLETE; resuming A2DP silence");
+        capture_play_stats();
         playing = false;
+        auto_pause_test = false;
         clock_pcm_ring_reset();
     }
 }
@@ -262,6 +305,11 @@ bool mp3_play_start(const char *path, uint32_t rate) {
 void mp3_play_stop(void) {}
 bool mp3_play_active(void) { return false; }
 bool mp3_play_pause(void) { return false; }
+bool mp3_play_pause_test_start(const char *path, uint32_t rate) {
+    (void)path; (void)rate;
+    puts("[MP3-TEST] MP3 support not compiled");
+    return false;
+}
 bool mp3_play_resume(void) { return false; }
 void mp3_play_status(void) {
     puts("[MP3-PLAY] MP3 support not compiled");
