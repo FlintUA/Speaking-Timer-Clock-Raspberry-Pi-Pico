@@ -546,3 +546,36 @@ User bench procedure: `sd-test`, `bt-status`,
 resumed behavior after A2DP disconnection, scheduled alarm priority,
 non-Bluetooth build regression. The previous 128-frame over-consumption
 observation remains to be investigated separately.
+
+
+## 2026-11-07 opt-in Bluetooth alarm playback, staged
+
+Source-level implementation added in `main.c` after user successfully
+bench-tested complete timer start/cancel/finish speech through JBL and
+the same events through DFPlayer (COM8 11:14-11:16, no registered
+PCM underruns). New volatile commands:
+`alarm-audio jbl|local`, `alarm-audio`, `alarm-audio-test 1..5`.
+Reboot retains LOCAL as safe output and no flash alarm schema changes.
+
+Both scheduled RTC alarms and simulated `alarm-audio-test N` call
+a common alarm-start helper. The scratch audio plan is identical to
+the existing logic: RU number in folder 07, voice time sequence,
+and final folder 08 music track or folder 07 track 013 signal. For
+live 44.1kHz A2DP with opt-in, a single-owner state machine decodes
+each MP3 through the existing Helix/PCM ring. No SD work occurs inside
+BTstack callbacks. If A2DP becomes unavailable, incomplete/remaining
+fragments enqueue on DFPlayer. If Bluetooth wasn't ready at start,
+use DFPlayer from the beginning.
+
+`alarm_service_playback` now considers `bt_alarm_running` before
+declaring completed. Physical ALARM button, serial `alarm-stop`,
+and 15min safety timeout stop either audio owner. Timer/voice/test
+streams are preempted before the alarm starts; destructive PCM debug
+commands are blocked during ringing. `alarm-audio-test N` uses the
+current RTC time and existing selected sound but doesn't touch the
+one-shot minute state or persist changes.
+
+Still pending: firmware SDK compile, audible multi-track alarm,
+button stop, failover on real BT loss, live RTC-scheduled trigger,
+non-Bluetooth regression tests. Do not use the new audio path for
+critical waking until failure scenarios have been exercised.
