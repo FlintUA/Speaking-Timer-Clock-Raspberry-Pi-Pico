@@ -124,6 +124,10 @@ static uint8_t saved_audio_timer, saved_audio_alarm;
 #endif
 // Save selected Bluetooth sink MAC even in BT-free firmware builds.
 static uint8_t saved_bt_target_addr[6];
+#ifdef CLOCK_ENABLE_A2DP
+static uint8_t bt_pending_target_addr[6];
+static bool bt_pending_target_valid, bt_pending_seen_disconnected;
+#endif
 static uint8_t volume = 10; // Default; overridden by saved flash settings.
 static bool sound_enabled = true;
 static speech_language_t language = SPEECH_RU;
@@ -1417,11 +1421,14 @@ static bool bt_sink_select(const char *mac){
         puts("[BT-SELECT] Busy audio/timer; selection refused");
         return false;
     }
+    bool was_active = clock_a2dp_stream_active();
     if (!clock_a2dp_select_target(mac)) return false;
     for (unsigned i=0;i<6u;i++)
-        saved_bt_target_addr[i] = (uint8_t)b[i];
-    settings_mark_changed();
-    printf("[BT-SELECT] preferred=%s, connect requested; LOCAL fallback remains\n",
+        bt_pending_target_addr[i] = (uint8_t)b[i];
+    bt_pending_target_valid = true;
+    bt_pending_seen_disconnected = !was_active;
+    // Do not persist a sink that never successfully negotiates A2DP.
+    printf("[BT-SELECT] connecting=%s; save only after stream ACTIVE\n",
            clock_a2dp_target());
     return true;
 }
@@ -2460,8 +2467,10 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "bt-devices") == 0) {
         bt_scan_list();
     } else if (strcmp(line, "bt-target") == 0) {
-        printf("[BT] preferred=%s stream=%s\n", clock_a2dp_target(),
-               clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
+        printf("[BT] preferred=%s stream=%s pending_validation=%s\n",
+               clock_a2dp_target(),
+               clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE",
+               bt_pending_target_valid ? "YES" : "NO");
     } else if (strncmp(line, "bt-use ", 7) == 0) {
         const char *argument = line + 7;
         unsigned index = 0u;
@@ -3290,6 +3299,20 @@ int main(void) {
     uint32_t previous_remaining = UINT32_MAX;
     while (true) {
 #ifdef CLOCK_ENABLE_A2DP
+        // Persist a newly selected sink only after it has REALLY established
+        // an A2DP stream. Observe the old link going down first so the old
+        // ACTIVE state cannot accidentally commit a failed selection.
+        if (bt_pending_target_valid) {
+            if (!clock_a2dp_stream_active()) bt_pending_seen_disconnected = true;
+            if (bt_pending_seen_disconnected && clock_a2dp_stream_active()) {
+                memcpy(saved_bt_target_addr, bt_pending_target_addr,
+                       sizeof(saved_bt_target_addr));
+                bt_pending_target_valid = false;
+                settings_mark_changed();
+                printf("[BT-SELECT] stream ACTIVE, sink accepted for Flash autosave: %s\n",
+                       clock_a2dp_target());
+            }
+        }
         // Synchronize with actual media-stream status, including reconnect and loss.
         // Only the configured JBL test endpoint is supported in this stage.
         bool bt_ready = clock_a2dp_stream_active();
