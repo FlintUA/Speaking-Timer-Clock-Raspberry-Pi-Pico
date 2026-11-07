@@ -128,7 +128,10 @@ static uint8_t saved_bt_target_addr[6];
 static uint8_t bt_pending_target_addr[6];
 static bool bt_pending_target_valid, bt_pending_seen_disconnected;
 #endif
-static uint8_t volume = 10; // Default; overridden by saved flash settings.
+static uint8_t volume = 10; // Local DFPlayer 0..30.
+static uint8_t bt_volume = 16; // Independent Bluetooth output 0..30.
+static bool volume_overlay_bluetooth;
+static bool menu_volume_bluetooth;
 static bool sound_enabled = true;
 static speech_language_t language = SPEECH_RU;
 // Two-level settings menu, following the MicroPython navigation model.
@@ -866,6 +869,7 @@ static clock_settings_t settings_snapshot(void) {
     clock_settings_t cfg = {
         .language = (uint8_t)language,
         .volume = volume,
+        .bt_volume = bt_volume,
         .exact_hour = exact_hour_phrase,
         .quiet_enabled = quiet_enabled,
         .quiet_start = quiet_start,
@@ -892,6 +896,7 @@ static clock_settings_t settings_snapshot(void) {
 static bool settings_equal(clock_settings_t a, clock_settings_t b) {
     // Compare fields explicitly, not struct padding.
     if (a.language != b.language || a.volume != b.volume ||
+        a.bt_volume != b.bt_volume ||
         a.exact_hour != b.exact_hour || a.quiet_enabled != b.quiet_enabled ||
         a.quiet_start != b.quiet_start || a.quiet_end != b.quiet_end ||
         a.half_hour_enabled != b.half_hour_enabled ||
@@ -997,17 +1002,62 @@ static void set_clock_mode(uint8_t requested, uint64_t now) {
     printf("[MODE] clock_mode=%s\n", clock_mode ? "CHIME" : "VOICE");
 }
 
+// Active audio owner takes priority. When idle, use current manual audio
+// preference; when disconnected, use the LOCAL rotary level.
+static bool volume_for_bluetooth(void) {
+#ifdef CLOCK_ENABLE_A2DP
+    if (!clock_a2dp_stream_active()) return false;
+    if (bt_timer_running || bt_alarm_running || bt_speech_running ||
+        routed_test_pending || mp3_play_active()) return true;
+    if (timer.running && !timer_audio_jbl_enabled) return false;
+    if (alarm_active_index >= 0 && !alarm_audio_jbl_enabled) return false;
+    return audio_router.requested == AUDIO_OUTPUT_BT_JBL;
+#else
+    return false;
+#endif
+}
+
+static void set_output_volume(bool bluetooth, uint8_t level) {
+    if (level > 30u) level = 30u;
+#ifdef CLOCK_ENABLE_A2DP
+    if (bluetooth) {
+        if (bt_volume == level) return;
+        bt_volume = level;
+        clock_a2dp_set_volume(bt_volume);
+        settings_mark_changed();
+        printf("[AUDIO] Bluetooth volume=%u/30 output=%s\n",
+               (unsigned)bt_volume,
+               clock_a2dp_pcm_volume_fallback() ? "PCM" : "AVRCP");
+    } else
+#endif
+    {
+        if (volume == level) return;
+        volume = level;
+        audio_queue_set_volume(&audio_queue, volume);
+        settings_mark_changed();
+        printf("[AUDIO] LOCAL volume=%u/30\n", (unsigned)volume);
+    }
+    volume_overlay_bluetooth = bluetooth;
+    volume_overlay_until_ms = to_ms_since_boot(get_absolute_time()) + VOLUME_OVERLAY_MS;
+}
+
 static void change_volume(int direction) {
-    int requested = (int)volume + direction;
+    bool bluetooth = volume_for_bluetooth();
+    uint8_t current = bluetooth ? bt_volume : volume;
+#ifdef CLOCK_ENABLE_A2DP
+    // Adopt the remote speaker volume on the first encoder adjustment,
+    // preventing a sudden jump from a stale saved level. After that,
+    // the clock manages the 0..30 setting independently.
+    if (bluetooth && clock_a2dp_avrcp_available()) {
+        uint8_t remote = clock_a2dp_remote_volume();
+        if (remote <= 127u && !clock_a2dp_pcm_volume_fallback())
+            current = (uint8_t)(((unsigned)remote * 30u + 63u) / 127u);
+    }
+#endif
+    int requested = (int)current + direction;
     if (requested < 0) requested = 0;
     if (requested > 30) requested = 30;
-    if (requested == volume) return;
-    volume = (uint8_t)requested;
-    settings_mark_changed();
-    audio_queue_set_volume(&audio_queue, volume);
-    volume_overlay_until_ms = to_ms_since_boot(get_absolute_time()) + VOLUME_OVERLAY_MS;
-    printf("[AUDIO] volume=%u/30 sound=%s\n", (unsigned)volume,
-           sound_enabled ? "ON" : "OFF");
+    set_output_volume(bluetooth, (uint8_t)requested);
 }
 
 static void toggle_sound(void) {
@@ -1567,7 +1617,8 @@ static void menu_begin_edit(uint64_t now) {
             menu_state = MENU_EDIT_EXACT;
             break;
         case 6:
-            menu_volume_choice = volume;
+            menu_volume_bluetooth = volume_for_bluetooth();
+            menu_volume_choice = menu_volume_bluetooth ? bt_volume : volume;
             menu_state = MENU_EDIT_VOLUME;
             break;
         case 7:
@@ -1604,12 +1655,10 @@ static void menu_commit(uint64_t now) {
             printf("[MENU] Language selected: %s\n", speech_language_name(language));
             break;
         case MENU_EDIT_VOLUME:
-            if (volume != menu_volume_choice) {
-                volume = menu_volume_choice;
-                audio_queue_set_volume(&audio_queue, volume);
-                settings_mark_changed();
-            }
-            printf("[MENU] Volume selected: %u/30\n", (unsigned)volume);
+            set_output_volume(menu_volume_bluetooth, menu_volume_choice);
+            printf("[MENU] Volume selected: %s=%u/30\n",
+                   menu_volume_bluetooth ? "BT" : "LOCAL",
+                   (unsigned)menu_volume_choice);
             break;
         case MENU_EDIT_TIME_H:
             menu_state = MENU_EDIT_TIME_M;
@@ -1889,6 +1938,10 @@ static void load_settings_at_boot(void) {
     if (result == SETTINGS_STORE_OK) {
         language = saved.language == 1u ? SPEECH_DE : SPEECH_RU;
         volume = saved.volume;
+        bt_volume = saved.bt_volume;
+#ifdef CLOCK_ENABLE_A2DP
+        clock_a2dp_set_volume(bt_volume); // Before A2DP connects: PCM-only initial state.
+#endif
         exact_hour_phrase = saved.exact_hour;
         quiet_enabled = saved.quiet_enabled;
         quiet_start = saved.quiet_start;
@@ -2483,6 +2536,18 @@ static void handle_command(char *line) {
         } else if (!bt_sink_select(argument)) {
             puts("[BT-SELECT] Usage: bt-use N (from bt-devices) OR bt-use XX:XX:XX:XX:XX:XX");
         }
+    } else if (strcmp(line, "bt-volume") == 0) {
+        printf("[BT-VOL] preferred=%u/30 AVRCP=%s remote_absolute=%u PCM_fallback=%s\n",
+               (unsigned)bt_volume,
+               clock_a2dp_avrcp_available() ? "CONNECTED" : "OFF",
+               (unsigned)clock_a2dp_remote_volume(),
+               clock_a2dp_pcm_volume_fallback() ? "YES" : "NO");
+    } else if (strncmp(line, "bt-vol ", 7) == 0) {
+        unsigned int requested = 0u;
+        char extra = 0;
+        if (sscanf(line + 7, "%u %c", &requested, &extra) != 1 || requested > 30u)
+            puts("[BT-VOL] Usage: bt-vol <0..30>");
+        else set_output_volume(true, (uint8_t)requested);
     } else if (strcmp(line, "bt-status") == 0) {
         printf("[BT] preferred=%s\n", clock_a2dp_target());
         clock_a2dp_print_status();
@@ -2624,6 +2689,8 @@ static void handle_command(char *line) {
                "LOCAL", "LOCAL", "LOCAL"
 #endif
         );
+        printf("[AUDIO-SETTINGS] volume LOCAL=%u/30 BT=%u/30\n",
+               (unsigned)volume, (unsigned)bt_volume);
         printf("[AUDIO-SETTINGS] output=preferred, effective JBL requires A2DP; autosave=%s\n",
                autosave_pending ? "PENDING" : "IDLE");
 #ifdef CLOCK_ENABLE_A2DP
@@ -2818,6 +2885,7 @@ static void handle_command(char *line) {
         puts("[ALARM-AUDIO] alarm-audio jbl|local; alarm-audio; alarm-audio-test 1; alarm-stop");
         puts("[AUDIO-SETTINGS] audio-settings shows persisted preferences; change with audio-select, auto-audio, timer-audio, alarm-audio; save");
         puts("[BT] SETTINGS > Bluetooth: scan, browse, connect; CLI: bt-scan, bt-devices, bt-use N|MAC, bt-target, bt-scan-stop");
+        puts("[BT-VOL] bt-volume shows independent Bluetooth level; bt-vol 0..30 sets it; VOLUME encoder follows audio route");
         puts("[AUDIO-HEALTH] audio-health shows read-only owner, queue and Bluetooth status");
         puts("[ALARM-PENDING] alarm-pending, alarm-pending-test N, alarm-pending-clear (RAM only)");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
@@ -3554,7 +3622,8 @@ int main(void) {
                      (unsigned)menu_rtc_choice.day, (unsigned)menu_rtc_choice.month,
                      (unsigned)menu_rtc_choice.year);
         } else if (menu_state == MENU_EDIT_VOLUME) {
-            snprintf(top, sizeof(top), "SET VOLUME");
+            snprintf(top, sizeof(top), "VOLUME %s",
+                     menu_volume_bluetooth ? "BT" : "LOCAL");
             snprintf(bottom, sizeof(bottom), "%u / 30 PRESS=OK",
                      (unsigned)menu_volume_choice);
         } else if (menu_state == MENU_EDIT_QUIET_ENABLED) {
@@ -3587,8 +3656,11 @@ int main(void) {
             snprintf(top, sizeof(top), "SPEAK TIME %s", speech_language_name(language));
             snprintf(bottom, sizeof(bottom), "%s", speech_overlay_time);
         } else if (volume_overlay_until_ms && now < volume_overlay_until_ms) {
-            snprintf(top, sizeof(top), "VOLUME %s", sound_enabled ? "ON" : "OFF");
-            snprintf(bottom, sizeof(bottom), "%u / 30", (unsigned)volume);
+            snprintf(top, sizeof(top), "%s VOL %s",
+                     volume_overlay_bluetooth ? "BT" : "LOCAL",
+                     sound_enabled ? "ON" : "OFF");
+            snprintf(bottom, sizeof(bottom), "%u / 30",
+                     (unsigned)(volume_overlay_bluetooth ? bt_volume : volume));
         } else if (finished_screen_until_ms && now < finished_screen_until_ms) {
             snprintf(top, sizeof(top), "TIMER FINISHED");
             snprintf(bottom, sizeof(bottom), "Ready");
