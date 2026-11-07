@@ -2443,10 +2443,38 @@ static void handle_command(char *line) {
         puts("[BOOTSEL] Usage: bootsel arm | bootsel confirm | bootsel cancel");
 #ifdef CLOCK_ENABLE_A2DP
     } else if (strncmp(line, "bt-connect ", 11) == 0) {
+        // Legacy one-shot debug connection (does not change stored preference).
         const char *address = line + 11;
         if (!clock_a2dp_connect(address))
-            puts("[BT] Direct connect rejected; check address/connection status");
+            puts("[BT] Direct connect rejected; use bt-use MAC for persistent selection");
+    } else if (strcmp(line, "bt-scan") == 0) {
+        if (!bt_sink_change_allowed())
+            puts("[BT-SCAN] Refused: timer/alarm/audio busy");
+        else if (!clock_a2dp_scan_start())
+            puts("[BT-SCAN] Not ready or scan already active");
+        else puts("[BT-SCAN] Started, run bt-devices after ~10s");
+    } else if (strcmp(line, "bt-scan-stop") == 0) {
+        clock_a2dp_scan_stop();
+        puts("[BT-SCAN] Stopped");
+    } else if (strcmp(line, "bt-devices") == 0) {
+        bt_scan_list();
+    } else if (strcmp(line, "bt-target") == 0) {
+        printf("[BT] preferred=%s stream=%s\n", clock_a2dp_target(),
+               clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
+    } else if (strncmp(line, "bt-use ", 7) == 0) {
+        const char *argument = line + 7;
+        unsigned index = 0u;
+        char extra = 0;
+        if (sscanf(argument, "%u %c", &index, &extra) == 1 && index > 0u) {
+            clock_bt_device_t d;
+            if (!clock_a2dp_scan_get(index - 1u, &d) ||
+                !bt_sink_select(d.address))
+                puts("[BT-SELECT] Invalid index or selection refused");
+        } else if (!bt_sink_select(argument)) {
+            puts("[BT-SELECT] Usage: bt-use N (from bt-devices) OR bt-use XX:XX:XX:XX:XX:XX");
+        }
     } else if (strcmp(line, "bt-status") == 0) {
+        printf("[BT] preferred=%s\n", clock_a2dp_target());
         clock_a2dp_print_status();
     } else if (strcmp(line, "bt-tone") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
@@ -2779,6 +2807,7 @@ static void handle_command(char *line) {
         puts("[TIMER-AUDIO] timer-audio jbl|local; timer-audio - timer start/cancel/finish routing");
         puts("[ALARM-AUDIO] alarm-audio jbl|local; alarm-audio; alarm-audio-test 1; alarm-stop");
         puts("[AUDIO-SETTINGS] audio-settings shows persisted preferences; change with audio-select, auto-audio, timer-audio, alarm-audio; save");
+        puts("[BT] SETTINGS > Bluetooth: scan, browse, connect; CLI: bt-scan, bt-devices, bt-use N|MAC, bt-target, bt-scan-stop");
         puts("[AUDIO-HEALTH] audio-health shows read-only owner, queue and Bluetooth status");
         puts("[ALARM-PENDING] alarm-pending, alarm-pending-test N, alarm-pending-clear (RAM only)");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
