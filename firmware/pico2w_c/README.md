@@ -1127,3 +1127,38 @@ Close COM8 serial monitor for update. Afterwards run
 The normal `-Build -Bluetooth` remains unchanged (MP3 OFF).
 The MP3 build and performance on actual RP2350 are **not verified yet**.
 Keep the working UF2 for rollback.
+
+
+## First MP3 playback over Bluetooth (experimental, hardware test pending)
+
+With the optional external Helix decoder checked out as documented above and
+MP3 firmware built by `-Build -Bluetooth -Mp3`, you may try the first
+**five-second-only** playback on the connected JBL. The BTstack A2DP stream must
+already be ACTIVE at 44100 Hz, and Pico's dedicated FAT32 SPI1 card must pass
+`sd-test`.
+
+```text
+sd-test
+bt-status
+mp3-play 07/001.mp3
+mp3-status
+mp3-stop
+```
+
+The test decodes 48kHz/192k MP3 into RAM with Helix and resamples to 44.1kHz,
+feeding an 8192-stereo-frame PCM ring to the existing SBC encoder. The source
+decoder uses at most 256 source frames per main loop pass; BT callback only
+copies prepared PCM data. The output amplitude is limited to **10%** by the
+existing final A2DP PCM attenuation, which is independent of the JBL's own
+absolute volume. Keep the speaker volume low for the first test. `mp3-stop`
+ends the test; playback ends automatically after five seconds of source audio.
+`mp3-status` reports ring fill, decoder time and underrun count.
+
+Important limitations: playback intentionally does **not** replace the
+DFPlayer local output, does **not** reroute normal speech or alarms, and does
+not automatically start at boot. The clock settings Flash map remains unchanged.
+`sd-list`, `sd-stream`, `sd-test` and `sd-file` are disabled while the
+MP3 source is playing to avoid sharing their FAT32 scratch buffer.
+**This implementation has not yet been compiled or heard on the physical
+clock.** If the build fails, do not flash; if audio glitches or RTC stalls, use
+`mp3-stop` and return to the known-good firmware. See development audit.
