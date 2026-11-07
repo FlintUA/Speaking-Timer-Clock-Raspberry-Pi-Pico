@@ -2076,3 +2076,29 @@ COM8 test:
 If MP3 files were not mirrored, an explicit `[MUSIC-UI] ... LOCAL fallback`
 log is expected, not a Bluetooth stream. This code change needs a build and
 on-device test before marking Bluetooth music complete.
+
+## Bluetooth Classic names during LCD discovery (2026-11-07)
+
+After the 10.24-second inquiry, devices without an EIR name are resolved
+one-by-one using BTstack `gap_remote_name_request` and the asynchronous
+`HCI_EVENT_REMOTE_NAME_REQUEST_COMPLETE` callback. The LCD scan screen
+remains open until name resolution is complete. The scan table retains each
+name alongside its 17-character MAC and RSSI; the UI displays up to 16
+characters and selects **by MAC**, not by a potentially duplicated name.
+
+Unknown peers display `Unknown XX:YY` rather than misleading placeholders
+like `BT 1`. An unresolved name does not block connection by address.
+The list's names are in RAM (available until the next scan/reboot); the chosen
+MAC is still saved in Flash v6 for automatic reconnection. This update does
+not add persistent per-device name aliases. Other peers can share identical
+advertised names, so name-only CLI selection refuses ambiguous matches.
+
+**To test:** use Settings -> Bluetooth -> Scan, let the scan and possible
+name lookups finish, then rotate TIMER through real device names. Confirm
+with TIMER and observe the MAC in the serial log. Commands `bt-devices`
+and `bt-use <exact discovered name>` also work; `bt-use N` and
+`bt-use XX:XX:XX:XX:XX:XX` remain supported. A peer must be discoverable
+to show in an active Classic scan; remote-name requests can fail for sleeping
+or weak-signal devices. Test with both Nest and Portable in pairing mode.
+
+This change is **not yet compiled or hardware validated**.
