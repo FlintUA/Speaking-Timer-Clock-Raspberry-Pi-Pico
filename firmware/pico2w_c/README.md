@@ -1977,3 +1977,67 @@ restore the original speaker if preferred.
 If an unsupported target is selected, return to the saved original
 after reboot or use \`bt-use AA:BB:CC:DD:EE:FF\` with the known MAC.
 Do not flash a new image during an alarm or while writing Flash.
+
+
+## Separate LOCAL and Bluetooth volume (2026-11-07)
+
+**Experimental - requires compilation and on-hardware acceptance.**
+
+The VOLUME rotary encoder now follows the active audio owner:
+
+- When a Bluetooth stream is connected and currently carrying MP3, speech,
+  alarm or timer sound, it adjusts the **Bluetooth 0..30** level.
+- During a LOCAL timer or alarm, or when A2DP is unavailable, it adjusts
+  the **DFPlayer LOCAL 0..30** level.
+- While audio is idle, it follows the *Manual* audio-output preference
+  if Bluetooth is active, or LOCAL otherwise.
+- SETTINGS -> Volume selects the same logical output at edit entry, with
+  an independent draft and explicit SAVE or MINUS cancel.
+- On LCD the overlay distinguishes \`BT VOL\` and \`LOCAL VOL\`.
+- Serial \`vol N\` remains a direct **LOCAL** volume command; new \`bt-vol N\`
+  explicitly sets the Bluetooth level. \`bt-volume\` reports remote AVRCP
+  level (0..127, 255 meaning unknown) and whether PCM fallback is active.
+  \`audio-settings\` displays both independent stored levels.
+
+For an AVRCP-connected speaker the firmware sends
+\`avrcp_controller_set_absolute_volume(cid, level*127/30)\`.
+The first encoder step adopts the speaker's last reported absolute level
+to avoid an abrupt volume jump. Later encoder steps use the clock's own
+volume level so asynchronous AVRCP notifications do not lose rotations.
+The initial connection does **not** overwrite the speaker's volume.
+
+If AVRCP is disconnected or the API rejects a volume command, the
+Pico instead scales outgoing SBC PCM with saturating gain (no gain
+greater than unity). Old fixed 53.3% MP3 output and 10% test tones
+are retained at fallback level 16/30. This approach cannot guarantee
+remote volume control if the peer silently ignores an accepted command.
+
+Flash settings record **v6** adds one independent Bluetooth volume
+byte, preserving reads of v1-v5 records. A v5 device migrates only on
+the next deliberate settings save, retaining the selected Bluetooth
+sink address and all four audio routing preferences.
+
+### Hardware check
+
+1. After firmware upgrade, check \`flash-info\`, \`audio-settings\`,
+   \`bt-volume\` while idle. Check the old v5 device is still selected.
+2. Connect Nest via A2DP. Note the existing column volume.
+3. Rotate VOLUME once slowly. Expect \`[BT-VOL]\` with AVRCP absolute
+   level and status 0; observe the **speaker** volume changed.
+4. Rotate two or three steps more and then back. Ensure changes are
+   monotonic and without large initial jumps; inspect \`bt-volume\`.
+5. Test \`bt-vol 5\`, \`bt-vol 15\` and \`bt-vol 0\`, starting with low
+   volume. Verify \`vol 16\` still changes only DFPlayer LOCAL level.
+6. Set timer output LOCAL via the Audio Output menu while Bluetooth
+   remains connected; start a timer and rotate VOLUME. Only LOCAL level
+   should change. Repeat with timer output Bluetooth.
+7. Leave settings menu and playback idle for autosave. Confirm
+   \`[FLASH] autosave=OK\` and \`flash-info\` v6. Power-cycle and verify
+   both levels plus BT target. Check scheduled alarms still ring.
+8. AVRCP-free sink test: confirm PCM fallback (not required for first
+   acceptance if no such device is available).
+
+Safety: Start with a low speaker setting when testing; AVRCP scales
+0..30 to the remote 0..127 range and remote speakers may interpret
+absolute volume nonlinearly. The initial pairing or reconnection
+should **not** issue a new volume request.
