@@ -318,3 +318,23 @@ RPSL/RCSL; vendor source remains outside project and should be reviewed before
 redistribution. No assumptions of permissive relicensing.
 - Hardware build, PCM output, A2DP coexistence and CPU/RAM performance
 are NOT yet confirmed.
+
+
+## Helix MP3 on Pico 2 W: initial hardware decode PASS (2026-11-07 07:43)
+
+User tested assembled Pico 2 W via COM8 with optional `-Build -Bluetooth -Mp3` image:
+```text
+[SD] SPI1 initialized: SDHC/SDXC, bus=3947368 Hz, read-only
+[SD] FAT32 detected at LBA 128, 7741440 sectors, sectors/cluster=8
+[SD] PASS: SPI sector read + FAT32 boot sector
+[MP3] Initial frame decoded: rate=48000 Hz bitrate=192000 bps, init=90350 us
+[MP3] PASS: pcm_frames=4096 blocks=16 sample_rate=48000 bitrate=192000 total_decode_us=100416 (no audio output)
+[INFO] A2DP stream: ACTIVE; audio: SILENCE; sample rate: 44100 Hz; samples remaining: 0
+[FLASH] size=4096 KiB slots=0x003fa000,0x003fb000 image_end=0x100a8194 guard=OK
+[FLASH] slot0=BLANK sequence=0 version=0 offset=0x003fa000
+[FLASH] slot1=BLANK sequence=0 version=0 offset=0x003fb000
+[FLASH] legacy_slot0=VALID sequence=33 version=3 offset=0x003fc000 READ_ONLY
+```
+**Verified:** Helix decodes MP3 bytes read directly from SPI/FAT32 into RAM while A2DP stays connected and RTC advances. The 4096 frames represent 85.33 ms of 48kHz source stereo audio. The measured ~100.42 ms includes ~90.35 ms initial frame decoding and setup, so the incremental 16-block phase cost was ~10.07 ms (not an end-to-end continuous real-time benchmark).
+
+**Next engineering work:** buffer decoded PCM outside BT callback, avoid synchronous SPI/MP3 decode inside BTstack, convert source 48000 Hz to negotiated 44100 Hz via a bounded resampler, integrate a ring-buffer consumer with A2DP and track underruns/CPU budget. Keep 10% initial volume and DFPlayer fallback. Need continuous 30-60s test; initial probe alone does not establish glitch-free playback. New clock A/B slots remain BLANK with valid read-only legacy record.
