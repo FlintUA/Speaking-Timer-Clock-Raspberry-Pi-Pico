@@ -398,3 +398,26 @@ User reports live COM8 test after full-file MP3 and pause/resume implementation:
 - User requested volume +1/3 vs existing 40% gain; now updated `produce_audio` to multiply signed samples by `8/15` (53.33% amplitude, ~+2.50dB), preserving other A2DP tests at 10% and local DFPlayer untouched. Updated UART status label. Await compile and on-device verification.
 
 Long uninterrupted playback, control commands while file playing and Bluetooth disconnect/reconnect still require hardware testing. No clock settings Flash change.
+
+
+## Hands-free pause/resume MP3 test staged (2026-11-07)
+
+After successful 53.3% PCM playback test of short MP3 with zero underruns,
+reviewed current audio architecture. Normal speech, timers, chimes and alarms
+are still queued by `audio_queue_t` and sent exclusively through DFPlayer;
+`audio-select jbl` currently only chooses a logical destination. Avoid
+prematurely hijacking critical alarms; add an independently testable mechanism.
+
+New diagnostic `mp3-pause-test 07/001.mp3` is gated by the same 44.1kHz A2DP
+readiness and clock/audio idle checks as `mp3-play`. Starts the existing
+full-file Helix decoder and waits until >300ms of output PCM is consumed
+before freezing producer and consumer for 1000ms. During pause BTstack
+sends SBC silence while the PCM and file cursor remain intact. It resumes
+automatically and finishes the file, so it can test pause/resume even when
+the existing MP3 clips are only two seconds long.
+
+Also captures last playback's consumed/underrun counters across ring reset,
+so post-completion `mp3-status` remains diagnostically useful.
+No change to amplitude (53.3%), Flash writes, DFPlayer or alarm routing.
+Compilation, hardware pause/resume sound behavior and long-file stability
+still require validation before routing automatic speech.
