@@ -484,3 +484,33 @@ New logic added to `main.c`:
 both words with ordered `[BT-SPEECH] SEGMENT 1/2`, `2/2`, and
 `COMPLETE`. Then repeat after `audio-select local`. Next test
 disconnect/fallback only after verified two-word playback.
+
+
+## Auto hour VOICE JBL opt-in staged, awaiting hardware check (2026-11-07)
+
+User reports 2026-11-07 10:32:46-49 successful two-segment manual
+`say 08 25` speech over JBL. Source paths `01/008.mp3` and
+`02/025.mp3` decoded and drained sequentially; both `underruns=0`;
+RTC kept ticking. Before the speaker recharged, multiple A2DP
+connections had failed with status 0x04; the fourth retry subsequently
+established a stream and speech worked. Low battery is plausible but
+the status code alone does not establish root cause.
+
+This milestone introduces RAM-only `auto-audio jbl|local` to opt in
+to Bluetooth for **real automatic hourly VOICE** announcements only.
+A default local output after reboot safeguards unattended operation.
+When the stream is ready at 44100Hz, `auto_service_rtc()` delegates
+the original scheduled hourly voice announcement to the already
+tested MP3 speech sequence; if unavailable/start fails, original
+DFPlayer `speech_enqueue_time` is used. Quiet hours, auto enable,
+time window and once/minute scheduler gates remain intact.
+Additional `auto_evaluate()` busy check excludes concurrent MP3,
+Bluetooth voice sequence or SD diagnostics. Chime, half hour,
+countdown timer, scheduled alarm and other audio still use DFPlayer.
+
+`auto-audio-test 8` plays simulated 08:00 via the chosen automatic
+route immediately without changing RTC, Flash or the scheduler.
+This is not the pre-existing dry-run-only `auto-test`. The
+`auto-audio` status command shows selected preference and A2DP
+readiness. Physical compilation, audible test, real xx:00
+boundary and BT-loss fallback still require validation.
