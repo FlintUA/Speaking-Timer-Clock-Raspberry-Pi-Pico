@@ -101,6 +101,19 @@ static void capture_play_stats(void) {
 
 bool mp3_play_active(void) { return playing; }
 void mp3_play_status(void) {
+    // Each successful PCM push must be reflected in the ring's produced
+    // counter. Observe the raw counters rather than masking over-consumption.
+    uint32_t ring_produced = clock_pcm_ring_produced();
+    uint32_t ring_consumed = clock_pcm_ring_consumed();
+    uint32_t buffered = clock_pcm_ring_available();
+    if (playing && (ring_produced != play_frames_pushed ||
+                    ring_consumed > ring_produced ||
+                    ring_produced - ring_consumed != buffered)) {
+        printf("[PCM-DIAG] INVARIANT_MISMATCH pushed=%lu ring_written=%lu read=%lu buffered=%lu\n",
+               (unsigned long)play_frames_pushed,
+               (unsigned long)ring_produced,
+               (unsigned long)ring_consumed, (unsigned long)buffered);
+    }
     printf("[MP3-PLAY] active=%s paused=%s buffered=%lu/%u source=%luHz target=%luHz decoded=%lu output=%lu consumed=%lu underruns=%lu eof=%s decode_us=%llu\n",
            playing ? "YES" : "NO", play_paused ? "YES" : "NO",
            (unsigned long)clock_pcm_ring_available(), CLOCK_PCM_RING_FRAMES,
