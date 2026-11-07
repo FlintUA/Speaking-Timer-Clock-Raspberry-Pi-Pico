@@ -1148,7 +1148,7 @@ mp3-stop
 The test decodes 48kHz/192k MP3 into RAM with Helix and resamples to 44.1kHz,
 feeding an 8192-stereo-frame PCM ring to the existing SBC encoder. The source
 decoder uses at most 256 source frames per main loop pass; BT callback only
-copies prepared PCM data. The MP3 playback output amplitude is limited to **20%** by the
+copies prepared PCM data. The MP3 playback output amplitude is limited to **40%** by the
 final A2DP PCM attenuation (test tones and clips remain at 10%), which is independent of the JBL's own
 absolute volume. Keep the speaker volume low for the first test. `mp3-stop`
 ends the test; playback ends automatically after five seconds of source audio.
