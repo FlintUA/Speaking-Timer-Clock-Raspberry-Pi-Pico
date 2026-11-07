@@ -363,3 +363,15 @@ Observed hardware output:
 [MP3-PLAY] COMPLETE; resuming A2DP silence
 ```
 A2DP remained ACTIVE, and DS1302 RTC ticks continued. Helix decoded about 1.944 seconds of this particular audio file; file EOF occurred before the five-second maximum. There were **two underrun events** and 640 more frames consumed than actual file output (tail silence during drain). Continuous glitch-free audio is not yet established. The user explicitly requested doubling audio volume. The shared Bluetooth `produce_audio()` final attenuation is now **20% amplitude for active MP3 PCM ring**, while startup tone and flash PCM clip retain 10% amplitude. Serial MP3 start text updated to 20%. This is +6.02 dB of PCM amplitude, subject to unchanged JBL volume setting. Build and device testing of the new gain are pending. Next focus: underrun handling/tail drain and longer source tests.
+
+## MP3 gain 40% on user request (2026-11-07 07:56)
+
+COM8 actual test of 20% PCM MP3 gain: audible but user reports still too quiet.
+`mp3-play 07/001.mp3` completed with decoded 93312 source frames, output
+85730 at 44.1kHz, consumed 85730, underruns=1, decode_us=437163.
+BTstack stream ACTIVE; RTC continued. One underrun at EOF may be a benign
+drain boundary and should be distinguished from true streaming starvation.
+User requests doubling gain once more: MP3 amplitude raised from 20% to **40%**
+(`int32_t * 2 / 5`), retaining tone/clip at 10%. No AVRCP speaker volume
+command was added; local DFPlayer remains unchanged. The logged MP3
+gain message was updated to 40%. Hardware test of this new gain pending.
