@@ -26,6 +26,15 @@ bool clock_a2dp_scan_get(unsigned index, clock_bt_device_t *out);
 bool clock_a2dp_select_target(const char *address);
 const char *clock_a2dp_target(void);
 
+// Preferred 0..30 Bluetooth level: AVRCP Absolute Volume when available,
+// otherwise gain applied to the outgoing SBC PCM. Never changes DFPlayer.
+// Current remote AVRCP level can be queried for smooth first encoder step.
+void clock_a2dp_set_volume(uint8_t level);
+uint8_t clock_a2dp_volume(void);
+bool clock_a2dp_avrcp_available(void);
+uint8_t clock_a2dp_remote_volume(void); // 0..127, 255=not reported
+bool clock_a2dp_pcm_volume_fallback(void);
+
 // These functions are implemented by the locally patched BTstack example.
 // Call them from the BTstack event loop (not an interrupt or another core).
 bool clock_a2dp_play_tone(void);
