@@ -85,7 +85,7 @@ void mp3_probe_service(void) {
 #define MP3_PLAY_LIMIT_SECONDS 5u
 #define MP3_PLAY_PREFILL 4096u
 static int16_t play_pcm[MP3_PLAY_BLOCK * 2u];
-static bool play_eof, play_first;
+static bool play_eof, play_first, play_decoder_open;
 static uint32_t play_src_rate, play_dst_rate, play_phase;
 static uint32_t play_frames_decoded, play_frames_pushed;
 static uint32_t play_budget_frames;
@@ -109,8 +109,11 @@ void mp3_play_stop(void) {
     if (playing) {
         mp3_play_status();
         puts("[MP3-PLAY] Stopped; A2DP returning to silence");
-        helix_mp3_deinit(&decoder);
-        sd_fat32_close_read();
+        if (play_decoder_open) {
+            helix_mp3_deinit(&decoder);
+            sd_fat32_close_read();
+            play_decoder_open = false;
+        }
     }
     playing = false;
     play_eof = false;
@@ -152,6 +155,7 @@ bool mp3_play_start(const char *path, uint32_t a2dp_rate) {
     }
     clock_pcm_ring_reset();
     playing = true;
+    play_decoder_open = true;
     play_eof = false;
     play_first = true;
     play_phase = 0;
@@ -178,8 +182,11 @@ static void mp3_play_service(void) {
         }
         if (!received) {
             play_eof = true;
-            helix_mp3_deinit(&decoder);
-            sd_fat32_close_read();
+            if (play_decoder_open) {
+                helix_mp3_deinit(&decoder);
+                sd_fat32_close_read();
+                play_decoder_open = false;
+            }
         } else {
             play_frames_decoded += (uint32_t)received;
             for (size_t i = 0; i < received; ++i) {
@@ -214,9 +221,10 @@ static void mp3_play_service(void) {
             }
             if (play_frames_decoded >= play_budget_frames)
                 play_eof = true;
-            if (play_eof) {
+            if (play_eof && play_decoder_open) {
                 helix_mp3_deinit(&decoder);
                 sd_fat32_close_read();
+                play_decoder_open = false;
             }
         }
     }
