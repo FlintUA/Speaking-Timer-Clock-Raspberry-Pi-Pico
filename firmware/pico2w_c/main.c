@@ -2615,8 +2615,26 @@ static void handle_command(char *line) {
             if (!clock_a2dp_scan_get(index - 1u, &d) ||
                 !bt_sink_select(d.address))
                 puts("[BT-SELECT] Invalid index or selection refused");
-        } else if (!bt_sink_select(argument)) {
-            puts("[BT-SELECT] Usage: bt-use N (from bt-devices) OR bt-use XX:XX:XX:XX:XX:XX");
+        } else {
+            // Resolve exact discovered device name to MAC. Never guess when
+            // multiple devices advertise the same name.
+            clock_bt_device_t device, selected;
+            unsigned matches = 0;
+            for (unsigned i = 0; i < clock_a2dp_scan_count(); ++i) {
+                if (clock_a2dp_scan_get(i, &device) &&
+                    strcmp(device.name, argument) == 0) {
+                    selected = device;
+                    ++matches;
+                }
+            }
+            if (matches == 1u) {
+                if (!bt_sink_select(selected.address))
+                    puts("[BT-SELECT] Connection refused");
+            } else if (matches > 1u) {
+                puts("[BT-SELECT] Ambiguous name: choose an index or MAC");
+            } else if (!bt_sink_select(argument)) {
+                puts("[BT-SELECT] Use bt-use N, bt-use <exact discovered name>, or bt-use XX:XX:XX:XX:XX:XX");
+            }
         }
     } else if (strcmp(line, "bt-volume") == 0) {
         printf("[BT-VOL] preferred=%u/30 AVRCP=%s remote_absolute=%u PCM_fallback=%s\n",
