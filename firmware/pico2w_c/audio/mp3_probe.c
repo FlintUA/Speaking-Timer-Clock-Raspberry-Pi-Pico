@@ -106,6 +106,8 @@ void mp3_play_status(void) {
     uint32_t ring_produced = clock_pcm_ring_produced();
     uint32_t ring_consumed = clock_pcm_ring_consumed();
     uint32_t buffered = clock_pcm_ring_available();
+    clock_pcm_ring_diag_t ring_diag = {0};
+    clock_pcm_ring_diagnostics(&ring_diag);
     if (playing && (ring_produced != play_frames_pushed ||
                     ring_consumed > ring_produced ||
                     ring_produced - ring_consumed != buffered)) {
@@ -113,6 +115,21 @@ void mp3_play_status(void) {
                (unsigned long)play_frames_pushed,
                (unsigned long)ring_produced,
                (unsigned long)ring_consumed, (unsigned long)buffered);
+    }
+    if (playing && ring_diag.fault_code) {
+        printf("[PCM-DIAG] FIRST_FAULT code=%lu phase=%lu written=%lu read=%lu buffered=%lu head=%lu tail=%lu request=%lu take=%lu calls=%lu max_depth=%lu reset_overlap=%lu\n",
+               (unsigned long)ring_diag.fault_code,
+               (unsigned long)ring_diag.phase,
+               (unsigned long)ring_diag.produced,
+               (unsigned long)ring_diag.consumed,
+               (unsigned long)ring_diag.buffered,
+               (unsigned long)ring_diag.head,
+               (unsigned long)ring_diag.tail,
+               (unsigned long)ring_diag.request,
+               (unsigned long)ring_diag.take,
+               (unsigned long)ring_diag.pop_calls,
+               (unsigned long)ring_diag.max_pop_depth,
+               (unsigned long)ring_diag.resets_during_pop);
     }
     printf("[MP3-PLAY] active=%s paused=%s buffered=%lu/%u source=%luHz target=%luHz decoded=%lu output=%lu consumed=%lu underruns=%lu eof=%s decode_us=%llu\n",
            playing ? "YES" : "NO", play_paused ? "YES" : "NO",
