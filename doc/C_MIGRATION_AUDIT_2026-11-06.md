@@ -375,3 +375,14 @@ User requests doubling gain once more: MP3 amplitude raised from 20% to **40%**
 (`int32_t * 2 / 5`), retaining tone/clip at 10%. No AVRCP speaker volume
 command was added; local DFPlayer remains unchanged. The logged MP3
 gain message was updated to 40%. Hardware test of this new gain pending.
+
+
+## Full-file MP3 player, pause/resume, EOF handling staged (2026-11-07)
+
+After first audible COM8 test of `/07/001.mp3` at 40% PCM gain, user approved extending experimental player. Changes in `audio/mp3_probe.c/.h`, `audio/pcm_ring.c/.h`, `main.c`:
+- Removed the five-second decode budget: `mp3-play <8.3 path>` now reads until Helix reports actual file EOF; at most 256 source PCM frames decoded per main-loop iteration. No hard file duration limit (normal streaming buffers stay bounded).
+- Added `mp3-pause`, `mp3-resume` and existing `mp3-stop`. Pause freezes SD reads and PCM queue consumption; BTstack emits silence. Resume continues with preserved decoder and PCM ring state.
+- Added explicit terminal EOF flag in PCM ring; one partial SBC packet padded with silence at file end no longer increments `underruns`. Unexpected starvation *before* EOF still increments this diagnostic.
+- Existing priority interruptions (alarm/timer/DFPlayer/mute/A2DP disconnect) still stop MP3, with 40% MP3 amplitude only, 10% other BT tests.
+- All changes are source-only until an actual rebuild/flash. No real-hardware verification of full-file playback, pause/resume or EOF accounting as of this note.
+- Planned COM8 checks: `sd-test`, `bt-status`, `mp3-play 07/001.mp3`, `mp3-status`, `mp3-pause`, `mp3-resume`, `mp3-stop`; then use a file longer than 5 s and watch for continuing audio, RTC stability, no unexpected underruns.
