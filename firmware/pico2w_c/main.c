@@ -1903,8 +1903,14 @@ static void menu_rotate(int direction, uint64_t now) {
                 unsigned count = 1u + clock_a2dp_scan_count();
                 menu_bt_index = (uint8_t)((menu_bt_index + count +
                                  (direction > 0 ? 1u : count - 1u)) % count);
-                printf("[MENU-BT] index=%u/%u\n",
-                       (unsigned)(menu_bt_index + 1u), count);
+                clock_bt_device_t device;
+                if (menu_bt_index && clock_a2dp_scan_get(menu_bt_index - 1u, &device))
+                    printf("[MENU-BT] index=%u/%u name=%s MAC=%s\n",
+                           (unsigned)(menu_bt_index + 1u), count,
+                           device.name, device.address);
+                else
+                    printf("[MENU-BT] index=%u/%u Scan devices\n",
+                           (unsigned)(menu_bt_index + 1u), count);
             }
 #endif
             break;
@@ -3489,6 +3495,11 @@ int main(void) {
             finished_screen_until_ms = now + 3000u;
         }
         if (menu_state != MENU_CLOSED &&
+#ifdef CLOCK_ENABLE_A2DP
+            // Remote-name requests follow the 10s Classic inquiry and can
+            // take several more seconds. Never close the scan screen midway.
+            !(menu_state == MENU_BT_SCANNING && clock_a2dp_scan_active()) &&
+#endif
             now - menu_last_input_ms >= SETTINGS_MENU_TIMEOUT_MS) {
             puts("[MENU] Timeout (20s); unsaved edit discarded");
             menu_close();
@@ -3634,8 +3645,9 @@ int main(void) {
             snprintf(bottom, sizeof(bottom), "%s", menu_item_name(menu_index));
         } else if (menu_state == MENU_BT_SCANNING) {
 #ifdef CLOCK_ENABLE_A2DP
-            snprintf(top, sizeof(top), "BT SCANNING");
-            snprintf(bottom, sizeof(bottom), "Wait or MINUS");
+            snprintf(top, sizeof(top), "BT SCAN+NAMES");
+            snprintf(bottom, sizeof(bottom), "%u found MINUS",
+                     clock_a2dp_scan_count());
 #else
             snprintf(top, sizeof(top), "BLUETOOTH OFF");
             snprintf(bottom, sizeof(bottom), "MINUS=BACK");
