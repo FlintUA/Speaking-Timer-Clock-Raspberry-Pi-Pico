@@ -1619,6 +1619,14 @@ static void handle_command(char *line) {
     while (isspace((unsigned char)*line)) ++line;
     size_t len = strlen(line);
     while (len && isspace((unsigned char)line[len - 1])) line[--len] = 0;
+    // FAT32 diagnostics share one synchronous sector buffer with Helix.
+    // Never change the SD card's state or FAT geometry during MP3 playback.
+    if (mp3_play_active() &&
+        (strncmp(line, "sd-", 3) == 0 ||
+         strncmp(line, "mp3-test ", 9) == 0)) {
+        puts("[MP3-PLAY] SD diagnostics blocked while MP3 playback is active");
+        return;
+    }
     uint64_t now = to_ms_since_boot(get_absolute_time());
     if (strcmp(line, "bootsel arm") == 0) {
         bootsel_command("arm", now);
@@ -1636,12 +1644,15 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "bt-status") == 0) {
         clock_a2dp_print_status();
     } else if (strcmp(line, "bt-tone") == 0) {
+        if (mp3_play_active()) mp3_play_stop();
         if (!clock_a2dp_play_tone())
             puts("[BT] No active A2DP stream");
     } else if (strcmp(line, "bt-clip") == 0) {
+        if (mp3_play_active()) mp3_play_stop();
         if (!clock_a2dp_play_clip())
             puts("[BT] PCM clip unavailable (A2DP not active)");
     } else if (strcmp(line, "bt-silence") == 0) {
+        if (mp3_play_active()) mp3_play_stop();
         clock_a2dp_stop_tone();
 #endif
     } else if (strncmp(line, "mp3-play ", 9) == 0) {
