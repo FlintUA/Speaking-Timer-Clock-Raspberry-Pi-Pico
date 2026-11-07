@@ -351,3 +351,15 @@ After successful on-device Helix decode-only test (48kHz / 192kbps, 4096 frames,
 - Startup prebuffer target 4096 stereo frames, max test duration five seconds. Ring underruns and CPU decode time are reported. Source stops and transitions to SBC silence after draining.
 - Existing MP3-free build remains functional with no file output; `-Build -Bluetooth -Mp3` is required for the new experiment. Same external pinned Helix decoder checkout.
 - **Not yet verified**: compilation, UF2 update, actual JBL audio, audible level, timer priority in live use, underrun counts and longer-session stability. Keep rollback UF2. Before playback run `sd-test` and confirm A2DP stream ACTIVE. Use `mp3-stop` if anomalies arise. No Flash writes, changes to DFPlayer mapping, or mandatory startup MP3 playback.
+
+## First audible MP3 via JBL and doubled PCM gain (2026-11-07 07:52)
+
+The user confirmed **audible MP3 sound** through the JBL Link Portable after `sd-test`, `bt-status` and `mp3-play 07/001.mp3`.
+Observed hardware output:
+```text
+[MP3-PLAY] START /07/001.mp3: 48000Hz 192000 bps -> 44100Hz, max 5 seconds, gain 10%
+[MP3-PLAY] Playback started, prebuffer=4233 frames
+[MP3-PLAY] active=YES buffered=0/8192 source=48000Hz target=44100Hz decoded=93312 output=85730 consumed=86370 underruns=2 eof=YES decode_us=455596
+[MP3-PLAY] COMPLETE; resuming A2DP silence
+```
+A2DP remained ACTIVE, and DS1302 RTC ticks continued. Helix decoded about 1.944 seconds of this particular audio file; file EOF occurred before the five-second maximum. There were **two underrun events** and 640 more frames consumed than actual file output (tail silence during drain). Continuous glitch-free audio is not yet established. The user explicitly requested doubling audio volume. The shared Bluetooth `produce_audio()` final attenuation is now **20% amplitude for active MP3 PCM ring**, while startup tone and flash PCM clip retain 10% amplitude. Serial MP3 start text updated to 20%. This is +6.02 dB of PCM amplitude, subject to unchanged JBL volume setting. Build and device testing of the new gain are pending. Next focus: underrun handling/tail drain and longer source tests.
