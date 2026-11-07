@@ -64,6 +64,12 @@ static uint64_t bootsel_armed_ms;
 static bool timer_screen;
 static audio_queue_t audio_queue;
 static audio_router_t audio_router;
+#ifdef CLOCK_ENABLE_A2DP
+// Opt-in routing test only: normal time, alarm and timer queue stays LOCAL.
+// Remember a single remote track so an A2DP loss can replay it locally.
+static bool routed_test_pending;
+static uint8_t routed_test_folder, routed_test_track;
+#endif
 static uint8_t volume = 10; // Default; overridden by saved flash settings.
 static bool sound_enabled = true;
 static speech_language_t language = SPEECH_RU;
@@ -1683,6 +1689,9 @@ static void handle_command(char *line) {
 #endif
     } else if (strcmp(line, "mp3-stop") == 0) {
         mp3_play_stop();
+#ifdef CLOCK_ENABLE_A2DP
+        routed_test_pending = false;
+#endif
     } else if (strcmp(line, "mp3-pause") == 0) {
         if (!mp3_play_pause()) puts("[MP3-PLAY] Cannot pause: no active playback or already paused");
     } else if (strcmp(line, "mp3-resume") == 0) {
@@ -1728,6 +1737,13 @@ static void handle_command(char *line) {
             puts("[SD] FAIL: check GP8/9/10/11, 3V3, GND and card seating");
         }
     } else if (strcmp(line, "audio-select local") == 0) {
+#ifdef CLOCK_ENABLE_A2DP
+        if (routed_test_pending && mp3_play_active()) {
+            mp3_play_stop();
+            routed_test_pending = false;
+            puts("[AUDIO-ROUTE] Switched to LOCAL; stopped current BT test");
+        }
+#endif
         audio_router_select(&audio_router, AUDIO_OUTPUT_LOCAL);
         puts("[AUDIO-ROUTE] Requested LOCAL (RAM only; DFPlayer remains physical output)");
 #ifdef CLOCK_ENABLE_A2DP
@@ -1736,12 +1752,55 @@ static void handle_command(char *line) {
         audio_router_bluetooth_state(&audio_router, clock_a2dp_stream_active());
         puts("[AUDIO-ROUTE] Requested BT_JBL (readiness test only; audio queue still uses DFPlayer)");
 #endif
+    } else if (strncmp(line, "audio-route-test ", 17) == 0) {
+        // Explicit test of one queued track through the selected audio output.
+        // Automatic alarms and the normal sound queue remain DFPlayer-only.
+        unsigned int folder = 0, track = 0;
+        char extra = 0;
+        if (sscanf(line + 17, "%u %u %c", &folder, &track, &extra) != 2 ||
+            folder < 1u || folder > 99u || track < 1u || track > 255u) {
+            puts("[AUDIO-ROUTE] Usage: audio-route-test <folder 1..99> <track 1..255>");
+        } else if (!sound_enabled || timer.running || alarm_active_index >= 0 ||
+                   music_ui_open || mp3_play_active() || mp3_probe_active() ||
+                   sd_fat32_stream_active() || !audio_queue_idle(&audio_queue) ||
+                   dfplayer_busy()) {
+            puts("[AUDIO-ROUTE] Test refused: sound disabled or clock/audio busy");
+        } else {
+#ifdef CLOCK_ENABLE_A2DP
+            bool ready = clock_a2dp_stream_active() &&
+                         clock_a2dp_current_rate() == 44100u;
+            audio_router_bluetooth_state(&audio_router, ready);
+            bool to_jbl = audio_router.requested == AUDIO_OUTPUT_BT_JBL &&
+                          audio_router.effective == AUDIO_OUTPUT_BT_JBL;
+            if (to_jbl) {
+                char mp3_path[20];
+                snprintf(mp3_path, sizeof(mp3_path), "%02u/%03u.mp3", folder, track);
+                if (mp3_play_start(mp3_path, clock_a2dp_current_rate())) {
+                    routed_test_pending = true;
+                    routed_test_folder = (uint8_t)folder;
+                    routed_test_track = (uint8_t)track;
+                    printf("[AUDIO-ROUTE] TEST BT_JBL %s (automatic events still LOCAL)\n",
+                           mp3_path);
+                } else {
+                    puts("[AUDIO-ROUTE] Bluetooth source failed; replaying test track on LOCAL");
+                    if (!audio_queue_enqueue(&audio_queue, (uint8_t)folder, (uint8_t)track))
+                        puts("[AUDIO-ROUTE] LOCAL enqueue failed");
+                }
+            } else
+#endif
+            {
+                if (audio_queue_enqueue(&audio_queue, (uint8_t)folder, (uint8_t)track))
+                    printf("[AUDIO-ROUTE] TEST LOCAL %02u/%03u (BT unavailable or not selected)\n",
+                           folder, track);
+                else puts("[AUDIO-ROUTE] LOCAL enqueue failed");
+            }
+        }
     } else if (strcmp(line, "audio-route") == 0) {
         printf("[AUDIO-ROUTE] requested=%s effective=%s bluetooth=%s\n",
                audio_router_name(audio_router.requested),
                audio_router_name(audio_router.effective),
                audio_router.bt_connected ? "STREAM_ACTIVE" : "OFFLINE");
-        puts("[AUDIO-ROUTE] NOTE: logical readiness only; speech/music/alarms still play via DFPlayer");
+        puts("[AUDIO-ROUTE] NOTE: audio-route-test uses requested output; automatic speech/music/alarms still use DFPlayer");
     } else if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
         puts("[SD] sd-test - initialize/read SD card read-only; sd-info - last detection result");
         puts("[SD] sd-list [folder] - show FAT32 8.3 names; sd-file 07/001.mp3 - read first bytes");
@@ -1749,6 +1808,7 @@ static void handle_command(char *line) {
         puts("[MP3] mp3-test 07/001.mp3 - experimental decode to RAM (no JBL output)");
         puts("[MP3] mp3-play 07/001.mp3 - full file on JBL; mp3-pause; mp3-resume; mp3-stop; mp3-status");
         puts("[MP3] mp3-pause-test 07/001.mp3 - auto pause at 300ms, auto resume after 1s");
+        puts("[AUDIO-ROUTE] audio-select local|jbl; audio-route; audio-route-test 7 1");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
@@ -2154,7 +2214,7 @@ int main(void) {
         if (audio_router.requested == AUDIO_OUTPUT_BT_JBL &&
             audio_router.bt_connected != bt_ready) {
             audio_router_bluetooth_state(&audio_router, bt_ready);
-            printf("[AUDIO-ROUTE] bluetooth=%s effective=%s (no PCM routing yet)\n",
+            printf("[AUDIO-ROUTE] bluetooth=%s effective=%s (test routing only)\n",
                    bt_ready ? "STREAM_ACTIVE" : "OFFLINE",
                    audio_router_name(audio_router.effective));
         }
@@ -2191,6 +2251,26 @@ int main(void) {
         music_ui_service();
         // One sector of read-only SD diagnostics per loop; do not decode in audio callbacks.
         sd_fat32_stream_service();
+        // Test-route reliability: on Bluetooth loss, replay the current
+        // test track locally, unless a higher-priority clock event intervened.
+#ifdef CLOCK_ENABLE_A2DP
+        if (routed_test_pending && mp3_play_active() &&
+            !clock_a2dp_stream_active() &&
+            !timer.running && alarm_active_index < 0 &&
+            !music_ui_open && sound_enabled &&
+            audio_queue_idle(&audio_queue)) {
+            uint8_t folder = routed_test_folder, track = routed_test_track;
+            mp3_play_stop();
+            routed_test_pending = false;
+            if (audio_queue_enqueue(&audio_queue, folder, track))
+                printf("[AUDIO-ROUTE] BT lost; LOCAL replay folder=%02u track=%03u\n",
+                       folder, track);
+            else puts("[AUDIO-ROUTE] FAIL: local fallback queue full");
+        }
+        // Keep test fallback armed until the MP3 is truly complete.
+        if (routed_test_pending && !mp3_play_active())
+            routed_test_pending = false;
+#endif
         // Abort experimental playback when a higher-priority clock event needs audio.
         if (mp3_play_active() &&
             (timer.running || alarm_active_index >= 0 || music_ui_open ||
@@ -2203,6 +2283,10 @@ int main(void) {
             puts("[MP3-PLAY] Interrupted by clock state/audio priority");
         }
         mp3_probe_service();
+#ifdef CLOCK_ENABLE_A2DP
+        if (routed_test_pending && !mp3_play_active())
+            routed_test_pending = false; // ordinary EOF, no local replay
+#endif
         autosave_service(now);
         if (timer.running) {
             uint32_t left = countdown_remaining(&timer, now);
