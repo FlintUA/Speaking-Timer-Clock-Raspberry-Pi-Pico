@@ -481,6 +481,36 @@ static void timer_audio_finished(void) {
 #ifdef CLOCK_ENABLE_A2DP
 // Timer event audio uses the original speech planners unchanged; no timer
 // event ever depends solely on Bluetooth, since any failure requeues locally.
+// Shared MP3 sequence executor. Owners retain priority/fallback decisions.
+// Returns WAIT, STARTED, COMPLETE or FAILED; all disk/decoder work is in
+// the cooperative main loop, never in the A2DP callback.
+typedef enum {
+    BT_SEQUENCE_WAIT = 0,
+    BT_SEQUENCE_STARTED,
+    BT_SEQUENCE_COMPLETE,
+    BT_SEQUENCE_FAILED
+} bt_sequence_result_t;
+static bt_sequence_result_t bt_sequence_step(const audio_track_t *tracks,
+                                               uint8_t count, uint8_t *index,
+                                               bool *track_started,
+                                               const char *log_tag) {
+    if (*track_started) {
+        if (mp3_play_active()) return BT_SEQUENCE_WAIT;
+        ++*index;
+        *track_started = false;
+    }
+    if (*index >= count) return BT_SEQUENCE_COMPLETE;
+    audio_track_t track = tracks[*index];
+    char path[20];
+    snprintf(path, sizeof(path), "%02u/%03u.mp3",
+             (unsigned)track.folder, (unsigned)track.track);
+    if (!mp3_play_start(path, clock_a2dp_current_rate()))
+        return BT_SEQUENCE_FAILED;
+    *track_started = true;
+    printf("[%s] SEGMENT %u/%u %s\\n",
+           log_tag, (unsigned)(*index + 1u), (unsigned)count, path);
+    return BT_SEQUENCE_STARTED;
+}
 static void bt_timer_cancel(const char *reason) {
     if (!bt_timer_running) return;
     if (bt_timer_started && mp3_play_active()) mp3_play_stop();
@@ -1569,36 +1599,6 @@ static void alarm_status(void) {
 #ifdef CLOCK_ENABLE_A2DP
 // Alarm owns the MP3 playback while active. Playback state does not alter
 // the one-shot RTC scheduler or the persisted settings.
-// Shared MP3 sequence executor. Owners retain priority/fallback decisions.
-// Returns WAIT, STARTED, COMPLETE or FAILED; all disk/decoder work is in
-// the cooperative main loop, never in the A2DP callback.
-typedef enum {
-    BT_SEQUENCE_WAIT = 0,
-    BT_SEQUENCE_STARTED,
-    BT_SEQUENCE_COMPLETE,
-    BT_SEQUENCE_FAILED
-} bt_sequence_result_t;
-static bt_sequence_result_t bt_sequence_step(const audio_track_t *tracks,
-                                               uint8_t count, uint8_t *index,
-                                               bool *track_started,
-                                               const char *log_tag) {
-    if (*track_started) {
-        if (mp3_play_active()) return BT_SEQUENCE_WAIT;
-        ++*index;
-        *track_started = false;
-    }
-    if (*index >= count) return BT_SEQUENCE_COMPLETE;
-    audio_track_t track = tracks[*index];
-    char path[20];
-    snprintf(path, sizeof(path), "%02u/%03u.mp3",
-             (unsigned)track.folder, (unsigned)track.track);
-    if (!mp3_play_start(path, clock_a2dp_current_rate()))
-        return BT_SEQUENCE_FAILED;
-    *track_started = true;
-    printf("[%s] SEGMENT %u/%u %s\\n",
-           log_tag, (unsigned)(*index + 1u), (unsigned)count, path);
-    return BT_SEQUENCE_STARTED;
-}
 static void bt_alarm_stop(const char *reason) {
     if (!bt_alarm_running) return;
     if (bt_alarm_started && mp3_play_active()) mp3_play_stop();
