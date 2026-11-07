@@ -12,6 +12,12 @@ uint32_t clock_pcm_ring_free(void);
 bool clock_pcm_ring_push(int16_t left, int16_t right);
 uint32_t clock_pcm_ring_pop(int16_t *interleaved_stereo, uint32_t frames);
 void clock_pcm_ring_set_active(bool enabled);
+void clock_pcm_ring_set_paused(bool paused);
+bool clock_pcm_ring_paused(void);
+// True when no more source PCM can arrive; partial final SBC packets are
+// padded with silence without counting a streaming underrun.
+void clock_pcm_ring_set_eof(bool eof);
+bool clock_pcm_ring_eof(void);
 bool clock_pcm_ring_active(void);
 uint32_t clock_pcm_ring_underruns(void);
 uint32_t clock_pcm_ring_consumed(void);
