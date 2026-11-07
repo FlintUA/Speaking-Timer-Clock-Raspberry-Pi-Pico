@@ -1670,6 +1670,10 @@ static void handle_command(char *line) {
 #endif
     } else if (strcmp(line, "mp3-stop") == 0) {
         mp3_play_stop();
+    } else if (strcmp(line, "mp3-pause") == 0) {
+        if (!mp3_play_pause()) puts("[MP3-PLAY] Cannot pause: no active playback or already paused");
+    } else if (strcmp(line, "mp3-resume") == 0) {
+        if (!mp3_play_resume()) puts("[MP3-PLAY] Cannot resume: no paused playback");
     } else if (strcmp(line, "mp3-status") == 0) {
         mp3_play_status();
     } else if (strncmp(line, "mp3-test ", 9) == 0) {
@@ -1730,7 +1734,7 @@ static void handle_command(char *line) {
         puts("[SD] sd-list [folder] - show FAT32 8.3 names; sd-file 07/001.mp3 - read first bytes");
         puts("[SD] sd-stream 07/001.mp3 - nonblocking complete file CRC32; sd-stop - cancel");
         puts("[MP3] mp3-test 07/001.mp3 - experimental decode to RAM (no JBL output)");
-        puts("[MP3] mp3-play 07/001.mp3 - five-second JBL audio test; mp3-stop; mp3-status");
+        puts("[MP3] mp3-play 07/001.mp3 - full file on JBL; mp3-pause; mp3-resume; mp3-stop; mp3-status");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
