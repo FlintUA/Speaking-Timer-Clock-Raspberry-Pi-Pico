@@ -84,6 +84,7 @@ static void bt_timer_cancel(const char *reason);
 static void bt_timer_service(void);
 static void bt_timer_fallback(const char *reason);
 static bool bt_timer_prepare(const audio_queue_t *plan, const char *event);
+static void bt_speech_cancel(const char *reason);
 
 static bool auto_voice_jbl_enabled; // RAM-only opt-in; default false after reboot.
 static bool bt_speech_start(uint8_t hour, uint8_t minute, bool automatic);
@@ -1932,14 +1933,22 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "bt-status") == 0) {
         clock_a2dp_print_status();
     } else if (strcmp(line, "bt-tone") == 0) {
+#ifdef CLOCK_ENABLE_A2DP
+        if (bt_timer_running) bt_timer_fallback("BT_TONE_OVERRIDE");
+        if (bt_speech_running) bt_speech_cancel("BT_TONE_OVERRIDE");
+#endif
         if (mp3_play_active()) mp3_play_stop();
         if (!clock_a2dp_play_tone())
             puts("[BT] No active A2DP stream");
     } else if (strcmp(line, "bt-clip") == 0) {
+        if (bt_timer_running) bt_timer_fallback("BT_CLIP_OVERRIDE");
+        if (bt_speech_running) bt_speech_cancel("BT_CLIP_OVERRIDE");
         if (mp3_play_active()) mp3_play_stop();
         if (!clock_a2dp_play_clip())
             puts("[BT] PCM clip unavailable (A2DP not active)");
     } else if (strcmp(line, "bt-silence") == 0) {
+        if (bt_timer_running) bt_timer_fallback("BT_SILENCE_OVERRIDE");
+        if (bt_speech_running) bt_speech_cancel("BT_SILENCE_OVERRIDE");
         if (mp3_play_active()) mp3_play_stop();
         clock_a2dp_stop_tone();
 #endif
@@ -1973,6 +1982,7 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "mp3-stop") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
         bt_speech_cancel("USER_STOP");
+        bt_timer_fallback("MP3_STOP_LOCAL_FALLBACK");
 #endif
         mp3_play_stop();
 #ifdef CLOCK_ENABLE_A2DP
