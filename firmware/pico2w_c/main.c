@@ -1745,12 +1745,12 @@ static void handle_command(char *line) {
         }
 #endif
         audio_router_select(&audio_router, AUDIO_OUTPUT_LOCAL);
-        puts("[AUDIO-ROUTE] Requested LOCAL (RAM only; DFPlayer remains physical output)");
+        puts("[AUDIO-ROUTE] Requested LOCAL (audio-route-test uses DFPlayer; normal clock output unchanged)");
 #ifdef CLOCK_ENABLE_A2DP
     } else if (strcmp(line, "audio-select jbl") == 0) {
         audio_router_select(&audio_router, AUDIO_OUTPUT_BT_JBL);
         audio_router_bluetooth_state(&audio_router, clock_a2dp_stream_active());
-        puts("[AUDIO-ROUTE] Requested BT_JBL (readiness test only; audio queue still uses DFPlayer)");
+        puts("[AUDIO-ROUTE] Requested BT_JBL (audio-route-test only; normal queue/alarms still use DFPlayer)");
 #endif
     } else if (strncmp(line, "audio-route-test ", 17) == 0) {
         // Explicit test of one queued track through the selected audio output.
