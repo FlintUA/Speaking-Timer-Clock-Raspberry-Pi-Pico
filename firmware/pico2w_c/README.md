@@ -1698,3 +1698,52 @@ The v4 firmware remains able to load both v3 and v4 records.
 **Pending:** Pico SDK build, first v3->v4 Flash save and reboot,
 persistence regression across all four selectors, live RTC alarm,
 and long-term A2DP stability.
+
+
+## Priority regression observability - `audio-health` (2026-11-07)
+
+This firmware adds a **read-only** serial command `audio-health`.
+It prints the active clock event owners (timer, alarm, manual/auto
+speech, MP3, DFPlayer/local queue), A2DP state, settings autosave
+pending state and menu/music status. It writes neither Flash nor RTC,
+starts no audio, and does not alter scheduler counters.
+It is safe to call before and during a timer or simulated alarm.
+
+Existing priority rules confirmed by source review:
+- A scheduled alarm and a currently running countdown timer collide:
+  **TIMER_PRIORITY** - scheduled alarm is skipped for that minute,
+  not deferred. This is existing intentional policy, not an audio
+  bug. Do not silently alter without explicit requirement.
+- A ringing alarm preempts manual/hourly BT speech and local queue.
+- Hourly `VOICE` / chime are suppressed when timer, alarm or audio
+  owner is busy. They do not replay later.
+- BT speech and alarm fallback retain the current interrupted track
+  when queuing LOCAL audio, restarting that track at its beginning.
+- `audio-health` is observational only; it is not an automated
+  proof that every collision is covered.
+
+**Hardware procedure after compiling** (one serial command per send):
+
+1. `audio-settings`, `audio-health`, `alarm-status`, `auto-status`.
+   Save baseline. No settings changed.
+2. `t 15`, `start`. Immediately send `audio-health` while the
+   timer is running. Expected `timer=RUNNING` and BT timer owner
+   active while its start announcement plays; once complete, owner
+   is idle even if the countdown continues. After finishing,
+   `audio-health` returns idle.
+3. `alarm-audio-test 1` while timer is running (optional on next
+   timer run). Expected test refusal. The real-time alarm scheduler
+   is unchanged by this check.
+4. `alarm-audio-test 1` at idle; during playback send
+   `audio-health` and `auto-test 12 0` for a read-only dry-run
+   priority decision. Then physically stop with ALARM button.
+5. `audio-health`, `alarm-status`, `flash-info` afterward.
+   Confirm no unexpected writes or changed alarm settings.
+
+Do not adjust real RTC merely to force a collision. Real scheduled
+alarm testing should use a deliberately configured test slot with
+its original values recorded first; it can be performed separately
+after this safe diagnostic run.
+
+**Pending:** compile, COM8 read-only diagnostics, actual simultaneous
+RTC events and long A2DP soak test.
