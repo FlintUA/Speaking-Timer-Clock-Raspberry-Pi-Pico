@@ -1929,9 +1929,29 @@ Usage:
 
 Diagnostic COM8 commands:
 
+Current firmware also supports `bt-known`, `bt-use <exact saved name>` and
+`bt-forget N|MAC`. `bt-devices` prints saved devices before scan results;
+`bt-use N` selects saved devices first, then scanned devices. The Bluetooth
+LCD menu follows the same order, so a known speaker can be selected without
+scanning. A successful A2DP connection saves up to four names and MACs in
+Flash settings v7; v1-v6 records remain readable. BTstack stores pairing
+keys in separate Flash banks. On restart the preferred MAC is connected
+directly, with 5, 10 and 30 second retry delays on the BTstack event loop.
+When the list is full, the oldest entry is replaced. `bt-forget` removes a
+saved entry and its pairing key. LOCAL audio remains available during retries.
+For hardware acceptance on a spare Pico 2 W: scan and select a speaker, wait
+for `[BT-SELECT] stream ACTIVE` and `[FLASH] autosave=OK`, then power-cycle.
+`bt-known` should show the saved name with `paired=YES`, and the serial log
+should show a boot direct connect without a new scan. Power-cycle once with
+the speaker off to verify retry and LOCAL fallback; turn it on to verify
+reconnection. Finally use `bt-forget N`, power-cycle, and confirm that the
+forgotten speaker is not selected automatically.
+
 - \`bt-scan\` - start a manual Classic inquiry (refused during active audio)
-- \`bt-devices\` - show the found device numbers, MAC, name and RSSI
-- \`bt-use N\` - request connection to entry N (1-based)
+- \`bt-devices\` - show saved and scanned devices
+- \`bt-use N\` - request connection to saved entry N (or later scanned entry)
+- \`bt-known\` - show saved names, MACs and pairing-key status
+- \`bt-forget N|MAC\` - remove a saved device and its pairing key
 - \`bt-use AA:BB:CC:DD:EE:FF\` - select a known Classic Bluetooth MAC
 - \`bt-target\` - current target, A2DP state and pending validation
 - \`bt-status\` - stream state and target

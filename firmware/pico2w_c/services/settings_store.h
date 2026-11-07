@@ -3,6 +3,13 @@
 #include <stdint.h>
 #include "alarm_engine.h"
 
+#define CLOCK_BT_KNOWN_MAX 4u
+#define CLOCK_BT_NAME_SIZE 25u
+typedef struct {
+    uint8_t address[6];
+    char name[CLOCK_BT_NAME_SIZE];
+} clock_bt_known_t;
+
 // Two provisional 4 KiB sectors, excluding the final sector (RP2350-E10 UF2 workaround).
 // A/B records preserve a previous valid record when saving a new one.
 // The library refuses to erase any nonblank sector that is not one of our records.
@@ -26,6 +33,9 @@ typedef struct {
     uint8_t bt_target_addr[6];
     // v6: independent Bluetooth volume step 0..30, legacy defaults to 16.
     uint8_t bt_volume;
+    // v7: successful A2DP sinks. BTstack stores pairing keys separately.
+    uint8_t bt_known_count;
+    clock_bt_known_t bt_known[CLOCK_BT_KNOWN_MAX];
 } clock_settings_t;
 
 typedef enum {

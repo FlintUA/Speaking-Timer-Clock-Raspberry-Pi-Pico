@@ -124,8 +124,11 @@ static uint8_t saved_audio_timer, saved_audio_alarm;
 #endif
 // Save selected Bluetooth sink MAC even in BT-free firmware builds.
 static uint8_t saved_bt_target_addr[6];
+static uint8_t bt_known_count;
+static clock_bt_known_t bt_known[CLOCK_BT_KNOWN_MAX];
 #ifdef CLOCK_ENABLE_A2DP
 static uint8_t bt_pending_target_addr[6];
+static char bt_pending_target_name[CLOCK_BT_NAME_SIZE];
 static bool bt_pending_target_valid, bt_pending_seen_disconnected;
 #endif
 static uint8_t volume = 10; // Local DFPlayer 0..30.
@@ -895,6 +898,8 @@ static clock_settings_t settings_snapshot(void) {
     };
     memcpy(cfg.alarms, alarms, sizeof(cfg.alarms));
     memcpy(cfg.bt_target_addr, saved_bt_target_addr, sizeof(cfg.bt_target_addr));
+    cfg.bt_known_count = bt_known_count;
+    memcpy(cfg.bt_known, bt_known, sizeof(cfg.bt_known));
     return cfg;
 }
 
@@ -910,7 +915,9 @@ static bool settings_equal(clock_settings_t a, clock_settings_t b) {
         a.audio_hourly_jbl != b.audio_hourly_jbl ||
         a.audio_timer_jbl != b.audio_timer_jbl ||
         a.audio_alarm_jbl != b.audio_alarm_jbl ||
-        memcmp(a.bt_target_addr, b.bt_target_addr, sizeof(a.bt_target_addr)) != 0)
+         memcmp(a.bt_target_addr, b.bt_target_addr, sizeof(a.bt_target_addr)) != 0 ||
+         a.bt_known_count != b.bt_known_count ||
+         memcmp(a.bt_known, b.bt_known, sizeof(a.bt_known)) != 0)
         return false;
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
         const alarm_entry_t *x = &a.alarms[i], *y = &b.alarms[i];
@@ -1537,10 +1544,32 @@ static bool bt_sink_change_allowed(void){
            !sd_fat32_stream_active() && !music_ui_open &&
            audio_queue_idle(&audio_queue) && !dfplayer_busy();
 }
+static int bt_known_find(const uint8_t address[6]) {
+    for (unsigned i = 0; i < bt_known_count; ++i)
+        if (memcmp(bt_known[i].address, address, 6) == 0) return (int)i;
+    return -1;
+}
+static bool bt_menu_device(unsigned index, clock_bt_device_t *out) {
+    if (index == 0u || !out) return false;
+    if (index <= bt_known_count) {
+        const clock_bt_known_t *known = &bt_known[index - 1u];
+        snprintf(out->address, sizeof(out->address), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 known->address[0], known->address[1], known->address[2],
+                 known->address[3], known->address[4], known->address[5]);
+        snprintf(out->name, sizeof(out->name), "%s", known->name);
+        out->rssi = 0;
+        return true;
+    }
+    return clock_a2dp_scan_get(index - bt_known_count - 1u, out);
+}
+static unsigned bt_menu_count(void) {
+    return 1u + bt_known_count + clock_a2dp_scan_count();
+}
 static bool bt_sink_select(const char *mac){
     unsigned b[6];
     char end;
-    if (sscanf(mac, "%2x:%2x:%2x:%2x:%2x:%2x%c",
+    if (!mac || strlen(mac) != 17u ||
+        sscanf(mac, "%2x:%2x:%2x:%2x:%2x:%2x%c",
                &b[0],&b[1],&b[2],&b[3],&b[4],&b[5],&end) != 6)
         return false;
     if (!bt_sink_change_allowed()){
@@ -1551,6 +1580,25 @@ static bool bt_sink_select(const char *mac){
     if (!clock_a2dp_select_target(mac)) return false;
     for (unsigned i=0;i<6u;i++)
         bt_pending_target_addr[i] = (uint8_t)b[i];
+    snprintf(bt_pending_target_name, sizeof(bt_pending_target_name), "%s", mac);
+    clock_bt_device_t discovered;
+    for (unsigned i = 0; i < clock_a2dp_scan_count(); ++i) {
+        unsigned found[6];
+        if (clock_a2dp_scan_get(i, &discovered) &&
+            sscanf(discovered.address, "%2x:%2x:%2x:%2x:%2x:%2x",
+                   &found[0], &found[1], &found[2], &found[3],
+                   &found[4], &found[5]) == 6 &&
+            found[0] == b[0] && found[1] == b[1] && found[2] == b[2] &&
+            found[3] == b[3] && found[4] == b[4] && found[5] == b[5]) {
+            snprintf(bt_pending_target_name, sizeof(bt_pending_target_name), "%s",
+                     discovered.name);
+            break;
+        }
+    }
+    int known = bt_known_find(bt_pending_target_addr);
+    if (known >= 0 && strcmp(bt_pending_target_name, mac) == 0)
+        snprintf(bt_pending_target_name, sizeof(bt_pending_target_name), "%s",
+                 bt_known[known].name);
     bt_pending_target_valid = true;
     bt_pending_seen_disconnected = !was_active;
     // Do not persist a sink that never successfully negotiates A2DP.
@@ -1559,6 +1607,14 @@ static bool bt_sink_select(const char *mac){
     return true;
 }
 static void bt_scan_list(void){
+    printf("[BT-KNOWN] count=%u\n", (unsigned)bt_known_count);
+    for (unsigned i = 0; i < bt_known_count; ++i) {
+        clock_bt_device_t known;
+        bt_menu_device(i + 1u, &known);
+        printf("[BT-KNOWN] %u address=%s name=%s paired=%s\n",
+               i + 1u, known.address, known.name,
+               clock_a2dp_has_link_key(known.address) ? "YES" : "NO");
+    }
     printf("[BT-SCAN] count=%u active=%s preferred=%s\n",
            clock_a2dp_scan_count(),
            clock_a2dp_scan_active() ? "YES" : "NO",
@@ -1567,7 +1623,7 @@ static void bt_scan_list(void){
     for (unsigned i=0;i<clock_a2dp_scan_count();i++){
         if (clock_a2dp_scan_get(i,&d))
             printf("[BT-SCAN] %u address=%s name=%s rssi=%d\n",
-                   i+1u,d.address,d.name,(int)d.rssi);
+                    bt_known_count+i+1u,d.address,d.name,(int)d.rssi);
     }
 }
 #endif
@@ -1821,7 +1877,7 @@ static void menu_commit(uint64_t now) {
                 }
             } else {
                 clock_bt_device_t d;
-                if (clock_a2dp_scan_get(menu_bt_index - 1u, &d)) {
+                if (bt_menu_device(menu_bt_index, &d)) {
                     menu_state = MENU_BT_CONFIRM;
                     printf("[MENU-BT] Confirm connect %s (%s)\n", d.name, d.address);
                 }
@@ -1835,7 +1891,7 @@ static void menu_commit(uint64_t now) {
             {
                 clock_bt_device_t d;
                 if (menu_bt_index > 0u &&
-                    clock_a2dp_scan_get(menu_bt_index - 1u, &d) &&
+                    bt_menu_device(menu_bt_index, &d) &&
                     bt_sink_select(d.address))
                     printf("[MENU-BT] Connecting %s\n", d.name);
                 else
@@ -1900,11 +1956,11 @@ static void menu_rotate(int direction, uint64_t now) {
         case MENU_BT_LIST:
 #ifdef CLOCK_ENABLE_A2DP
             {
-                unsigned count = 1u + clock_a2dp_scan_count();
+                unsigned count = bt_menu_count();
                 menu_bt_index = (uint8_t)((menu_bt_index + count +
                                  (direction > 0 ? 1u : count - 1u)) % count);
                 clock_bt_device_t device;
-                if (menu_bt_index && clock_a2dp_scan_get(menu_bt_index - 1u, &device))
+                if (menu_bt_index && bt_menu_device(menu_bt_index, &device))
                     printf("[MENU-BT] index=%u/%u name=%s MAC=%s\n",
                            (unsigned)(menu_bt_index + 1u), count,
                            device.name, device.address);
@@ -2033,12 +2089,35 @@ static void load_settings_at_boot(void) {
         memcpy(alarms, saved.alarms, sizeof(alarms));
         memcpy(saved_bt_target_addr, saved.bt_target_addr,
                sizeof(saved_bt_target_addr));
+        bt_known_count = saved.bt_known_count;
+        memcpy(bt_known, saved.bt_known, sizeof(bt_known));
+        // v5/v6 stored only the preferred MAC. Keep it selectable by MAC
+        // until a fresh scan supplies its advertised name.
+        bool legacy_target = false, cleared_target = true;
+        for (unsigned k = 0; k < sizeof(saved_bt_target_addr); ++k) {
+            legacy_target |= saved_bt_target_addr[k] != 0u;
+            cleared_target &= saved_bt_target_addr[k] == 0xffu;
+        }
+        if (!bt_known_count && legacy_target && !cleared_target) {
+            memcpy(bt_known[0].address, saved_bt_target_addr, 6);
+            snprintf(bt_known[0].name, sizeof(bt_known[0].name),
+                     "%02X:%02X:%02X:%02X:%02X:%02X",
+                     saved_bt_target_addr[0], saved_bt_target_addr[1],
+                     saved_bt_target_addr[2], saved_bt_target_addr[3],
+                     saved_bt_target_addr[4], saved_bt_target_addr[5]);
+            bt_known_count = 1u;
+        }
 #ifdef CLOCK_ENABLE_A2DP
         // All zeroes in a legacy record mean "use build-time sink".
-        bool address_saved = false;
+        bool address_saved = false, target_cleared = true;
         for (unsigned k = 0; k < sizeof(saved_bt_target_addr); ++k)
             address_saved |= saved_bt_target_addr[k] != 0;
-        if (address_saved) {
+        for (unsigned k = 0; k < sizeof(saved_bt_target_addr); ++k)
+            target_cleared &= saved_bt_target_addr[k] == 0xffu;
+        if (target_cleared) {
+            clock_a2dp_clear_target();
+            puts("[BT] No preferred sink (explicitly cleared)");
+        } else if (address_saved) {
             char mac[18];
             snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
                      saved_bt_target_addr[0], saved_bt_target_addr[1],
@@ -2601,6 +2680,8 @@ static void handle_command(char *line) {
         puts("[BT-SCAN] Stopped");
     } else if (strcmp(line, "bt-devices") == 0) {
         bt_scan_list();
+    } else if (strcmp(line, "bt-known") == 0) {
+        bt_scan_list();
     } else if (strcmp(line, "bt-target") == 0) {
         printf("[BT] preferred=%s stream=%s pending_validation=%s\n",
                clock_a2dp_target(),
@@ -2612,7 +2693,7 @@ static void handle_command(char *line) {
         char extra = 0;
         if (sscanf(argument, "%u %c", &index, &extra) == 1 && index > 0u) {
             clock_bt_device_t d;
-            if (!clock_a2dp_scan_get(index - 1u, &d) ||
+            if (!bt_menu_device(index, &d) ||
                 !bt_sink_select(d.address))
                 puts("[BT-SELECT] Invalid index or selection refused");
         } else {
@@ -2627,6 +2708,16 @@ static void handle_command(char *line) {
                     ++matches;
                 }
             }
+            for (unsigned i = 0; i < bt_known_count; ++i) {
+                if (strcmp(bt_known[i].name, argument) == 0) {
+                    clock_bt_device_t known;
+                    bt_menu_device(i + 1u, &known);
+                    if (matches == 0u || strcmp(selected.address, known.address) != 0) {
+                        selected = known;
+                        ++matches;
+                    }
+                }
+            }
             if (matches == 1u) {
                 if (!bt_sink_select(selected.address))
                     puts("[BT-SELECT] Connection refused");
@@ -2634,6 +2725,37 @@ static void handle_command(char *line) {
                 puts("[BT-SELECT] Ambiguous name: choose an index or MAC");
             } else if (!bt_sink_select(argument)) {
                 puts("[BT-SELECT] Use bt-use N, bt-use <exact discovered name>, or bt-use XX:XX:XX:XX:XX:XX");
+            }
+        }
+    } else if (strncmp(line, "bt-forget ", 10) == 0) {
+        const char *argument = line + 10;
+        unsigned index = 0u;
+        char extra = 0;
+        int found = -1;
+        if (sscanf(argument, "%u %c", &index, &extra) == 1 &&
+            index > 0u && index <= bt_known_count) found = (int)(index - 1u);
+        for (unsigned i = 0; found < 0 && i < bt_known_count; ++i) {
+            clock_bt_device_t known;
+            bt_menu_device(i + 1u, &known);
+            if (strcmp(argument, known.address) == 0) found = (int)i;
+        }
+        if (found < 0 || !bt_sink_change_allowed()) {
+            puts("[BT-KNOWN] Unknown device or audio busy");
+        } else {
+            clock_bt_device_t known;
+            bt_menu_device((unsigned)found + 1u, &known);
+            if (clock_a2dp_forget(known.address)) {
+                if (memcmp(saved_bt_target_addr, bt_known[found].address, 6) == 0)
+                    memset(saved_bt_target_addr, 0xff, 6);
+                if (bt_pending_target_valid &&
+                    memcmp(bt_pending_target_addr, bt_known[found].address, 6) == 0)
+                    bt_pending_target_valid = false;
+                memmove(&bt_known[found], &bt_known[found + 1u],
+                        (bt_known_count - (unsigned)found - 1u) * sizeof(bt_known[0]));
+                --bt_known_count;
+                memset(&bt_known[bt_known_count], 0, sizeof(bt_known[0]));
+                settings_mark_changed();
+                printf("[BT-KNOWN] Forgotten %s; Flash autosave pending\n", known.address);
             }
         }
     } else if (strcmp(line, "bt-volume") == 0) {
@@ -2984,7 +3106,7 @@ static void handle_command(char *line) {
         puts("[TIMER-AUDIO] timer-audio jbl|local; timer-audio - timer start/cancel/finish routing");
         puts("[ALARM-AUDIO] alarm-audio jbl|local; alarm-audio; alarm-audio-test 1; alarm-stop");
         puts("[AUDIO-SETTINGS] audio-settings shows persisted preferences; change with audio-select, auto-audio, timer-audio, alarm-audio; save");
-        puts("[BT] SETTINGS > Bluetooth: scan, browse, connect; CLI: bt-scan, bt-devices, bt-use N|MAC, bt-target, bt-scan-stop");
+        puts("[BT] SETTINGS > Bluetooth: known devices, scan, connect; CLI: bt-scan, bt-devices, bt-use N|name|MAC, bt-forget N|MAC, bt-target");
         puts("[BT-VOL] bt-volume shows independent Bluetooth level; bt-vol 0..30 sets it; VOLUME encoder follows audio route");
         puts("[AUDIO-HEALTH] audio-health shows read-only owner, queue and Bluetooth status");
         puts("[ALARM-PENDING] alarm-pending, alarm-pending-test N, alarm-pending-clear (RAM only)");
@@ -3473,7 +3595,20 @@ int main(void) {
         if (!clock_a2dp_stream_active()) bt_volume_remote_synced = false;
         if (bt_pending_target_valid) {
             if (!clock_a2dp_stream_active()) bt_pending_seen_disconnected = true;
-            if (bt_pending_seen_disconnected && clock_a2dp_stream_active()) {
+            if (bt_pending_seen_disconnected &&
+                clock_a2dp_stream_matches(bt_pending_target_addr)) {
+                int known = bt_known_find(bt_pending_target_addr);
+                if (known < 0) {
+                    if (bt_known_count == CLOCK_BT_KNOWN_MAX) {
+                        memmove(&bt_known[0], &bt_known[1],
+                                (CLOCK_BT_KNOWN_MAX - 1u) * sizeof(bt_known[0]));
+                        --bt_known_count;
+                    }
+                    known = (int)bt_known_count++;
+                }
+                memcpy(bt_known[known].address, bt_pending_target_addr, 6);
+                snprintf(bt_known[known].name, sizeof(bt_known[known].name), "%s",
+                         bt_pending_target_name);
                 memcpy(saved_bt_target_addr, bt_pending_target_addr,
                        sizeof(saved_bt_target_addr));
                 bt_pending_target_valid = false;
@@ -3615,7 +3750,7 @@ int main(void) {
 #ifdef CLOCK_ENABLE_A2DP
         if (menu_state == MENU_BT_SCANNING && !clock_a2dp_scan_active()) {
             menu_state = MENU_BT_LIST;
-            menu_bt_index = clock_a2dp_scan_count() ? 1u : 0u;
+            menu_bt_index = bt_menu_count() > 1u ? 1u : 0u;
             menu_last_input_ms = now;
             printf("[MENU-BT] scan complete, devices=%u\n",
                    clock_a2dp_scan_count());
@@ -3674,7 +3809,7 @@ int main(void) {
 #ifdef CLOCK_ENABLE_A2DP
             clock_bt_device_t d;
             snprintf(top, sizeof(top), "BT CONNECT?");
-            if (menu_bt_index && clock_a2dp_scan_get(menu_bt_index - 1u, &d))
+            if (menu_bt_index && bt_menu_device(menu_bt_index, &d))
                 snprintf(bottom, sizeof(bottom), "%.16s", d.name);
             else snprintf(bottom, sizeof(bottom), "Device missing");
 #else
@@ -3683,15 +3818,15 @@ int main(void) {
 #endif
         } else if (menu_state == MENU_BT_LIST) {
 #ifdef CLOCK_ENABLE_A2DP
-            unsigned count = clock_a2dp_scan_count();
+            unsigned count = bt_menu_count();
             snprintf(top, sizeof(top), "BT %u/%u %s",
-                     (unsigned)(menu_bt_index + 1u), (unsigned)(count + 1u),
+                     (unsigned)(menu_bt_index + 1u), count,
                      clock_a2dp_stream_active() ? "ON" : "OFF");
             if (menu_bt_index == 0u)
                 snprintf(bottom, sizeof(bottom), "Scan devices");
             else {
                 clock_bt_device_t d;
-                if (clock_a2dp_scan_get(menu_bt_index - 1u, &d))
+                if (bt_menu_device(menu_bt_index, &d))
                     snprintf(bottom, sizeof(bottom), "%.16s", d.name);
                 else snprintf(bottom, sizeof(bottom), "No device");
             }

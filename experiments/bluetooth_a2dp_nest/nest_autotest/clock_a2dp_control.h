@@ -25,6 +25,9 @@ bool clock_a2dp_scan_get(unsigned index, clock_bt_device_t *out);
 // the in-RAM reconnect target. Caller persists the MAC after user approval.
 bool clock_a2dp_select_target(const char *address);
 const char *clock_a2dp_target(void);
+bool clock_a2dp_has_link_key(const char *address);
+bool clock_a2dp_forget(const char *address);
+void clock_a2dp_clear_target(void);
 
 // Preferred 0..30 Bluetooth level: AVRCP Absolute Volume when available,
 // otherwise gain applied to the outgoing SBC PCM. Never changes DFPlayer.
@@ -42,6 +45,7 @@ bool clock_a2dp_play_clip(void);
 void clock_a2dp_stop_tone(void);
 void clock_a2dp_print_status(void);
 bool clock_a2dp_stream_active(void);
+bool clock_a2dp_stream_matches(const uint8_t address[6]);
 uint32_t clock_a2dp_current_rate(void);
 
 #endif

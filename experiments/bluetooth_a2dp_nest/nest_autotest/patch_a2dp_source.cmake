@@ -18,6 +18,13 @@ set(_new_scan_function [=[
 #include "clock_a2dp_control.h"
 // Flash v5 overrides the legacy build-time default at boot.
 static char clock_autoconnect_target[18] = "__CLOCK_AUTO_TARGET__";
+static bd_addr_t clock_connected_addr;
+static bool clock_connected_addr_valid;
+bool clock_a2dp_stream_matches(const uint8_t address[6]){
+    return address && clock_a2dp_stream_active() &&
+           clock_connected_addr_valid &&
+           memcmp(clock_connected_addr, address, 6) == 0;
+}
 bool clock_a2dp_avrcp_available(void){ return media_tracker.avrcp_cid != 0; }
 uint8_t clock_a2dp_volume(void){ return clock_bt_volume; }
 uint8_t clock_a2dp_remote_volume(void){ return clock_bt_remote_volume; }
@@ -229,6 +236,36 @@ void clock_a2dp_scan_stop(void){
     }
     clock_reconnect_schedule();
 }
+bool clock_a2dp_has_link_key(const char *address){
+    if (!address || strlen(address) != 17u) return false;
+    bd_addr_t addr;
+    link_key_t key;
+    link_key_type_t type;
+    sscanf_bd_addr(address, addr);
+    return gap_get_link_key_for_bd_addr(addr, key, &type);
+}
+void clock_a2dp_clear_target(void){
+    clock_reconnect_cancel();
+    clock_autoconnect_target[0] = 0;
+    clock_bt_switch_requested = false;
+}
+bool clock_a2dp_forget(const char *address){
+    if (!address || strlen(address) != 17u) return false;
+    bd_addr_t addr;
+    sscanf_bd_addr(address, addr);
+    if (clock_autoconnect_target[0]) {
+        bd_addr_t selected;
+        sscanf_bd_addr(clock_autoconnect_target, selected);
+        if (!bd_addr_cmp(addr, selected)) {
+            if (media_tracker.a2dp_cid &&
+                a2dp_source_disconnect(media_tracker.a2dp_cid) != ERROR_CODE_SUCCESS)
+                return false;
+            clock_a2dp_clear_target();
+        }
+    }
+    gap_drop_link_key_for_bd_addr(addr);
+    return true;
+}
 bool clock_a2dp_select_target(const char *address){
     if (!address || strlen(address)!=17u) return false;
     for (unsigned i=0;i<17u;i++){
@@ -346,6 +383,7 @@ set(_old_failed_connection [=[
 ]=])
 set(_new_failed_connection [=[
                 media_tracker.a2dp_cid = 0;
+                clock_connected_addr_valid = false;
                 if (clock_bt_scan_requested) clock_bt_scan_begin();
                 else clock_reconnect_schedule();
                 break;
@@ -362,6 +400,8 @@ set(_old_connected [=[
 ]=])
 set(_new_connected [=[
             media_tracker.a2dp_cid = cid;
+            memcpy(clock_connected_addr, address, 6);
+            clock_connected_addr_valid = true;
             clock_reconnect_cancel();
             clock_reconnect_failures = 0;
             media_tracker.volume = 32;
@@ -378,6 +418,7 @@ set(_old_signal_released [=[
 ]=])
 set(_new_signal_released [=[
                 media_tracker.a2dp_cid = 0;
+                clock_connected_addr_valid = false;
                 printf("A2DP Source: Signaling released.\n\n");
                 if (clock_bt_scan_requested) clock_bt_scan_begin();
                 else if (clock_bt_switch_requested){
