@@ -288,12 +288,17 @@ static void produce_audio(int16_t * pcm_buffer, int num_samples){
             }
         }
     }
-    // Independent conservative gains: MP3 playback 20%, test tones/clips 10%.
-    // The 20% level is exactly twice the prior MP3 PCM amplitude (-6 dB -> 0 dB relative).
-    // Apply the gain after the ring consumer but before SBC encoding.
+    // Independent conservative gains: MP3 playback 40%, test tones/clips 10%.
+    // 40% gives 2x amplitude (+6.02 dB) compared with the previous 20% setting.
+    // Apply the gain after ring consumption, before SBC encoding. Division
+    // attenuates all signed 16-bit samples without clipping/overflow.
     const int clock_pcm_divisor = clock_pcm_ring_active() ? 5 : 10;
+    // For MP3 specifically use *2/5 (40%); the other outputs remain at 10%.
+
     for (int sample = 0; sample < num_samples * NUM_CHANNELS; ++sample){
-        pcm_buffer[sample] = (int16_t)(pcm_buffer[sample] / clock_pcm_divisor);
+        pcm_buffer[sample] = clock_pcm_ring_active()
+            ? (int16_t)(((int32_t)pcm_buffer[sample] * 2) / 5)
+            : (int16_t)(pcm_buffer[sample] / clock_pcm_divisor);
     }
 #ifdef VOLUME_REDUCTION
 ]=])
