@@ -22,6 +22,8 @@ typedef struct {
     uint8_t audio_hourly_jbl;
     uint8_t audio_timer_jbl;
     uint8_t audio_alarm_jbl;
+    // v5: selected A2DP sink Bluetooth MAC (all zeros = legacy build target).
+    uint8_t bt_target_addr[6];
 } clock_settings_t;
 
 typedef enum {
