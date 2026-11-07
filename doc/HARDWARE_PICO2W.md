@@ -1,8 +1,8 @@
-# Текущая распиновка Pico 2 W
+# Current Pico 2 W pin map
 
-Таблица соответствует C-прошивке main и проверенной на собранных часах конфигурации. GP означает GPIO, контакт - физический контакт платы. Первоначальная [схема Pico](../schematic/shematic.png) не отражает SPI-карту и перенос энкодера. Подтверждения испытаний собраны в [журнале аппаратных проверок](HARDWARE_TEST_EVIDENCE.md).
+This table matches the C firmware on main and the configuration tested on the assembled clock. GP means GPIO; pin means the physical board pin. The original [Pico schematic](../schematic/shematic.png) does not show the SPI card or relocated encoder. See [hardware test evidence](HARDWARE_TEST_EVIDENCE.md).
 
-| Сигнал | GPIO | Контакт |
+| Signal | GPIO | Physical pin |
 | --- | --- | --- |
 | LCD I2C SDA / SCL | GP0 / GP1 | 1 / 2 |
 | DS1302 CLK / DIO / CE | GP2 / GP5 / GP4 | 4 / 7 / 6 |
@@ -10,24 +10,24 @@
 | SD SPI1 CS | GP9 | 12 |
 | SD SPI1 CLK / SCK | GP10 | 14 |
 | SD SPI1 DI / MOSI | GP11 | 15 |
-| Таймерный энкодер DT / CLK | GP12 / GP13 | 16 / 17 |
-| Энкодер громкости DT / CLK | GP14 / GP15 | 19 / 20 |
+| Timer encoder DT / CLK | GP12 / GP13 | 16 / 17 |
+| Volume encoder DT / CLK | GP14 / GP15 | 19 / 20 |
 | Pico TX -> DFPlayer RX | GP16 | 21 |
 | Pico RX <- DFPlayer TX | GP17 | 22 |
 | DFPlayer BUSY | GP18 | 24 |
-| Кнопка энкодера таймера | GP19 | 25 |
-| Кнопка энкодера громкости | GP20 | 26 |
-| Кнопка будильника | GP21 | 27 |
-| Кнопка режима | GP22 | 29 |
-| Кнопка минус | GP26 | 31 |
-| Кнопка настройки / плюс | GP27 | 32 |
-| Кнопка режима таймера | GP28 | 34 |
-| Резерв внешней подсветки | GP6 | 9 |
+| Timer encoder button | GP19 | 25 |
+| Volume encoder button | GP20 | 26 |
+| Alarm button | GP21 | 27 |
+| Mode button | GP22 | 29 |
+| Minus button | GP26 | 31 |
+| Settings / plus button | GP27 | 32 |
+| Timer-mode button | GP28 | 34 |
+| Reserved external illumination output | GP6 | 9 |
 
-Кнопки замыкают GPIO на общую землю; код включает внутренние подтяжки вверх. Для SPI перенесены два сигнала вращения таймерного энкодера: DT с GP11 на GP12, CLK с GP10 на GP13. Работа энкодера после переноса подтверждена пользователем в журнале аудита. Кнопки энкодеров остаются на GP19 (таймер) и GP20 (громкость). Кнопка громкости отдельно проверена: переключение ON/OFF видно в USB-журнале и на LCD.
+Buttons connect GPIO to common ground; the code enables internal pull-ups. To free SPI pins, the timer encoder rotation signals moved: DT from GP11 to GP12, CLK from GP10 to GP13. The audit records user confirmation that the relocated encoder works. Encoder buttons remain GP19 (timer) and GP20 (volume). The volume button was tested separately: ON/OFF appears in USB logs and on the LCD.
 
-Подключённый внешний SD-модуль рассчитан на 3,3 В: VCC -> 3V3(OUT), контакт 36; GND -> общая земля. SPI подключён по таблице выше и аппаратно проверен: инициализация SDHC/SDXC, чтение секторов, FAT32, каталогов и MP3-файлов. DFPlayer сохраняет собственную карту и аналоговый выход. На отдельной FAT32-карте Pico находятся копии нумерованных папок MP3, например 07/001.mp3. Последующие тесты подтвердили декодирование Helix и воспроизведение через Bluetooth.
+The connected external SD module is rated for 3.3 V: VCC -> 3V3(OUT), pin 36; GND -> common ground. SPI follows the table above and has passed hardware tests for SDHC/SDXC initialization, sector reads, FAT32, directories and MP3 files. DFPlayer retains its own card and analog output. The separate Pico FAT32 card contains copies of numbered MP3 folders, such as 07/001.mp3. Later tests confirmed Helix decoding and Bluetooth playback.
 
-Эта таблица фиксирует сигнальные подключения. Полная электрическая схема питания RTC, LCD и DFPlayer требует сверки с фактическими модулями. GP6 зарезервирован для отдельного светодиода через ключ; управление подсветкой пока отсутствует.
+This table documents signal connections. A complete RTC, LCD and DFPlayer power schematic still requires comparison with the installed modules. GP6 is reserved for a separate illumination LED through a switching stage; illumination control is not implemented.
 
-Источники: [controls.c](../firmware/pico2w_c/drivers/controls.c), [main.c](../firmware/pico2w_c/main.c), [sd_spi.c](../firmware/pico2w_c/drivers/sd_spi.c), [dfplayer.c](../firmware/pico2w_c/drivers/dfplayer.c).
+Sources: [controls.c](../firmware/pico2w_c/drivers/controls.c), [main.c](../firmware/pico2w_c/main.c), [sd_spi.c](../firmware/pico2w_c/drivers/sd_spi.c), [dfplayer.c](../firmware/pico2w_c/drivers/dfplayer.c).

@@ -915,7 +915,7 @@ instead of the expected finish phrase and long signal. The checked-in
 \`009.mp3\`, \`014.mp3\`, and \`015.mp3\`; there are no files
 \`011.mp3\` or \`013.mp3\` in that German service folder.
 The documented track labels are in
-\`sound/_sdcard/описание папок.txt\`. The user's physical SD-card
+\`sound/_sdcard/FOLDER_LAYOUT.txt\`. The user's physical SD-card
 contents have not yet been independently inventoried.
 
 As a temporary nonverbal German fallback,

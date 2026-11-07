@@ -1,16 +1,16 @@
-# Подтверждённые аппаратные проверки
+# Confirmed hardware test evidence
 
-Сводка относится к собранным часам Pico 2 W на COM8. Она восстанавливает результаты из журнала проекта и пользовательских тестов; это не новый прогон оборудования.
+This summary covers the assembled Pico 2 W clock on COM8. It reconstructs results from project records and user tests; it is not a new hardware run.
 
-## Энкодеры и кнопки
+## Encoders and buttons
 
-В [аудите от 6 ноября](C_MIGRATION_AUDIT_2026-11-06.md#fat32-directory--file-read-diagnostics-implemented-2026-11-06) явно записано подтверждение пользователя: таймерный энкодер работает после переноса на GP12/GP13. Кнопка громкости GP20 проверена по переключению звука ON/OFF в последовательном журнале и на LCD; изменение её прошивки не требовалось.
+The [November 6 audit](C_MIGRATION_AUDIT_2026-11-06.md#fat32-directory--file-read-diagnostics-implemented-2026-11-06) explicitly records user confirmation that the timer encoder works after relocation to GP12/GP13. Volume button GP20 was verified through sound ON/OFF in serial logs and on the LCD; no firmware change was required for that button.
 
-Перенесены сигналы вращения DT/CLK: GP11/GP10 -> GP12/GP13. Кнопки энкодеров в коде остаются GP20 (громкость), GP19 (таймер). В пользовательском журнале от 7 ноября присутствуют encoder TIMER CW/CCW и button TIMER PRESS/RELEASE с навигацией и подтверждением в Bluetooth-меню.
+The rotation signals moved from DT/CLK GP11/GP10 to GP12/GP13. Encoder buttons remain GP20 (volume) and GP19 (timer). The November 7 user log includes encoder TIMER CW/CCW and button TIMER PRESS/RELEASE with Bluetooth menu navigation and confirmation.
 
 ## SPI microSD
 
-[Коммит 85369eb](https://github.com/FlintUA/Speaking-Timer-Clock-Raspberry-Pi-Pico/commit/85369ebe2af2bbf4994ca601ce5b201ccf30d3ee) зафиксировал успешный тест 6 ноября 2026 года в 21:28:
+[Commit 85369eb](https://github.com/FlintUA/Speaking-Timer-Clock-Raspberry-Pi-Pico/commit/85369ebe2af2bbf4994ca601ce5b201ccf30d3ee) recorded a successful test on November 6, 2026 at 21:28:
 
 ```text
 [SD] SPI1 initialized: SDHC/SDXC, bus=3947368 Hz, read-only
@@ -18,42 +18,42 @@
 [SD] PASS: SPI sector read + FAT32 boot sector
 ```
 
-Подключение: GP8 MISO, GP9 CS, GP10 SCK, GP11 MOSI. Подключён модуль 3,3 В, карта FAT32 4 ГБ с копиями файлов DFPlayer. Точная таблица соединений и питания модуля находится в [HARDWARE_PICO2W.md](HARDWARE_PICO2W.md).
+Wiring: GP8 MISO, GP9 CS, GP10 SCK, GP11 MOSI. The connected module is rated for 3.3 V, and the 4 GB FAT32 card contains copies of the DFPlayer files. See [HARDWARE_PICO2W.md](HARDWARE_PICO2W.md) for signal and module power connections.
 
-В 21:39 тот же [аудит](C_MIGRATION_AUDIT_2026-11-06.md#full-sd-fat32-directory-and-file-lookup-verified-conservative-jbl-level-2026-11-06-2139) зафиксировал 27 записей корневого каталога, файлы в папке 07 и успешное чтение 07/001.mp3: 53103 байта, первый кластер 1476, заголовок ID3. RTC продолжал работать, A2DP был ACTIVE на 44100 Гц.
+At 21:39, the same [audit](C_MIGRATION_AUDIT_2026-11-06.md#full-sd-fat32-directory-and-file-lookup-verified-conservative-jbl-level-2026-11-06-2139) recorded 27 root directory entries, files in folder 07 and successful access to 07/001.mp3: 53103 bytes, first cluster 1476, ID3 header. The RTC kept running and A2DP was ACTIVE at 44100 Hz.
 
-## MP3 и Bluetooth
+## MP3 and Bluetooth
 
-В том же аудите тест от 7 ноября 07:43 подтвердил чтение MP3 с SPI/FAT32 и декодирование Helix: 4096 PCM-кадров, 48000 Гц, 192000 бит/с.
+The same audit records a November 7 test at 07:43 confirming MP3 reads from SPI/FAT32 and Helix decoding: 4096 PCM frames, 48000 Hz, 192000 bits/s.
 
-В чате [«Часы на Pico2W»](chatgpt-conversation://6aedc619-12a0-83eb-8dfe-f136af0ced90) пользователь представил вывод sd-list 08 с MP3-файлами и подтвердил фактическое воспроизведение музыки на Nest, затем успешное подключение и музыку на Portable.
+In the [Pico2W clock chat](chatgpt-conversation://6aedc619-12a0-83eb-8dfe-f136af0ced90), the user supplied sd-list 08 output containing MP3 files and confirmed audible music on Nest, followed by successful connection and music on Portable.
 
-В приложенном журнале чата [«Часы на Pico2W часть 2»](chatgpt-conversation://6aef4851-6a7c-83eb-b02c-62756a5107b1) присутствуют завершённые воспроизведения /01/016.mp3 и /02/044.mp3 с преобразованием 48000 -> 44100 Гц и underruns=0. Там же зарегистрированы вращения обоих энкодеров и нажатия кнопок.
+The attached log in the [Pico2W clock, part 2 chat](chatgpt-conversation://6aef4851-6a7c-83eb-b02c-62756a5107b1) shows completed playback of /01/016.mp3 and /02/044.mp3, conversion from 48000 to 44100 Hz and underruns=0. It also records rotation of both encoders and button presses.
 
-## Известные устройства v7 и переподключение: аппаратный тест 7 ноября
+## Known devices v7 and reconnection: November 7 hardware test
 
-Пользователь уточнил модели двух колонок: JBL Link Portable (имя Portable, MAC 04:21:44:FA:A9:0E) и Google Nest Audio (имя Nest).
+The user identified two speakers: JBL Link Portable (name Portable, MAC 04:21:44:FA:A9:0E) and Google Nest Audio (name Nest).
 
-Журнал 19:25-19:27 подтверждает сканирование, выбор Portable, A2DP/SBC 44100 Гц, AVRCP, принятие устройства после Stream ACTIVE и последующий autosave=OK. Команда bt-devices показывает одну известную запись с именем Portable и paired=YES.
+The 19:25-19:27 log confirms discovery, Portable selection, A2DP/SBC at 44100 Hz, AVRCP, device acceptance after Stream ACTIVE and subsequent autosave=OK. The bt-devices command shows one known entry named Portable with paired=YES.
 
-Пользователь подтвердил отключение питания и успешное автоматическое переподключение. В журнале 19:30 COM8 отключается, затем возвращается; соединение с 04:21:44:FA:A9:0E восстанавливается, A2DP-поток запускается на 44100 Гц, канал AVRCP открывается. Команд сканирования в представленном фрагменте нет.
+The user confirmed power disconnection and successful automatic reconnection. In the 19:30 log, COM8 disconnects and returns; the connection to 04:21:44:FA:A9:0E is restored, A2DP starts at 44100 Hz and AVRCP opens. The supplied excerpt contains no scan commands.
 
-После восстановления связи ручное объявление 19:30 успешно воспроизводит /01/019.mp3 и /02/030.mp3. Оба сегмента преобразованы из 48000 в 44100 Гц, завершены с underruns=0; итог: BT-SPEECH COMPLETE, all segments delivered. RTC продолжает работать.
+After reconnection, a manual 19:30 announcement successfully plays /01/019.mp3 and /02/030.mp3. Both segments are converted from 48000 to 44100 Hz and finish with underruns=0; the final result is BT-SPEECH COMPLETE, all segments delivered. The RTC continues running.
 
-Таким образом, поиск, подключение, запись выбранной Portable и переподключение после отключения питания подтверждены на плате. Факт отключения питания подтверждён пользователем; журнал показывает восстановление соединения и последующий звук.
+Discovery, connection, saving the selected Portable and reconnection after power loss are therefore hardware confirmed. Power disconnection is user confirmed; the log shows restored connectivity and subsequent audio.
 
-## Что требует новой проверки
+## Deletion test and remaining checks
 
-Удаление через bt-forget 1 проверено пользователем 7 ноября в 19:40. До удаления: одна Portable, paired=YES. Команда вывела Forgotten, A2DP и AVRCP отключились, маршрут переключился на LOCAL. Через пять секунд получен autosave=OK. Повторный bt-known показал count=0 и пустую preferred. Пользователь подтвердил успешное удаление. Сохранность удаления после нового отключения питания этим фрагментом не проверялась.
+The user tested bt-forget 1 on November 7 at 19:40. Before deletion there was one Portable entry with paired=YES. The command printed Forgotten, A2DP and AVRCP disconnected, and routing switched to LOCAL. Five seconds later, autosave=OK appeared. A subsequent bt-known showed count=0 and an empty preferred target. The user confirmed successful deletion. This excerpt does not test whether deletion remains effective after another power cycle.
 
-В текущем меню одна Portable может отображаться дважды: как известное устройство и результат сканирования с тем же MAC; это дублирование отображения, а не вторая колонка.
+The current menu can show Portable twice: once as a known device and once as a scan result with the same MAC. This is duplicate presentation, not a second speaker.
 
-## Две сохранённые колонки: переключение без сканирования (7 ноября, 19:46-19:47)
+## Two saved speakers: switching without scanning (November 7, 19:46-19:47)
 
-Пользователь подтвердил переключение между сохранёнными Portable и Nest без сканирования. Представленный журнал показывает Portable -> Nest, затем Nest -> Portable: выбор записей 2 и 3 в Bluetooth-меню, прямое подключение по MAC, успешные A2DP/SBC 44100 Гц и AVRCP в обоих направлениях. Запуска BT-SCAN в этом фрагменте нет.
+The user confirmed switching between saved Portable and Nest without scanning. The supplied log shows Portable -> Nest, then Nest -> Portable: selection of entries 2 and 3 in the Bluetooth menu, direct MAC connection and successful A2DP/SBC at 44100 Hz plus AVRCP in both directions. No BT-SCAN starts in this excerpt.
 
-После каждого переключения ручное объявление времени завершилось полностью: 19:46 через Nest, 19:47 через Portable, по два MP3-сегмента, underruns=0. Для Nest зарегистрирован autosave=OK; в конце фрагмента для последующего выбора Portable запись ещё pending, поэтому сохранение именно последнего выбора этим фрагментом не подтверждено.
+Each switch is followed by a complete manual time announcement: 19:46 on Nest and 19:47 on Portable, two MP3 segments each, underruns=0. Nest has a recorded autosave=OK. At the end of the excerpt, saving the subsequent Portable selection is still pending, so this excerpt does not confirm persistence of that final selection.
 
-При обоих переключениях первая попытка прямого подключения сразу после освобождения старого канала вернула 0x56. В установленном BTstack это BTSTACK_MEMORY_ALLOC_FAILED. Автоматический повтор через 5000 мс вернул 0x00 и восстановил соединение. Возможная связь с незавершённым освобождением ресурсов старого канала требует отдельного разбора; журнал не доказывает причину. Часы продолжали работать в течение ожидания.
+For both switches, the first direct connection attempt immediately after release of the previous channel returned 0x56. In the installed BTstack, this is BTSTACK_MEMORY_ALLOC_FAILED. The automatic retry after 5000 ms returned 0x00 and restored the connection. A possible relationship to incomplete resource release from the previous channel needs separate investigation; the log does not establish the cause. The clock continued running during the wait.
 
-Отображение имени колонки на LCD без MAC отдельно подтверждено пользователем. Остаются отдельные проверки сохранности удаления после выключения питания и загрузки с выбранной Nest; переподключение Portable после отключения питания уже проверено.
+The user separately confirmed that the LCD displays speaker names without MAC addresses. Remaining checks are persistence of deletion after power loss and booting with Nest selected. Portable reconnection after power loss is already verified.

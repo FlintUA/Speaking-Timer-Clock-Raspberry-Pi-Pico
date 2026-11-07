@@ -170,7 +170,7 @@ Three planned operating modes remain **OFF, ON, AUTO** (day/night dimming), but 
 ## Known audio-language difference: timer completion (RU vs DE, 2026-11-06)
 
 **Documented existing behavior - intentionally not fixed in this iteration.**
-- **Russian (RU):** after countdown completion, the spoken phrase `Таймер завершён` plays, together with the double timer-finish sound.
+- **Russian (RU):** after countdown completion, the spoken phrase meaning "Timer finished" in English plays, together with the double timer-finish sound.
 - **German (DE):** after countdown completion, only the double timer-finish sound plays. The corresponding German spoken completion message is missing/not found at the expected location in the current audio asset set.
 - User explicitly requested **leave current behavior unchanged** until a later audio-assets repair task. Do **not** substitute a guessed track, synthesize an unapproved announcement, or alter existing timer priority/finish signaling in this change.
 - Future action: identify the correct German phrase/audio file, confirm its exact DFPlayer folder/track mapping and RU/DE sequencing, add/repair the asset and verify both language modes on hardware. Also account for this when migrating voice playback from DFPlayer to second microSD + software MP3/A2DP.

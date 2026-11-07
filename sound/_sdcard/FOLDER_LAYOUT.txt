@@ -1,0 +1,39 @@
+Historical SD-card audio folder layout
+The descriptions below translate the original folder notes.
+They describe Russian/German recordings; the audio files are unchanged.
+Use the current firmware mappings when checking actual track availability.
+
+00: Not described.
+01: Hours, Russian.
+02: Minutes, Russian.
+03: Day-of-month numbers, Russian.
+04: Months, Russian.
+05: Year.
+06: Day of week.
+07: Timer messages, Russian.
+08: Music.
+09: Numbers 000 through 030, Russian.
+10: Reserved.
+11: Hours, German.
+    000: Noon.
+    001: One o'clock, continuing through 023.
+12: Numbers 000 through 059, German.
+    000: Exactly/on the hour; 001 through 059: minute numbers.
+13: Day-of-month ordinals 001 through 031, German, starting with "erste".
+14: Months 001 through 012, German; original note also lists 000 as "Januar".
+15: 003: Year 2023 in German; entries continue through 009.
+16: 001: "Montag"; German weekdays.
+17: German phrases (English meanings below).
+    007: Timer set.
+    008: Sound on.
+    009: Sound off.
+    014: Timer deactivated.
+    015: "minuten" (minutes).
+18: Clock chimes.
+    000: Melody.
+    001 through 012: Number of strikes.
+19: Simple beeps.
+    001: One beep.
+    002: Two beeps.
+20: Reserved.
+21: Reserved.

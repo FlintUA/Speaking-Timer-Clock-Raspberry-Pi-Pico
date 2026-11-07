@@ -1,34 +1,34 @@
-# C-прошивка часов Pico 2 W
+# Pico 2 W clock C firmware
 
-Текущая прошивка проекта. Сборка, зависимости и обновление описаны в [главном README](../../README.md), подключения - в [актуальной распиновке](../../doc/HARDWARE_PICO2W.md).
+This is the current project firmware. See the [main README](../../README.md) for build dependencies and updates, and the [current pin map](../../doc/HARDWARE_PICO2W.md) for wiring.
 
-## Проверка на плате
+## On-device verification
 
-1. После прошивки: flash-info, alarm-status, audio-settings, bt-status.
-2. Проверьте LCD, RTC, оба энкодера, кнопки, LOCAL речь и таймер.
-3. Выполните bt-scan, дождитесь окончания, bt-devices и bt-use N.
-4. Дождитесь Stream ACTIVE, выйдите из меню, дождитесь autosave=OK.
-5. Перезапустите плату: bt-known должен сохранить имя/MAC; подключение должно выполняться без сканирования.
-6. Повторите запуск с выключенной колонкой: часы и LOCAL-звук должны работать. Включите колонку, проверьте повторное подключение.
-7. Выполните bt-forget N и перезапуск: удалённое выбранное устройство не должно подключаться автоматически.
-8. Проверьте MP3, речь, таймер и будильник через Bluetooth, потерю связи и независимую громкость обоих выходов.
+1. After flashing, run flash-info, alarm-status, audio-settings and bt-status.
+2. Check LCD, RTC, both encoders, buttons, LOCAL speech and the timer.
+3. Run bt-scan, wait for completion, then bt-devices and bt-use N.
+4. Wait for Stream ACTIVE, leave the menu and wait for autosave=OK.
+5. Restart the board: bt-known should retain the name/MAC and connection should require no scan.
+6. Boot with the speaker off: the clock and LOCAL audio should continue working. Turn the speaker on and check reconnection.
+7. Run bt-forget N and restart: the removed preferred device should not reconnect automatically.
+8. Check MP3, speech, timer and alarm playback over Bluetooth, connection loss and independent output volume levels.
 
-update-pico.ps1 автоматически проверяет ответы Flash и будильников, но не заменяет аппаратную проверку звука и Bluetooth. Энкодер после переноса, кнопка громкости, SD/FAT32 и MP3/Bluetooth уже прошли аппаратные проверки - см. [подтверждения](../../doc/HARDWARE_TEST_EVIDENCE.md). Для реестра v7 подтверждены поиск, подключение, сохранение, переподключение Portable после отключения питания, удаление через bt-forget с autosave и переключение Portable <-> Nest без сканирования с последующей речью. При обоих переключениях первоначальный статус 0x56 преодолён автоматическим повтором через пять секунд.
+update-pico.ps1 automatically checks Flash and alarm responses, but does not replace sound and Bluetooth hardware tests. The relocated encoder, volume button, SD/FAT32 and MP3/Bluetooth have passed hardware tests; see [evidence](../../doc/HARDWARE_TEST_EVIDENCE.md). Registry v7 tests confirm discovery, connection, saving, Portable reconnection after power loss, deletion with autosave and Portable <-> Nest switching without scanning, followed by speech. Both switches recovered from initial status 0x56 through an automatic retry after five seconds.
 
-## Управление и диагностика
+## Controls and diagnostics
 
-Один энкодер громкости управляет активным выходом, его кнопка включает/выключает звук. Таймерный энкодер выбирает длительность; его кнопка запускает/отменяет таймер и подтверждает выбор в меню.
+One volume encoder adjusts the active output; its button toggles sound. The timer encoder sets the duration; its button starts/cancels the timer and confirms menu selections.
 
-SETTINGS открывает меню, таймерный энкодер выбирает пункт, SETTINGS или кнопка таймерного энкодера подтверждает, MINUS возвращает назад. Полный список USB-команд: help, скорость 115200.
+SETTINGS opens the menu, the timer encoder selects an item, SETTINGS or the timer encoder button confirms, and MINUS goes back. Run help for the complete USB command list. Serial speed: 115200.
 
-## Хранилище
+## Storage
 
-Настройки Clock Flash A/B находятся в секторах -6/-5 от конца Flash; старый -4 читается для миграции. BTstack использует -3/-2; последний сектор зарезервирован. v7 с CRC хранит четыре имени/MAC и настройки, форматы v1-v6 читаются. Ключи сопряжения сохраняет BTstack отдельно.
+Clock Flash A/B occupies sectors -6/-5 from the end of Flash; legacy sector -4 is read for migration. BTstack uses -3/-2; the final sector is reserved. CRC-protected v7 records store settings and four names/MACs, while v1-v6 remain readable. BTstack stores pairing keys separately.
 
-Устройство добавляется после активного A2DP-потока с совпавшим MAC. Сборка без Bluetooth сохраняет эти поля при изменении других настроек. SPI SD используется только для чтения.
+A device is added only after an active A2DP stream with a matching MAC. Builds without Bluetooth preserve these fields when saving other settings. SPI SD access is read-only.
 
-## История и ограничения
+## History and limitations
 
-Прежний накопленный README сохранён в [истории разработки](../../doc/history/PICO2W_C_DEVELOPMENT.md). Его ранняя распиновка и описания незавершённых этапов исторические.
+The previous accumulated README is in the [development history](../../doc/history/PICO2W_C_DEVELOPMENT.md). Its early wiring and descriptions of incomplete stages are historical.
 
-Флаги CMake CLOCK_ENABLE_A2DP и CLOCK_ENABLE_MP3 включаются явно. GP6 PWM ещё не реализован. Поддерживается Classic A2DP/SBC с автоматическим SSP, legacy PIN не поддерживается. Helix подключается отдельно, ревизия указана в главном README.
+CMake flags CLOCK_ENABLE_A2DP and CLOCK_ENABLE_MP3 are opt-in. GP6 PWM is not implemented. Classic A2DP/SBC with automatic SSP confirmation is supported; legacy PIN pairing is not. Helix is checked out separately at the revision documented in the main README.

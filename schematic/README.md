@@ -1,5 +1,5 @@
-# Историческая схема
+# Historical schematic
 
-shematic.png относится к первоначальной конструкции Raspberry Pi Pico. Для текущей Pico 2 W используйте [актуальную таблицу подключений](../doc/HARDWARE_PICO2W.md).
+shematic.png describes the original Raspberry Pi Pico construction. For the current Pico 2 W, use the [current wiring table](../doc/HARDWARE_PICO2W.md).
 
-Таймерный энкодер DT/CLK перенесён на GP12/GP13; GP8-GP11 заняты SPI1 microSD. Кнопки энкодеров по текущему коду: GP20 (громкость), GP19 (таймер). Старое изображение не является обновлённой электрической схемой.
+The timer encoder DT/CLK signals moved to GP12/GP13; GP8-GP11 are used by SPI1 microSD. Encoder buttons in the current code are GP20 (volume) and GP19 (timer). The old image is not an updated electrical schematic.

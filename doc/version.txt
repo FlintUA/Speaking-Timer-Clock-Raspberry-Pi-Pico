@@ -1,37 +1,36 @@
-#
-# Cyrrent Version 1.16 
-#
-Реализовано:
+# Historical version notes
+# Version 1.16
+# These notes describe the original firmware, not the current C release.
+
+Implemented:
 
 14:
-+ разделено реагирование на полный час и на пол-часа
-  полный час - бой курантов от 1 до 12, пол-часа - один удар
++ Separate full-hour and half-hour behavior.
+  Full hour: 1 to 12 chime strikes; half hour: one strike.
 
 15:
-+ проигрывание и остановка музыки по кнопке 1
++ Start and stop music with button 1.
 
-# кнопка 1 - проигрывание случайной мелодии из 
-# кнопка 2 - проговаривание текущего времени, даты и года
-# кнопка 3 - "выбор"
-# кнопка 4 - "минус"
-# кнопка 5 - "плюс"
-# кнопка левого енкодера - вкл/выкл звука
-# кнопка правого енкодера - старт/отмена таймера
-#
-#
+Original controls:
+# Button 1: play a random melody (source location unspecified in the original note).
+# Button 2: announce the current time, date and year.
+# Button 3: select.
+# Button 4: minus.
+# Button 5: plus.
+# Left encoder button: toggle sound on/off.
+# Right encoder button: start/cancel the timer.
 
-Планы:
-
-* - важные
+Historical plans:
+* marks an important item.
 =========================================
-*- режимы проговаривания времени: каждый час, +- каждые пол-часа, каждый час два сигнала, каждые полчаса один сигнал либо сочетание этих режимов
-+ режим боя старых часов - каждый час удары по количеству часов, каждые полчаса - один удар
-+ режим проговаривания праздничных дат (по заранее введенному списку дат и соответствующих им сообщений)
-+ переключение языков (укр-рус-нем) сделать по кнопке, например 2.
-+ сделать режим коррекции времени
-+ сделать механизм настроек - таймера, будильников, звук окончания таймера, проговаривания времени, боя часов
-+ сделать по кнопке вывод на экран текущего значения громкости, остатка минут таймера, времени будильников
-
-*- режим таймеров полного типа с датой и временем - для каждого таймера устанавливается флаг - на определенную дату или каждый день
-
-- режим коррекции времени
+* Time-announcement modes: every hour, approximately every half hour,
+  two signals on the hour, one signal on the half hour, or combinations.
++ Old-clock chime mode: hourly strikes matching the hour, one half-hour strike.
++ Holiday announcements from a predefined list of dates and messages.
++ Switch Ukrainian/Russian/German using a button, for example button 2.
++ Add a time-correction mode.
++ Add settings for the timer, alarms, timer completion sound,
+  time announcements and clock chimes.
++ Use a button to display volume, remaining timer minutes and alarm times.
+* Full date/time timers, each flagged as a specific-date or daily event.
+- Time-correction mode.

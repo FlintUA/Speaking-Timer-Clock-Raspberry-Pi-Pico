@@ -1,8 +1,8 @@
-# История проекта
+# Project history
 
-Эти документы отражают прежние этапы, а не текущие инструкции.
+These documents describe earlier stages rather than current instructions.
 
-- README-before-main-migration.md: прежняя главная страница.
-- PICO2W_C_DEVELOPMENT.md: накопленный журнал C-разработки; относительные ссылки сохранены в историческом виде.
+- README-before-main-migration.md: the previous project home page, translated into English.
+- PICO2W_C_DEVELOPMENT.md: the accumulated C development log; relative links retain their historical form.
 
-Текущие документы: [главный README](../../README.md), [распиновка](../HARDWARE_PICO2W.md), [C-прошивка](../../firmware/pico2w_c/README.md).
+Current documents: [main README](../../README.md), [pin map](../HARDWARE_PICO2W.md), [C firmware](../../firmware/pico2w_c/README.md).
