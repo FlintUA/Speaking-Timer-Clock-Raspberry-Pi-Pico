@@ -1229,3 +1229,44 @@ and `[MP3-PLAY] COMPLETE`. This avoids having to copy a long test file.
 Usual DFPlayer output and Flash settings are unchanged. Use
 `mp3-stop` to abort an unexpected test. This update requires recompiling
 and is **not yet verified** on the physical Pico.
+
+
+## Single-track Bluetooth audio routing test (2026-11-07)
+
+An explicit opt-in test now connects the existing logical `audio_router_t`
+selection to playback of **one 8.3 MP3 folder/track**. It does **not yet**
+change normal speech, automatic hours, timer notifications or alarm output:
+these remain on DFPlayer for safety while we prove the fallback.
+
+On COM8, verify SPI1 SD and an active 44.1kHz JBL A2DP stream, then try:
+
+```text
+sd-test
+bt-status
+audio-select jbl
+audio-route
+audio-route-test 7 1
+audio-route
+audio-select local
+audio-route-test 7 2
+audio-route
+```
+
+The remote path for `audio-route-test 7 1` is `07/001.mp3`, matching
+the tested Helix playback. The local test enqueues folder 07 track 002
+into the normal DFPlayer queue. MP3 digital level remains 53.3%.
+`audio-route-test` refuses while a timer, alarm, local music, decoder
+or SD diagnostics are busy, and does not persist the output choice.
+
+If JBL is disconnected/unavailable, an explicit test requested for JBL
+falls back to DFPlayer. When an **ongoing** routed test loses A2DP, it
+closes Helix and replays the entire current test track on DFPlayer from
+the beginning (rather than risking a lost/partial announcement). This
+fallback is suppressed if a higher-priority alarm/timer/music event is active.
+The normal queue never silently switches to Bluetooth in this milestone.
+
+The `audio-select local` command cancels a running routed Bluetooth
+test without replay. Reboot starts in LOCAL mode. Test an actual
+disconnect only after the normal JBL vs local test passes. Physical
+compilation/COM8 and disconnection recovery **still unverified** for this
+new revision. Do not test with a critical pending alarm.
