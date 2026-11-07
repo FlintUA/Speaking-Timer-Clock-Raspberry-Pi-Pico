@@ -261,8 +261,9 @@ static auto_decision_t auto_evaluate(uint8_t hour, uint8_t minute,
     if (!audio_queue_idle(&audio_queue) || dfplayer_busy()) return AUTO_BUSY;
 #ifdef CLOCK_ENABLE_A2DP
     // Never begin an automatic announcement in the middle of a BT phrase.
-    if (bt_speech_running || mp3_play_active() || mp3_probe_active() ||
-        routed_test_pending || sd_fat32_stream_active()) return AUTO_BUSY;
+    if (bt_speech_running || bt_timer_running || mp3_play_active() ||
+        mp3_probe_active() || routed_test_pending ||
+        sd_fat32_stream_active()) return AUTO_BUSY;
 #endif
     // If boot/RTC recovers in the middle of an hour/half-hour minute,
     // do not announce stale time. A 5-second window is deliberate.
@@ -2675,8 +2676,11 @@ int main(void) {
 #endif
         // Abort experimental playback when a higher-priority clock event needs audio.
         if (mp3_play_active() &&
-            ((timer.running && !bt_timer_running) ||
-             alarm_active_index >= 0 || music_ui_open ||
+            ((timer.running
+#ifdef CLOCK_ENABLE_A2DP
+              && !bt_timer_running
+#endif
+             ) || alarm_active_index >= 0 || music_ui_open ||
              !sound_enabled || !audio_queue_idle(&audio_queue)
 #ifdef CLOCK_ENABLE_A2DP
              || !clock_a2dp_stream_active()
