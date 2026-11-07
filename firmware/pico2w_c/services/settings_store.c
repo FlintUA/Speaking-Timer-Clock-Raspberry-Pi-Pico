@@ -155,15 +155,6 @@ static size_t record_size(const settings_record_v4_t *r) {
     return sizeof(settings_record_v4_t);
 }
 
-static uint32_t slot_offset(unsigned slot) {
-    return slot == 0u ? SLOT0_OFFSET :
-           slot == 1u ? SLOT1_OFFSET : LEGACY_SLOT_OFFSET;
-}
-
-static const uint8_t *slot_bytes(unsigned slot) {
-    return (const uint8_t *)(uintptr_t)(XIP_BASE + slot_offset(slot));
-}
-
 static bool sector_blank(unsigned slot) {
     const uint8_t *bytes = slot_bytes(slot);
     for (size_t i = 0; i < FLASH_SECTOR_SIZE; ++i) {
