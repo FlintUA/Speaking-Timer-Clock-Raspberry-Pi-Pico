@@ -1434,3 +1434,63 @@ timer announcement to observe failover. Alarm events remain LOCAL.
 
 **Not yet confirmed on Pico:** new firmware compilation, real countdown
 trigger, event audio, mid-stream disconnect, alarm preemption.
+
+
+## Experimental Bluetooth alarm routing - RAM-only opt-in (2026-11-07)
+
+This stage adds an *optional* JBL A2DP alarm audio path, with DFPlayer
+as the default and fallback. The existing five-slot flash-stored alarm
+configuration, collision handling, timer priority, one-shot RTC
+minute gating and quiet/sound settings are not modified. **After any
+reboot, alarm audio defaults to LOCAL**. Please do not rely on the JBL
+alarm path for an essential wake-up until the following tests are
+verified on hardware.
+
+COM8 test procedure, with charged JBL and 44.1 kHz A2DP active:
+
+```text
+sd-test
+bt-status
+alarm-status
+alarm-audio
+alarm-audio jbl
+alarm-audio-test 1
+```
+
+The new `alarm-audio-test 1` immediately starts a simulated ring for
+alarm slot 1, using its existing sound choice and the current RTC time.
+It does NOT change alarm enabled flags, alarm schedule/fired mask,
+RTC or flash settings. It does activate the normal ringing state so
+the physical ALARM button and `alarm-stop` command can terminate it.
+Expected Bluetooth logs are:
+
+```text
+[BT-ALARM] START segments=...
+[ALARM-AUDIO] output=JBL TEST
+[ALARM] 1 RINGING ... TEST
+[BT-ALARM] SEGMENT 1/... ...
+[MP3-PLAY] COMPLETE; resuming A2DP silence
+...
+[BT-ALARM] COMPLETE
+[ALARM] finished=AUDIO_COMPLETED
+```
+
+While still ringing, press the ALARM button or send `alarm-stop` to
+verify immediate cancellation. Next switch to `alarm-audio local`
+and run `alarm-audio-test 1`; inspect DFPlayer `[AUDIO-TRACK]`
+logs. When JBL is unavailable from the outset, the entire ring is
+enqueued locally. If A2DP drops mid-ring, the interrupted fragment
+restarts from its beginning and remaining parts continue through
+DFPlayer. Diagnostic `bt-tone`, `bt-clip`, `bt-silence`, `mp3-stop`
+and `mp3-pause/resume` are rejected while an alarm rings. Alarm stop
+applies to either sound owner; safety timeout stays 15 min.
+
+The MP3 ring and Helix decoder are serviced cooperatively, never
+inside the A2DP media callback. Current known PCM counter peculiarity:
+some prior completions logged 128/640 more consumed frames than
+produced, with `underruns=0`. This is not established as an audible
+failure but deserves a separate instrumentation review.
+
+**Not yet hardware verified**: new compile, simulated alarm audio
+through both outputs, physical ALARM press during Bluetooth MP3,
+live scheduled alarm at RTC boundary, mid-track disconnect fallback.
