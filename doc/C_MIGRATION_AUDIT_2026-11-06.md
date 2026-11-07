@@ -386,3 +386,15 @@ After first audible COM8 test of `/07/001.mp3` at 40% PCM gain, user approved ex
 - Existing priority interruptions (alarm/timer/DFPlayer/mute/A2DP disconnect) still stop MP3, with 40% MP3 amplitude only, 10% other BT tests.
 - All changes are source-only until an actual rebuild/flash. No real-hardware verification of full-file playback, pause/resume or EOF accounting as of this note.
 - Planned COM8 checks: `sd-test`, `bt-status`, `mp3-play 07/001.mp3`, `mp3-status`, `mp3-pause`, `mp3-resume`, `mp3-stop`; then use a file longer than 5 s and watch for continuing audio, RTC stability, no unexpected underruns.
+
+
+## Full-file MP3 hardware verification, gain to 53.3% (2026-11-07 08:08)
+
+User reports live COM8 test after full-file MP3 and pause/resume implementation:
+- `mp3-play 07/001.mp3`: decoded 93312 source frames, output/consumed 85730, `underruns=0`, `eof=YES`, `decode_us=458747`; `COMPLETE` and RTC ticking.
+- `mp3-play 07/002.mp3`: decoded 92160, output/consumed 84672, `underruns=0`, `eof=YES`, `decode_us=440524`; `COMPLETE`, RTC ticking.
+- Pause and resume commands were issued several seconds **after** the ~2-second file completed, returning correctly `Cannot pause: no active playback` and `Cannot resume: no paused playback`. Pause/resume during active stream is still unverified; use an MP3 longer than 10s.
+- After completion, `mp3-status` displays `consumed=0` because the PCM ring reset clears historical counts. Status preservation is a minor diagnostic improvement for later; successful playback's pre-reset log is correct.
+- User requested volume +1/3 vs existing 40% gain; now updated `produce_audio` to multiply signed samples by `8/15` (53.33% amplitude, ~+2.50dB), preserving other A2DP tests at 10% and local DFPlayer untouched. Updated UART status label. Await compile and on-device verification.
+
+Long uninterrupted playback, control commands while file playing and Bluetooth disconnect/reconnect still require hardware testing. No clock settings Flash change.
