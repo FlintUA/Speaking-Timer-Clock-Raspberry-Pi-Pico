@@ -398,6 +398,13 @@ bool sd_fat32_open_read(const char *path) {
         puts("[SD-MP3] Cannot open during sd-stream CRC test");
         return false;
     }
+    // Retry missing or not-yet-probed media only on a real playback request.
+    // No card reinitialization is attempted while a file/CRC stream is active.
+    // This remains in the main-loop decoder path, never in A2DP callbacks.
+    if (!sd_spi_ensure_fat32()) {
+        puts("[SD-MP3] FAT32 unavailable; caller may fall back to LOCAL");
+        return false;
+    }
     if (!mount_volume() || !path) return false;
     if (*path == '/') ++path;
     const char *slash = strchr(path, '/');
