@@ -1,4 +1,4 @@
-// Speaking-clock C firmware with protected flash settings (no Bluetooth yet).
+// Speaking-clock C firmware with protected flash settings and optional A2DP/MP3.
 // DS1302 RTC supports explicit manual time/date writes.
 #include <stdio.h>
 #include <stdlib.h>

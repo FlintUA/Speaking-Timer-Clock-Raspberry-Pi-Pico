@@ -8,10 +8,10 @@ param(
     [switch]$Build,
     [switch]$Bluetooth,
     [switch]$Mp3,
-    [string]$JblAddress = '04:21:44:FA:A9:0E',
+    [string]$JblAddress = '',
     [switch]$VerifyOnly,
     [int]$TimeoutSeconds = 45,
-    [string]$Cmake = 'C:\Users\Flint123\.pico-sdk\cmake\v4.3.4\bin\cmake.exe'
+    [string]$Cmake = (Join-Path $env:USERPROFILE '.pico-sdk\cmake\v4.3.4\bin\cmake.exe')
 )
 
 $ErrorActionPreference = 'Stop'

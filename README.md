@@ -1,41 +1,85 @@
-# Project status and firmware tracks
+# Говорящие часы на Raspberry Pi Pico 2 W
 
-The existing clock is running **MicroPython v3.10.0** on the Pico 2 W.
-The native **C / Pico SDK firmware is being developed in parallel** and
-is **not yet a replacement** for the working clock.
+Основной проект в main - прошивка на C / Pico SDK для **Pico 2 W (RP2350)**. Исходники MicroPython и первоначальная схема Pico сохранены как история.
 
-| Directory | Purpose | State |
-| --- | --- | --- |
-| [`source/v3/`](source/v3/) | Working MicroPython clock, source of truth for behavior | Stable v3.10.0 |
-| [`experiments/bluetooth_a2dp_nest/`](experiments/bluetooth_a2dp_nest/) | SBC/A2DP Source proof of concept on spare Pico 2 W | Tested with Nest Audio |
-| [`firmware/pico2w_c/`](firmware/pico2w_c/) | Future integrated C clock | Preparing migration, not bootable yet |
-| [`doc/C_MIGRATION_PLAN.md`](doc/C_MIGRATION_PLAN.md) | Porting matrix, pin map, verification and rollback gates | Maintained |
+Часы используют LCD1602 I2C, RTC DS1302, DFPlayer Mini, два энкодера и пять дополнительных кнопок. Pico читает MP3 с отдельной microSD по SPI1, декодирует их через Helix и передаёт SBC-аудио на колонку Bluetooth Classic A2DP.
 
-**Development safety:** do not flash the C experiment onto the working clock
-or remove any working MicroPython modules as part of housekeeping. The
-historical description below documents the original hardware and design;
-its feature limitations may not reflect the current v3.10.0 firmware.
+## Возможности и состояние
 
----
+- Таймер, пять ежедневных будильников, русская и немецкая речь, тихие часы.
+- Меню времени, даты, языка, громкости и аудиовыходов; диагностика по USB.
+- Локальный DFPlayer и Bluetooth для речи, таймера, будильников и музыки с локальным резервным воспроизведением.
+- Один энкодер управляет активным аудиовыходом. Громкость DFPlayer и Bluetooth хранится раздельно.
+- Сканирование Bluetooth, выбор имени/MAC, автоматическое SSP-сопряжение, до четырёх известных устройств, прямое подключение к сохранённому MAC.
+- Настройки Flash v7 читают форматы v1-v6. Ключи сопряжения хранятся отдельно средствами BTstack.
+- SPI microSD: чтение FAT32 и MP3; запись не реализована.
 
-# Speaking Timer-Clock on Raspberry Pi Pico
-Speaking Timer-Clock on Raspberry Pi Pico (H/W)
+C-прошивка является текущей разработкой. Предыдущие аппаратные проверки описаны в [истории](doc/history/PICO2W_C_DEVELOPMENT.md). Новый список Bluetooth-устройств проверен сборкой; сопряжение и восстановление после выключения ещё требуют проверки на плате. GP6 зарезервирован для внешней подсветки, драйвер PWM не реализован.
 
-Timer-clock with voice communication (1 timer up to 240 minutes, 5 fixed time points) and MP3 player based on Raspberry Pi Pico board, 1602 display with I2C module, RTC Clock DS1302 clock module, DFPlayer Mini MP3 player, 2 encoders with a button and a pull-up resistor 1K each, 5 additional buttons.
+## Актуальное подключение
 
-One encoder adjusts the volume, and a button on the encoder turns the sound on/off. The second encoder is designed to set the required number of minutes of the timer, the button on the encoder starts/stops the timer. The timer is not too accurate yet - the accuracy is approximate, from one minute, for example, setting the timer for 5 minutes can work after 4 minutes, but not less, because there is no concept of "seconds" in the device. There are 5 additional buttons for various additional functions. The display shows messages in German, voice messages in Russian and German. Every hour the time is announced, every half hour there is a short signal, there are sounds imitating the striking of an ancient clock. There is a silence mode (silent / night mode) from 22.00 to 7.00. While there is no setting mode, all settings are performed in the source code.
+См. [распиновку Pico 2 W](doc/HARDWARE_PICO2W.md). Она имеет приоритет над старым изображением схемы и MicroPython-кодом.
 
-Таймер-часы с речевым соообщением (1 таймер до 240 минут, 5 фиксированных временных точек) и проигрывателем MP3 файлов на базе платы Raspberry Pi Pico, дисплей 1602 с модулем I2C, модуль часов RTC Clock DS1302,
-проигрыватель MP3 файлов DFPlayer Mini, 2 енкодера с кнопкой и подтягивающим резитором 1кОм каждый, 5 дополнительных кнопок.
+Таймерный энкодер перенесён с DT=GP11 / CLK=GP10 на **GP12 / GP13**. GP8-GP11 используются SD SPI1. Кнопки энкодеров в текущем коде: громкость GP20, таймер GP19. Карты Pico и DFPlayer независимы.
 
-Один енкодер регулирует громкость, кнопка на енкодере включает/выключает звук.
-Второй енкодер предназначается для установки необходимого количества минут таймера, кнопка на енкодере запускает/останавливает таймер.
-Таймер пока не слишком точный - точность примерная, от одной минуты, например, выставив на 5 минут таймер может сработать и через 4 минуты, 
-но не меньше, т.к. в устройстве нет понятия "секунд".
-Есть 5 дополнительных кнопок для различных дополнительных функций.
-На дисплее сообщения выводятся на немецком языке, голосовые сообщения на русском и немецком.
-Каждый час проговаривается время, каждые пол-часа - короткий сигнал, есть звуки, имитирующие бой старинных часов.
-Есть режим тишины (тихий/ночной режим) с 22.00 до 7.00.
-Пока без режима настройки, все настройки выполняются в исходном коде.
+## Обновление Windows
 
+В вашей рабочей папке репозитория закройте монитор последовательного порта. При первом переходе с develop/v3:
 
+```powershell
+git status --short
+git fetch origin
+git switch main
+git merge --ff-only origin/main
+```
+
+Переключайте ветку при чистой рабочей копии, предварительно сохранив свои изменения. Если локальной main нет: `git switch --track origin/main`.
+
+Последующие обновления:
+
+```powershell
+git pull --ff-only
+powershell -ExecutionPolicy Bypass -File .\update-pico.ps1 -Build -Bluetooth -Mp3
+```
+
+По умолчанию используется COM8; другой порт задаётся через `-Port COM7`. Программный переход в BOOTSEL требует уже установленной прошивки с командами bootsel arm/confirm; первая установка выполняется с BOOTSEL вручную. Скрипт после прошивки проверяет Flash и ответы будильников, но не качество звука и сопряжение.
+
+## Зависимости и сборка
+
+Скрипт ожидает Pico SDK 2.3.1, pico-examples, CMake 4.3.4, ARM GCC, Ninja, pioasm и picotool в `%USERPROFILE%\.pico-sdk`. Для MP3:
+
+```powershell
+git clone https://github.com/Lefucjusz/Helix-MP3-Decoder.git third_party/Helix-MP3-Decoder
+git -C third_party/Helix-MP3-Decoder checkout e4f5adadb5126708144e55a862f59e318cbffb51
+powershell -ExecutionPolicy Bypass -File .\build-clock-bt.ps1 -Mp3
+```
+
+Сборка не прошивает плату. Результат: `firmware/pico2w_c/build-bt/speaking_clock_c.uf2`. На Windows используйте короткий путь без кириллицы, например вашу папку `C:\Users\Flint123\projects\Speaking-Timer-Clock-Raspberry-Pi-Pico`.
+
+## Bluetooth
+
+1. Переведите колонку в режим обнаружения, запустите Scan devices в SETTINGS > Bluetooth или `bt-scan`.
+2. После окончания поиска: `bt-devices`, затем `bt-use N`, `bt-use Portable` или `bt-use AA:BB:CC:DD:EE:FF`.
+3. Дождитесь `[BT-SELECT] stream ACTIVE`, выйдите из меню, дождитесь `[FLASH] autosave=OK`.
+4. После перезапуска выполняется прямое подключение к сохранённому MAC без сканирования. Интервалы повторных попыток: 5, 10, затем 30 секунд.
+5. `bt-known` показывает сохранённые имена и наличие ключа. `bt-forget N` удаляет устройство и его ключ.
+
+В меню и нумерации сначала идут известные устройства, затем результаты поиска. Одинаковые имена разных устройств требуют номера или MAC. При заполнении четырёх записей заменяется самая ранняя добавленная запись.
+
+Поддерживается Classic A2DP Sink/SBC. BLE-only, HFP и Google Cast этим путём не поддерживаются. SSP подтверждается автоматически; legacy PIN не поддерживается. Если колонка забыла сопряжение, удалите запись и подключите её заново.
+
+## Структура
+
+| Путь | Назначение |
+| --- | --- |
+| [firmware/pico2w_c](firmware/pico2w_c/) | Текущая C-прошивка и диагностика |
+| [doc/HARDWARE_PICO2W.md](doc/HARDWARE_PICO2W.md) | Актуальные подключения |
+| [doc/history](doc/history/) | Прежние README и история разработки |
+| [source/v3](source/v3/) | Историческая MicroPython-версия |
+| [experiments/bluetooth_a2dp_nest](experiments/bluetooth_a2dp_nest/) | Генератор интеграции BTstack A2DP |
+| [schematic](schematic/) | Первоначальная схема Pico |
+| [sound](sound/) | Звуковые материалы |
+
+## Лицензии
+
+Проект: [GPL-3.0](LICENSE). Внешний Helix не включён в репозиторий; оболочка и ядро сохраняют условия GPL/RPSL/RCSL. При распространении прошивки учитывайте также лицензии Pico SDK и BTstack.

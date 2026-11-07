@@ -1,5 +1,7 @@
 # Clock v3.10.0 -> native Pico SDK C migration
 
+> Historical migration log. Current C firmware, wiring and update instructions are documented in [README](../README.md) and [Pico 2 W wiring](HARDWARE_PICO2W.md). Early statuses below describe previous stages.
+
 **Status:** design and preparation; existing clock remains on MicroPython v3.10.0.
 **Target:** Raspberry Pi Pico 2 W, Pico SDK; one repository, staged implementation.
 

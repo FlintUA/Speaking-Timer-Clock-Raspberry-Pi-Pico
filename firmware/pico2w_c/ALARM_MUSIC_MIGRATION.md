@@ -3,7 +3,7 @@
 Baseline (hardware verified 2026-11-05):
 `checkpoint/pico2w-c-core-tested-2026-11-05`
 at `85989addb9accdba0f7b1e04f3cf7ed304107789`.
-Work continues on `develop/v3` only. The checkpoint is not changed.
+Current development is published on `main`. This document preserves the migration history; the checkpoint is unchanged.
 
 ## Reference MicroPython behavior
 

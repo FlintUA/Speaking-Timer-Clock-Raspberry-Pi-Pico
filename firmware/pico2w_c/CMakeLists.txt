@@ -103,7 +103,7 @@ endif()
 # MP3 decoding is opt-in: keep the previously tested clock image unchanged
 # unless the user explicitly requests an experiment. Third-party Helix source
 # is checked out separately, not vendored into the clock repository.
-option(CLOCK_ENABLE_MP3 "Experimental Helix MP3 diagnostics (no A2DP audio yet)" OFF)
+option(CLOCK_ENABLE_MP3 "Helix MP3 playback from SPI SD for A2DP" OFF)
 set(CLOCK_HELIX_PATH "" CACHE PATH "Path to separate Helix-MP3-Decoder checkout")
 if(CLOCK_ENABLE_MP3)
     if(NOT EXISTS "${CLOCK_HELIX_PATH}/src/helix_mp3.h" OR
