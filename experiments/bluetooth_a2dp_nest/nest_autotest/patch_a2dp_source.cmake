@@ -44,9 +44,18 @@ static bool clock_bt_scan_running;
 static bool clock_bt_switch_requested;
 static clock_bt_device_t clock_bt_found[CLOCK_BT_MAX_DEVICES];
 static unsigned clock_bt_found_count;
+// Original inquiry parameters are required by gap_remote_name_request().
+static uint8_t clock_bt_scan_page_mode[CLOCK_BT_MAX_DEVICES];
+static uint16_t clock_bt_scan_clock_offset[CLOCK_BT_MAX_DEVICES];
+static uint8_t clock_bt_name_needed[CLOCK_BT_MAX_DEVICES];
+static int clock_bt_name_pending = -1;
+static void clock_bt_scan_names_next(void);
 const char *clock_a2dp_target(void){ return clock_autoconnect_target; }
 unsigned clock_a2dp_scan_count(void){ return clock_bt_found_count; }
-bool clock_a2dp_scan_active(void){ return clock_bt_scan_requested || clock_bt_scan_running; }
+bool clock_a2dp_scan_active(void){
+    return clock_bt_scan_requested || clock_bt_scan_running ||
+           clock_bt_name_pending >= 0;
+}
 bool clock_a2dp_scan_get(unsigned index, clock_bt_device_t *out){
     if (index >= clock_bt_found_count || !out) return false;
     *out = clock_bt_found[index]; return true;
@@ -57,25 +66,77 @@ static void clock_bt_capture_inquiry(const uint8_t *packet){
     for (unsigned i=0;i<clock_bt_found_count;i++){
         bd_addr_t existing;
         sscanf_bd_addr(clock_bt_found[i].address, existing);
-        if (!bd_addr_cmp(addr, existing)) return;
+        if (!bd_addr_cmp(addr, existing)) {
+            // Some peers send a name only in a subsequent inquiry result.
+            if (clock_bt_name_needed[i] &&
+                gap_event_inquiry_result_get_name_available(packet)){
+                int len = gap_event_inquiry_result_get_name_len(packet);
+                if (len > (int)sizeof(clock_bt_found[i].name) - 1)
+                    len = sizeof(clock_bt_found[i].name) - 1;
+                if (len > 0) {
+                    memcpy(clock_bt_found[i].name,
+                           gap_event_inquiry_result_get_name(packet), (size_t)len);
+                    clock_bt_found[i].name[len] = 0;
+                    clock_bt_name_needed[i] = 0;
+                }
+            }
+            return;
+        }
     }
     if (clock_bt_found_count >= CLOCK_BT_MAX_DEVICES) return;
-    clock_bt_device_t *d = &clock_bt_found[clock_bt_found_count++];
+    unsigned index = clock_bt_found_count++;
+    clock_bt_device_t *d = &clock_bt_found[index];
     snprintf(d->address, sizeof(d->address), "%02X:%02X:%02X:%02X:%02X:%02X",
              addr[0],addr[1],addr[2],addr[3],addr[4],addr[5]);
-    snprintf(d->name, sizeof(d->name), "BT %u", clock_bt_found_count);
+    // Do not label an unknown device "BT 1": it is not an identity.
+    snprintf(d->name, sizeof(d->name), "Unknown %02X:%02X",
+             addr[4], addr[5]);
     d->rssi = gap_event_inquiry_result_get_rssi_available(packet)
          ? (int8_t)gap_event_inquiry_result_get_rssi(packet) : -127;
+    clock_bt_scan_page_mode[index] =
+        gap_event_inquiry_result_get_page_scan_repetition_mode(packet);
+    clock_bt_scan_clock_offset[index] =
+        gap_event_inquiry_result_get_clock_offset(packet);
+    clock_bt_name_needed[index] = 1;
     if (gap_event_inquiry_result_get_name_available(packet)){
         int len = gap_event_inquiry_result_get_name_len(packet);
-        if (len >= (int)sizeof(d->name)) len = sizeof(d->name)-1;
+        if (len > (int)sizeof(d->name)-1) len = sizeof(d->name)-1;
         if (len > 0){
             memcpy(d->name, gap_event_inquiry_result_get_name(packet), (size_t)len);
             d->name[len] = 0;
+            clock_bt_name_needed[index] = 0;
         }
     }
-    printf("[BT-SCAN] %u %s name=%s rssi=%d\n",
-           clock_bt_found_count, d->address, d->name, (int)d->rssi);
+    printf("[BT-SCAN] %u %s name=%s rssi=%d name_source=%s\n",
+           clock_bt_found_count, d->address, d->name, (int)d->rssi,
+           clock_bt_name_needed[index] ? "PENDING" : "EIR");
+}
+static void clock_bt_scan_finish(void){
+    clock_bt_scan_requested = false;
+    clock_bt_name_pending = -1;
+    printf("[BT-SCAN] COMPLETE devices=%u\n", clock_bt_found_count);
+}
+static void clock_bt_scan_names_next(void){
+    if (!clock_bt_scan_requested) return;
+    for (unsigned i=0; i<clock_bt_found_count; ++i){
+        if (!clock_bt_name_needed[i]) continue;
+        clock_bt_name_needed[i] = 0; // at most one request per scan
+        clock_bt_name_pending = (int)i;
+        bd_addr_t addr;
+        sscanf_bd_addr(clock_bt_found[i].address, addr);
+        uint16_t offset = clock_bt_scan_clock_offset[i];
+        if (offset) offset |= 0x8000u; // valid clock offset
+        uint8_t rc = gap_remote_name_request(
+            addr, clock_bt_scan_page_mode[i], offset);
+        if (rc == ERROR_CODE_SUCCESS){
+            printf("[BT-NAME] Request %s\n", clock_bt_found[i].address);
+            return;
+        }
+        clock_bt_name_pending = -1;
+        printf("[BT-NAME] Request failed %s status=0x%02x\n",
+               clock_bt_found[i].address, rc);
+    }
+    clock_bt_scan_finish();
 }
 static void clock_bt_scan_begin(void){
     if (!clock_bt_scan_requested || clock_bt_scan_running) return;
@@ -137,6 +198,8 @@ bool clock_a2dp_scan_start(void){
         clock_bt_switch_requested) return false;
     clock_reconnect_cancel();
     clock_bt_found_count = 0;
+    clock_bt_name_pending = -1;
+    memset(clock_bt_name_needed, 0, sizeof(clock_bt_name_needed));
     clock_bt_scan_requested = true;
     if (scan_active){
         scan_active = false;
@@ -158,6 +221,8 @@ bool clock_a2dp_scan_start(void){
 }
 void clock_a2dp_scan_stop(void){
     clock_bt_scan_requested = false;
+    // Any in-flight remote-name completion is ignored after cancellation.
+    clock_bt_name_pending = -1;
     if (clock_bt_scan_running){
         clock_bt_scan_running = false;
         gap_inquiry_stop();
@@ -175,6 +240,7 @@ bool clock_a2dp_select_target(const char *address){
     if (clock_bt_scan_running) gap_inquiry_stop();
     clock_bt_scan_running = false;
     clock_bt_scan_requested = false;
+    clock_bt_name_pending = -1;
     scan_active = false;
     clock_reconnect_cancel();
     char previous_target[18];
@@ -545,8 +611,7 @@ set(_bt_new_inquiry_done [=[
         case GAP_EVENT_INQUIRY_COMPLETE:
             if (clock_bt_scan_running){
                 clock_bt_scan_running = false;
-                clock_bt_scan_requested = false;
-                printf("[BT-SCAN] COMPLETE devices=%u\n", clock_bt_found_count);
+                clock_bt_scan_names_next();
                 break;
             }
             if (clock_bt_scan_requested){
@@ -559,6 +624,53 @@ if(_bt_done_found EQUAL -1)
     message(FATAL_ERROR "BTstack inquiry completion anchor changed")
 endif()
 string(REPLACE "        case GAP_EVENT_INQUIRY_COMPLETE:" "${_bt_new_inquiry_done}" _source "${_source}")
+
+# Resolve missing Classic names asynchronously after inquiry.
+# BTstack emits the completion on the same HCI packet handler.
+set(_bt_name_complete [=[
+        case HCI_EVENT_REMOTE_NAME_REQUEST_COMPLETE:
+            if (clock_bt_name_pending >= 0){
+                int index = clock_bt_name_pending;
+                clock_bt_name_pending = -1;
+                if (clock_bt_scan_requested &&
+                    (unsigned)index < clock_bt_found_count){
+                    bd_addr_t remote;
+                    reverse_bd_addr(&packet[3], remote);
+                    bd_addr_t expected;
+                    sscanf_bd_addr(clock_bt_found[index].address, expected);
+                    if (!bd_addr_cmp(remote, expected) && packet[2] == 0){
+                        // HCI event data: status[2], address[3..8],
+                        // NUL-terminated remote name[9..].
+                        const char *received = (const char *)&packet[9];
+                        size_t size = hci_event_packet_get_length(packet);
+                        size_t room = size > 9u ? size - 9u : 0u;
+                        size_t length = 0;
+                        while (length < room && received[length]) ++length;
+                        if (length >= sizeof(clock_bt_found[index].name))
+                            length = sizeof(clock_bt_found[index].name) - 1u;
+                        if (length){
+                            memcpy(clock_bt_found[index].name, received, length);
+                            clock_bt_found[index].name[length] = 0;
+                            printf("[BT-NAME] Resolved %s = %s\\n",
+                                   clock_bt_found[index].address,
+                                   clock_bt_found[index].name);
+                        }
+                    } else {
+                        printf("[BT-NAME] No remote name for %s status=0x%02x\\n",
+                               clock_bt_found[index].address, packet[2]);
+                    }
+                    clock_bt_scan_names_next();
+                }
+                break;
+            }
+]=])
+string(FIND "${_source}" "        case GAP_EVENT_INQUIRY_COMPLETE:" _bt_name_anchor)
+if(_bt_name_anchor EQUAL -1)
+    message(FATAL_ERROR "BTstack remote-name event anchor changed")
+endif()
+string(REPLACE "        case GAP_EVENT_INQUIRY_COMPLETE:"
+               "${_bt_name_complete}        case GAP_EVENT_INQUIRY_COMPLETE:"
+               _source "${_source}")
 
 set(_bt_new_working [=[
         case  BTSTACK_EVENT_STATE:
