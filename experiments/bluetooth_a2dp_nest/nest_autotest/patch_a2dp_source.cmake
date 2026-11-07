@@ -288,11 +288,12 @@ static void produce_audio(int16_t * pcm_buffer, int num_samples){
             }
         }
     }
-    // Keep all experimental JBL output quiet regardless of the sink volume.
-    // 10 percent linear PCM gain, applied before BTstack SBC encoding.
-    // This also limits the startup tone and any future test PCM generated here.
+    // Independent conservative gains: MP3 playback 20%, test tones/clips 10%.
+    // The 20% level is exactly twice the prior MP3 PCM amplitude (-6 dB -> 0 dB relative).
+    // Apply the gain after the ring consumer but before SBC encoding.
+    const int clock_pcm_divisor = clock_pcm_ring_active() ? 5 : 10;
     for (int sample = 0; sample < num_samples * NUM_CHANNELS; ++sample){
-        pcm_buffer[sample] = (int16_t)(pcm_buffer[sample] / 10);
+        pcm_buffer[sample] = (int16_t)(pcm_buffer[sample] / clock_pcm_divisor);
     }
 #ifdef VOLUME_REDUCTION
 ]=])
