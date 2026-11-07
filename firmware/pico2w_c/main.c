@@ -69,6 +69,11 @@ static audio_router_t audio_router;
 // Remember a single remote track so an A2DP loss can replay it locally.
 static bool routed_test_pending;
 static uint8_t routed_test_folder, routed_test_track;
+// Manual speech routing is intentionally separate from the production queue.
+// Normal automatic alarms, timer messages and hourly speech remain LOCAL.
+static audio_track_t bt_speech_tracks[2];
+static uint8_t bt_speech_count, bt_speech_index;
+static bool bt_speech_running, bt_speech_track_started;
 #endif
 static uint8_t volume = 10; // Default; overridden by saved flash settings.
 static bool sound_enabled = true;
@@ -391,6 +396,98 @@ static void timer_audio_finished(void) {
     if (sound_enabled) speech_enqueue_timer_finish(&audio_queue, language);
 }
 
+#ifdef CLOCK_ENABLE_A2DP
+static void bt_speech_cancel(const char *reason) {
+    if (!bt_speech_running) return;
+    if (bt_speech_track_started && mp3_play_active()) mp3_play_stop();
+    bt_speech_running = false;
+    bt_speech_track_started = false;
+    printf("[BT-SPEECH] Cancelled: %s\n", reason);
+}
+// Only use local fallback when no higher-priority audio owner is present.
+// Replay the interrupted phrase from the beginning, then each remaining phrase.
+static void bt_speech_fallback(const char *reason) {
+    if (!bt_speech_running) return;
+    if (bt_speech_track_started && mp3_play_active()) mp3_play_stop();
+    bool safe = alarm_active_index < 0 && !timer.running && !music_ui_open &&
+                sound_enabled && audio_queue_idle(&audio_queue) && !dfplayer_busy();
+    if (!safe) {
+        bt_speech_running = false;
+        bt_speech_track_started = false;
+        printf("[BT-SPEECH] Local fallback suppressed: %s; higher priority audio active\n",
+               reason);
+        return;
+    }
+    unsigned queued = 0u;
+    for (unsigned i = bt_speech_index; i < bt_speech_count; ++i) {
+        if (!audio_queue_enqueue(&audio_queue, bt_speech_tracks[i].folder,
+                                 bt_speech_tracks[i].track)) break;
+        ++queued;
+    }
+    bt_speech_running = false;
+    bt_speech_track_started = false;
+    printf("[BT-SPEECH] LOCAL fallback reason=%s queued=%u\n", reason, queued);
+}
+static bool bt_speech_start(uint8_t hour, uint8_t minute) {
+    if (bt_speech_running || routed_test_pending || mp3_play_active() ||
+        mp3_probe_active() || sd_fat32_stream_active() ||
+        !audio_queue_idle(&audio_queue) || dfplayer_busy() ||
+        timer.running || alarm_active_index >= 0 || music_ui_open) {
+        puts("[BT-SPEECH] Busy; manual speech refused");
+        return false;
+    }
+    // Use original speech planner so RU/DE and exact-hour mappings agree.
+    audio_queue_t scratch = {0};
+    if (!speech_enqueue_time(&scratch, language, hour, minute, exact_hour_phrase) ||
+        scratch.size == 0u || scratch.size > 2u) {
+        puts("[BT-SPEECH] Failed to build speech sequence");
+        return false;
+    }
+    for (unsigned i = 0; i < scratch.size; ++i)
+        bt_speech_tracks[i] = scratch.items[(scratch.head + i) % AUDIO_QUEUE_CAPACITY];
+    bt_speech_count = scratch.size;
+    bt_speech_index = 0u;
+    bt_speech_track_started = false;
+    bt_speech_running = true;
+    printf("[BT-SPEECH] START %02u:%02u segments=%u, gain=53.3%%\n",
+           (unsigned)hour, (unsigned)minute, (unsigned)bt_speech_count);
+    return true;
+}
+static void bt_speech_service(void) {
+    if (!bt_speech_running) return;
+    if (timer.running || alarm_active_index >= 0 || music_ui_open ||
+        !sound_enabled || !audio_queue_idle(&audio_queue) || dfplayer_busy()) {
+        bt_speech_cancel("HIGHER_PRIORITY");
+        return;
+    }
+    if (!clock_a2dp_stream_active() || clock_a2dp_current_rate() != 44100u) {
+        bt_speech_fallback("A2DP_UNAVAILABLE");
+        return;
+    }
+    if (bt_speech_track_started) {
+        if (mp3_play_active()) return;
+        ++bt_speech_index;
+        bt_speech_track_started = false;
+    }
+    if (bt_speech_index >= bt_speech_count) {
+        bt_speech_running = false;
+        puts("[BT-SPEECH] COMPLETE, all segments delivered");
+        return;
+    }
+    audio_track_t t = bt_speech_tracks[bt_speech_index];
+    char path[20];
+    snprintf(path, sizeof(path), "%02u/%03u.mp3", (unsigned)t.folder,
+             (unsigned)t.track);
+    if (!mp3_play_start(path, clock_a2dp_current_rate())) {
+        bt_speech_fallback("MP3_OPEN_FAILED");
+        return;
+    }
+    bt_speech_track_started = true;
+    printf("[BT-SPEECH] SEGMENT %u/%u %s\n",
+           (unsigned)(bt_speech_index + 1u), (unsigned)bt_speech_count, path);
+}
+#endif
+
 // Use the same hour/minute file mapping as MicroPython enqueue_clock_time.
 // Never announce automatically: only on user command or MODE long press.
 static void announce_time(uint8_t hour, uint8_t minute) {
@@ -406,10 +503,29 @@ static void announce_time(uint8_t hour, uint8_t minute) {
         puts("[SPEECH] invalid time");
         return;
     }
-    audio_queue_clear(&audio_queue, true);
-    if (!speech_enqueue_time(&audio_queue, language, hour, minute, exact_hour_phrase)) {
-        puts("[SPEECH] failed to queue time");
-        return;
+#ifdef CLOCK_ENABLE_A2DP
+    // Only manually requested speech uses the selected Bluetooth output.
+    // Automatic clock announcements and alarms retain their DFPlayer path.
+    bool use_jbl = audio_router.requested == AUDIO_OUTPUT_BT_JBL;
+    if (use_jbl) {
+        audio_router_bluetooth_state(&audio_router, clock_a2dp_stream_active() &&
+                                     clock_a2dp_current_rate() == 44100u);
+        if (audio_router.effective == AUDIO_OUTPUT_BT_JBL) {
+            if (!bt_speech_start(hour, minute)) return;
+        } else {
+            puts("[BT-SPEECH] JBL not ready; announcing via LOCAL");
+            audio_queue_clear(&audio_queue, true);
+            if (!speech_enqueue_time(&audio_queue, language, hour, minute,
+                                     exact_hour_phrase)) return;
+        }
+    } else
+#endif
+    {
+        audio_queue_clear(&audio_queue, true);
+        if (!speech_enqueue_time(&audio_queue, language, hour, minute, exact_hour_phrase)) {
+            puts("[SPEECH] failed to queue time");
+            return;
+        }
     }
     snprintf(speech_overlay_time, sizeof(speech_overlay_time), "%02u:%02u",
              (unsigned)hour, (unsigned)minute);
@@ -1688,6 +1804,9 @@ static void handle_command(char *line) {
         puts("[MP3-PLAY] Requires Bluetooth A2DP");
 #endif
     } else if (strcmp(line, "mp3-stop") == 0) {
+#ifdef CLOCK_ENABLE_A2DP
+        bt_speech_cancel("USER_STOP");
+#endif
         mp3_play_stop();
 #ifdef CLOCK_ENABLE_A2DP
         routed_test_pending = false;
@@ -1738,6 +1857,8 @@ static void handle_command(char *line) {
         }
     } else if (strcmp(line, "audio-select local") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
+        // Explicit switch to LOCAL replays remaining manual speech locally.
+        if (bt_speech_running) bt_speech_fallback("SELECT_LOCAL");
         if (routed_test_pending && mp3_play_active()) {
             mp3_play_stop();
             routed_test_pending = false;
@@ -1750,7 +1871,7 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "audio-select jbl") == 0) {
         audio_router_select(&audio_router, AUDIO_OUTPUT_BT_JBL);
         audio_router_bluetooth_state(&audio_router, clock_a2dp_stream_active());
-        puts("[AUDIO-ROUTE] Requested BT_JBL (audio-route-test only; normal queue/alarms still use DFPlayer)");
+        puts("[AUDIO-ROUTE] Requested BT_JBL (manual say and route-test only; automatic alarms remain LOCAL)");
 #endif
     } else if (strncmp(line, "audio-route-test ", 17) == 0) {
         // Explicit test of one queued track through the selected audio output.
@@ -1800,7 +1921,7 @@ static void handle_command(char *line) {
                audio_router_name(audio_router.requested),
                audio_router_name(audio_router.effective),
                audio_router.bt_connected ? "STREAM_ACTIVE" : "OFFLINE");
-        puts("[AUDIO-ROUTE] NOTE: audio-route-test uses requested output; automatic speech/music/alarms still use DFPlayer");
+        puts("[AUDIO-ROUTE] NOTE: manual say + audio-route-test use selected output; automatic speech/music/alarms stay LOCAL");
     } else if (strcmp(line, "help") == 0 || strcmp(line, "h") == 0) {
         puts("[SD] sd-test - initialize/read SD card read-only; sd-info - last detection result");
         puts("[SD] sd-list [folder] - show FAT32 8.3 names; sd-file 07/001.mp3 - read first bytes");
@@ -1808,7 +1929,7 @@ static void handle_command(char *line) {
         puts("[MP3] mp3-test 07/001.mp3 - experimental decode to RAM (no JBL output)");
         puts("[MP3] mp3-play 07/001.mp3 - full file on JBL; mp3-pause; mp3-resume; mp3-stop; mp3-status");
         puts("[MP3] mp3-pause-test 07/001.mp3 - auto pause at 300ms, auto resume after 1s");
-        puts("[AUDIO-ROUTE] audio-select local|jbl; audio-route; audio-route-test 7 1");
+        puts("[AUDIO-ROUTE] audio-select local|jbl; audio-route; audio-route-test 7 1; say 08 25");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
@@ -2270,6 +2391,11 @@ int main(void) {
         // Keep test fallback armed until the MP3 is truly complete.
         if (routed_test_pending && !mp3_play_active())
             routed_test_pending = false;
+#endif
+#ifdef CLOCK_ENABLE_A2DP
+        // Service manual Bluetooth speech before generic MP3 disconnect handling,
+        // so a lost A2DP stream requeues its interrupted track on DFPlayer.
+        bt_speech_service();
 #endif
         // Abort experimental playback when a higher-priority clock event needs audio.
         if (mp3_play_active() &&
