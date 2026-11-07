@@ -1848,3 +1848,52 @@ skip-on-conflict (no delayed replay).
 
 Real due-RTC tests and full 30-minute expiry remain separate
 acceptance checks. This change is not yet compiler/hardware tested.
+
+
+## LCD1602 Audio Output settings (2026-11-07)
+
+The existing SETTINGS menu now has **8** entries, with entry 8
+`Audio Output`. Press SETTINGS (or TIMER encoder button) to enter;
+rotate TIMER encoder to choose one of four independently persisted
+output preferences:
+
+| LCD category | Corresponding serial command | Meaning |
+| --- | --- | --- |
+| Manual | `audio-select local\|jbl` | manually requested time / routed tracks |
+| Hourly voice | `auto-audio local\|jbl` | automatic *voice* on the hour (not chimes) |
+| Timer | `timer-audio local\|jbl` | timer start, cancel and finish |
+| Alarm | `alarm-audio local\|jbl` | scheduled and test alarms |
+
+The category screen shows current `LOCAL` or `JBL`.
+Press SETTINGS/TIMER to edit, rotate TIMER to choose `LOCAL` or
+`JBL`, press again to save. MINUS while editing cancels the draft
+and goes back to the category list; MINUS again returns to the
+settings list. The normal 20-second menu inactivity timeout still
+applies. Saved choices use existing Flash v4 A/B settings and
+debounced autosave after leaving the menu, without changing the
+schema. `audio-settings` over COM8 shows the same preferences.
+
+`JBL` denotes the **preferred** output, not exclusive output.
+When Bluetooth A2DP or an MP3 file is unavailable, local DFPlayer
+fallback is retained. With `LOCAL`, sound goes directly to DFPlayer.
+BT-disabled builds allow only LOCAL and never change saved JBL bits
+accidentally.
+
+Hardware acceptance:
+1. First record `audio-settings`, `flash-info`.
+2. Open SETTINGS -> Audio Output -> Timer. Change JBL -> LOCAL and
+   confirm; return from both levels with MINUS. Check
+   `audio-settings` now says `timer=LOCAL`.
+3. Run `t 8`, `start`. Expect local timer output. Switch Timer
+   to JBL using LCD and repeat; expect A2DP output.
+4. Repeat for Manual, Hourly voice and Alarm (test using
+   `alarm-audio-test 1`). All other preferences should remain intact
+   when changing only one.
+5. Verify draft cancellation: enter edit, rotate, MINUS without
+   saving. `audio-settings` must remain unchanged.
+6. Wait for autosave with menu closed and system idle; check
+   `flash-info`; reboot and recheck `audio-settings` for
+   persistence.
+
+Firmware changes need compilation and on-device acceptance before
+calling this feature verified.
