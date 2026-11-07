@@ -2869,6 +2869,13 @@ int main(void) {
     alarm_defaults(alarms);
     alarm_scheduler_init(&alarm_scheduler);
     load_settings_at_boot();
+#ifdef CLOCK_ENABLE_MP3
+    // Autonomous remote audio: initialize the separate SPI1 microSD once
+    // before any timer/alarm/hourly playback. Failure is nonfatal since
+    // DFPlayer remains the local audio fallback.
+    if (!sd_spi_ensure_fat32())
+        puts("[SD-AUTO] Boot will continue with LOCAL audio fallback");
+#endif
     audio_queue_set_volume(&audio_queue, volume);
     puts("[AUDIO] DFPlayer UART0 GP16/17 BUSY GP18");
     puts("[AUTO] runtime=ON after boot; first observed RTC boundary will be consumed");
