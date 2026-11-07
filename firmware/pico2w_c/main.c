@@ -933,7 +933,8 @@ static void autosave_service(uint64_t now_ms) {
         !audio_queue_idle(&audio_queue) || dfplayer_busy()
 #ifdef CLOCK_ENABLE_A2DP
         || bt_speech_running || bt_timer_running || bt_alarm_running ||
-        routed_test_pending || mp3_play_active() || sd_fat32_stream_active()
+        routed_test_pending || mp3_play_active() || sd_fat32_stream_active() ||
+        clock_a2dp_scan_active()
 #endif
        ) return;
 
