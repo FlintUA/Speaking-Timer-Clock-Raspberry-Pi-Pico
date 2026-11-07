@@ -74,6 +74,8 @@ static uint8_t routed_test_folder, routed_test_track;
 static audio_track_t bt_speech_tracks[2];
 static uint8_t bt_speech_count, bt_speech_index;
 static bool bt_speech_running, bt_speech_track_started;
+static bool auto_voice_jbl_enabled; // RAM-only opt-in; default false after reboot.
+static bool bt_speech_start(uint8_t hour, uint8_t minute, bool automatic);
 #endif
 static uint8_t volume = 10; // Default; overridden by saved flash settings.
 static bool sound_enabled = true;
@@ -245,6 +247,11 @@ static auto_decision_t auto_evaluate(uint8_t hour, uint8_t minute,
         music_ui_open)
         return AUTO_MENU;
     if (!audio_queue_idle(&audio_queue) || dfplayer_busy()) return AUTO_BUSY;
+#ifdef CLOCK_ENABLE_A2DP
+    // Never begin an automatic announcement in the middle of a BT phrase.
+    if (bt_speech_running || mp3_play_active() || mp3_probe_active() ||
+        routed_test_pending || sd_fat32_stream_active()) return AUTO_BUSY;
+#endif
     // If boot/RTC recovers in the middle of an hour/half-hour minute,
     // do not announce stale time. A 5-second window is deliberate.
     if (second > 5u) return AUTO_LATE;
@@ -259,6 +266,10 @@ static void auto_status(void) {
            (unsigned long)auto_played, (unsigned long)auto_skipped);
     printf("[AUTO] clock_mode=%s (folder 18, 1..12 strikes)\n",
            clock_mode ? "CHIME" : "VOICE");
+#ifdef CLOCK_ENABLE_A2DP
+    printf("[AUTO] voice_output=%s (RAM-only; chime/half/timer/alarm LOCAL)\n",
+           auto_voice_jbl_enabled ? "JBL_PREFERRED" : "LOCAL");
+#endif
 }
 
 // Read-only snapshot: useful when the RTC is manually adjusted for tests.
@@ -359,7 +370,24 @@ static void auto_service_rtc(const ds1302_datetime_t *dt) {
         if (strikes == 0u) strikes = 12u;
         queued = audio_queue_enqueue(&audio_queue, 18u, strikes);
     } else {
-        queued = speech_enqueue_time(&audio_queue, language, dt->hour, 0u, exact_hour_phrase);
+#ifdef CLOCK_ENABLE_A2DP
+        // Only hourly VOICE announcements may use JBL, and only after
+        // explicit auto-audio jbl opt-in. Keep chime/half-hour LOCAL.
+        if (auto_voice_jbl_enabled && clock_a2dp_stream_active() &&
+            clock_a2dp_current_rate() == 44100u) {
+            queued = bt_speech_start(dt->hour, 0u, true);
+            if (queued)
+                puts("[AUTO-AUDIO] HOURLY_VOICE routed=JBL");
+            else
+                puts("[AUTO-AUDIO] JBL start failed; attempting LOCAL");
+        } else {
+            queued = false;
+            if (auto_voice_jbl_enabled)
+                puts("[AUTO-AUDIO] JBL unavailable; hourly voice LOCAL");
+        }
+        if (!queued)
+#endif
+            queued = speech_enqueue_time(&audio_queue, language, dt->hour, 0u, exact_hour_phrase);
     }
     if (queued) {
         ++auto_played;
@@ -428,7 +456,7 @@ static void bt_speech_fallback(const char *reason) {
     bt_speech_track_started = false;
     printf("[BT-SPEECH] LOCAL fallback reason=%s queued=%u\n", reason, queued);
 }
-static bool bt_speech_start(uint8_t hour, uint8_t minute) {
+static bool bt_speech_start(uint8_t hour, uint8_t minute, bool automatic) {
     if (bt_speech_running || routed_test_pending || mp3_play_active() ||
         mp3_probe_active() || sd_fat32_stream_active() ||
         !audio_queue_idle(&audio_queue) || dfplayer_busy() ||
@@ -449,8 +477,9 @@ static bool bt_speech_start(uint8_t hour, uint8_t minute) {
     bt_speech_index = 0u;
     bt_speech_track_started = false;
     bt_speech_running = true;
-    printf("[BT-SPEECH] START %02u:%02u segments=%u, gain=53.3%%\n",
-           (unsigned)hour, (unsigned)minute, (unsigned)bt_speech_count);
+    printf("[BT-SPEECH] START %02u:%02u segments=%u mode=%s gain=53.3%%\n",
+           (unsigned)hour, (unsigned)minute, (unsigned)bt_speech_count,
+           automatic ? "AUTO_HOUR" : "MANUAL");
     return true;
 }
 static void bt_speech_service(void) {
@@ -511,7 +540,7 @@ static void announce_time(uint8_t hour, uint8_t minute) {
         audio_router_bluetooth_state(&audio_router, clock_a2dp_stream_active() &&
                                      clock_a2dp_current_rate() == 44100u);
         if (audio_router.effective == AUDIO_OUTPUT_BT_JBL) {
-            if (!bt_speech_start(hour, minute)) return;
+            if (!bt_speech_start(hour, minute, false)) return;
         } else {
             puts("[BT-SPEECH] JBL not ready; announcing via LOCAL");
             audio_queue_clear(&audio_queue, true);
@@ -1855,6 +1884,32 @@ static void handle_command(char *line) {
         } else {
             puts("[SD] FAIL: check GP8/9/10/11, 3V3, GND and card seating");
         }
+    } else if (strcmp(line, "auto-audio local") == 0) {
+#ifdef CLOCK_ENABLE_A2DP
+        auto_voice_jbl_enabled = false;
+        puts("[AUTO-AUDIO] Hourly VOICE output=LOCAL (RAM only; timers/alarms unchanged)");
+#else
+        puts("[AUTO-AUDIO] Bluetooth disabled; hourly announcements always LOCAL");
+#endif
+    } else if (strcmp(line, "auto-audio jbl") == 0) {
+#ifdef CLOCK_ENABLE_A2DP
+        auto_voice_jbl_enabled = true;
+        printf("[AUTO-AUDIO] Hourly VOICE output=JBL_PREFERRED, stream=%s; "
+               "LOCAL fallback (RAM only)\n",
+               clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
+        puts("[AUTO-AUDIO] Chime, half-hour, timer, alarms and music still LOCAL");
+#else
+        puts("[AUTO-AUDIO] Requires Bluetooth A2DP");
+#endif
+    } else if (strcmp(line, "auto-audio") == 0) {
+#ifdef CLOCK_ENABLE_A2DP
+        printf("[AUTO-AUDIO] hourly_voice=%s stream=%s "
+               "(RAM-only; other automatic events LOCAL)\n",
+               auto_voice_jbl_enabled ? "JBL_PREFERRED" : "LOCAL",
+               clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
+#else
+        puts("[AUTO-AUDIO] Hourly voice LOCAL (Bluetooth unavailable)");
+#endif
     } else if (strcmp(line, "audio-select local") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
         // Explicit switch to LOCAL replays remaining manual speech locally.
@@ -1939,6 +1994,7 @@ static void handle_command(char *line) {
         puts("[MP3] mp3-play 07/001.mp3 - full file on JBL; mp3-pause; mp3-resume; mp3-stop; mp3-status");
         puts("[MP3] mp3-pause-test 07/001.mp3 - auto pause at 300ms, auto resume after 1s");
         puts("[AUDIO-ROUTE] audio-select local|jbl; audio-route; audio-route-test 7 1; say 08 25");
+        puts("[AUTO-AUDIO] auto-audio jbl|local; auto-audio (only automatic hourly VOICE)");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
