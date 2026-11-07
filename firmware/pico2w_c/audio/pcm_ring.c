@@ -51,7 +51,6 @@ void clock_pcm_ring_reset(void) {
 uint32_t clock_pcm_ring_available(void) { return count; }
 uint32_t clock_pcm_ring_free(void) { return CLOCK_PCM_RING_FRAMES - count; }
 bool clock_pcm_ring_push(int16_t l, int16_t r) {
-    pcm_diag_check(1u, 0u, 0u);
     if (count == CLOCK_PCM_RING_FRAMES) return false;
     samples[2u * head] = l;
     samples[2u * head + 1u] = r;
@@ -61,6 +60,8 @@ bool clock_pcm_ring_push(int16_t l, int16_t r) {
     uint32_t irq_state = save_and_disable_interrupts();
     ++count;
     ++produced;
+    // Sample both counters only while their update is indivisible.
+    pcm_diag_check(1u, 0u, 0u);
     restore_interrupts(irq_state);
     return true;
 }
@@ -69,7 +70,6 @@ uint32_t clock_pcm_ring_pop(int16_t *dst, uint32_t frames) {
     ++diag.pop_calls;
     if (pop_depth > diag.max_pop_depth) diag.max_pop_depth = pop_depth;
     if (pop_depth > 1u) pcm_diag_capture(2u, 2u, frames, 0u);
-    pcm_diag_check(2u, frames, 0u);
     // Pause means silence to A2DP, but do not consume or discard queued PCM.
     if (paused) {
         memset(dst, 0, (size_t)frames * 2u * sizeof(int16_t));
@@ -87,13 +87,13 @@ uint32_t clock_pcm_ring_pop(int16_t *dst, uint32_t frames) {
     uint32_t irq_state = save_and_disable_interrupts();
     count -= take;
     consumed += take;
+    pcm_diag_check(3u, frames, take);
     restore_interrupts(irq_state);
     if (active && !source_eof && take < frames) ++underruns; // not at EOF
     if (take < frames) {
         memset(dst + 2u * take, 0,
                (size_t)(frames - take) * 2u * sizeof(int16_t));
     }
-    pcm_diag_check(3u, frames, take);
     --pop_depth;
     return take;
 }
