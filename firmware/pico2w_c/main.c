@@ -507,7 +507,7 @@ static bt_sequence_result_t bt_sequence_step(const audio_track_t *tracks,
     if (!mp3_play_start(path, clock_a2dp_current_rate()))
         return BT_SEQUENCE_FAILED;
     *track_started = true;
-    printf("[%s] SEGMENT %u/%u %s\\n",
+    printf("[%s] SEGMENT %u/%u %s\n",
            log_tag, (unsigned)(*index + 1u), (unsigned)count, path);
     return BT_SEQUENCE_STARTED;
 }
