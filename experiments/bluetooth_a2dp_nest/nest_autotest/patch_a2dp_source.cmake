@@ -642,7 +642,7 @@ set(_bt_name_complete [=[
                         // HCI event data: status[2], address[3..8],
                         // NUL-terminated remote name[9..].
                         const char *received = (const char *)&packet[9];
-                        size_t size = hci_event_packet_get_length(packet);
+                        size_t size = (size_t)packet[1] + 2u;
                         size_t room = size > 9u ? size - 9u : 0u;
                         size_t length = 0;
                         while (length < room && received[length]) ++length;
