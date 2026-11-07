@@ -1565,6 +1565,19 @@ static bool bt_menu_device(unsigned index, clock_bt_device_t *out) {
 static unsigned bt_menu_count(void) {
     return 1u + bt_known_count + clock_a2dp_scan_count();
 }
+static const char *bt_lcd_name(unsigned index, const clock_bt_device_t *device) {
+    // Legacy saved entries and discovery fallbacks can contain a MAC.
+    // Keep the original name/address for connection and USB diagnostics.
+    bool address_label = strlen(device->name) == 17u;
+    for (unsigned i = 0; address_label && i < 17u; ++i) {
+        if (i % 3u == 2u) address_label = device->name[i] == ':';
+        else address_label = isxdigit((unsigned char)device->name[i]) != 0;
+    }
+    if (device->name[0] && !address_label &&
+        strncmp(device->name, "Unknown ", 8u) != 0)
+        return device->name;
+    return index <= bt_known_count ? "Saved speaker" : "Unknown device";
+}
 static bool bt_sink_select(const char *mac){
     unsigned b[6];
     char end;
@@ -3813,7 +3826,7 @@ int main(void) {
             clock_bt_device_t d;
             snprintf(top, sizeof(top), "BT CONNECT?");
             if (menu_bt_index && bt_menu_device(menu_bt_index, &d))
-                snprintf(bottom, sizeof(bottom), "%.16s", d.name);
+                snprintf(bottom, sizeof(bottom), "%.16s", bt_lcd_name(menu_bt_index, &d));
             else snprintf(bottom, sizeof(bottom), "Device missing");
 #else
             snprintf(top, sizeof(top), "BLUETOOTH OFF");
@@ -3830,7 +3843,7 @@ int main(void) {
             else {
                 clock_bt_device_t d;
                 if (bt_menu_device(menu_bt_index, &d))
-                    snprintf(bottom, sizeof(bottom), "%.16s", d.name);
+                    snprintf(bottom, sizeof(bottom), "%.16s", bt_lcd_name(menu_bt_index, &d));
                 else snprintf(bottom, sizeof(bottom), "No device");
             }
 #else
