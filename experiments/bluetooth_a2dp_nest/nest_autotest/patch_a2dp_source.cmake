@@ -15,7 +15,60 @@ set(_old_scan_function [=[
 static void a2dp_source_demo_start_scanning(void){
 ]=])
 set(_new_scan_function [=[
-static const char *clock_autoconnect_target = "__CLOCK_AUTO_TARGET__";
+#include "clock_a2dp_control.h"
+// Flash v5 overrides the legacy build-time default at boot.
+static char clock_autoconnect_target[18] = "__CLOCK_AUTO_TARGET__";
+static bool clock_bt_stack_ready;
+static bool clock_bt_scan_requested;
+static bool clock_bt_scan_running;
+static bool clock_bt_switch_requested;
+static clock_bt_device_t clock_bt_found[CLOCK_BT_MAX_DEVICES];
+static unsigned clock_bt_found_count;
+const char *clock_a2dp_target(void){ return clock_autoconnect_target; }
+unsigned clock_a2dp_scan_count(void){ return clock_bt_found_count; }
+bool clock_a2dp_scan_active(void){ return clock_bt_scan_requested || clock_bt_scan_running; }
+bool clock_a2dp_scan_get(unsigned index, clock_bt_device_t *out){
+    if (index >= clock_bt_found_count || !out) return false;
+    *out = clock_bt_found[index]; return true;
+}
+static void clock_bt_capture_inquiry(const uint8_t *packet){
+    bd_addr_t addr;
+    gap_event_inquiry_result_get_bd_addr(packet, addr);
+    for (unsigned i=0;i<clock_bt_found_count;i++){
+        bd_addr_t existing;
+        sscanf_bd_addr(clock_bt_found[i].address, existing);
+        if (!bd_addr_cmp(addr, existing)) return;
+    }
+    if (clock_bt_found_count >= CLOCK_BT_MAX_DEVICES) return;
+    clock_bt_device_t *d = &clock_bt_found[clock_bt_found_count++];
+    snprintf(d->address, sizeof(d->address), "%02X:%02X:%02X:%02X:%02X:%02X",
+             addr[0],addr[1],addr[2],addr[3],addr[4],addr[5]);
+    snprintf(d->name, sizeof(d->name), "BT %u", clock_bt_found_count);
+    d->rssi = gap_event_inquiry_result_get_rssi_available(packet)
+         ? (int8_t)gap_event_inquiry_result_get_rssi(packet) : -127;
+    if (gap_event_inquiry_result_get_name_available(packet)){
+        int len = gap_event_inquiry_result_get_name_len(packet);
+        if (len >= (int)sizeof(d->name)) len = sizeof(d->name)-1;
+        if (len > 0){
+            memcpy(d->name, gap_event_inquiry_result_get_name(packet), (size_t)len);
+            d->name[len] = 0;
+        }
+    }
+    printf("[BT-SCAN] %u %s name=%s rssi=%d\n",
+           clock_bt_found_count, d->address, d->name, (int)d->rssi);
+}
+static void clock_bt_scan_begin(void){
+    if (!clock_bt_scan_requested || clock_bt_scan_running) return;
+    int rc = gap_inquiry_start(8u); // 10.24 seconds
+    if (rc != ERROR_CODE_SUCCESS){
+        printf("[BT-SCAN] inquiry failed 0x%02x\n", rc);
+        clock_bt_scan_requested = false;
+        return;
+    }
+    clock_bt_scan_running = true;
+    puts("[BT-SCAN] ACTIVE Classic inquiry 10s");
+}
+
 static bool clock_a2dp_connect_address(const char *text){
     if (text == NULL || strlen(text) != 17u) return false;
     for (unsigned i = 0; i < 17u; ++i){
@@ -58,6 +111,71 @@ static void clock_reconnect_cancel(void){
     clock_reconnect_pending = false;
 }
 
+// Scanning deliberately disconnects the current sink before inquiry.
+bool clock_a2dp_scan_start(void){
+    if (!clock_bt_stack_ready || clock_bt_scan_requested ||
+        clock_bt_switch_requested) return false;
+    clock_reconnect_cancel();
+    clock_bt_found_count = 0;
+    clock_bt_scan_requested = true;
+    if (scan_active){
+        scan_active = false;
+        gap_inquiry_stop(); // inquiry-complete event starts user scan
+        return true;
+    }
+    if (media_tracker.a2dp_cid != 0){
+        uint8_t rc = a2dp_source_disconnect(media_tracker.a2dp_cid);
+        if (rc != ERROR_CODE_SUCCESS){
+            printf("[BT-SCAN] disconnect rejected 0x%02x\n", rc);
+            clock_bt_scan_requested = false;
+            return false;
+        }
+        puts("[BT-SCAN] releasing A2DP before inquiry");
+        return true;
+    }
+    clock_bt_scan_begin();
+    return clock_bt_scan_running;
+}
+void clock_a2dp_scan_stop(void){
+    clock_bt_scan_requested = false;
+    if (clock_bt_scan_running){
+        clock_bt_scan_running = false;
+        gap_inquiry_stop();
+    }
+    clock_reconnect_schedule();
+}
+bool clock_a2dp_select_target(const char *address){
+    if (!address || strlen(address)!=17u) return false;
+    for (unsigned i=0;i<17u;i++){
+        if (i%3u==2u){ if (address[i]!=':') return false; }
+        else if (!((address[i]>='0' && address[i]<='9') ||
+                   (address[i]>='a' && address[i]<='f') ||
+                   (address[i]>='A' && address[i]<='F'))) return false;
+    }
+    if (clock_bt_scan_running) gap_inquiry_stop();
+    clock_bt_scan_running = false;
+    clock_bt_scan_requested = false;
+    scan_active = false;
+    clock_reconnect_cancel();
+    memcpy(clock_autoconnect_target, address, 18u);
+    printf("[BT] Selected sink %s\n", clock_autoconnect_target);
+    if (!clock_bt_stack_ready) return true;
+    if (media_tracker.a2dp_cid != 0){
+        clock_bt_switch_requested = true;
+        uint8_t rc = a2dp_source_disconnect(media_tracker.a2dp_cid);
+        if (rc != ERROR_CODE_SUCCESS){
+            clock_bt_switch_requested = false;
+            printf("[BT] switch disconnect failed 0x%02x\n", rc);
+            return false;
+        }
+        return true;
+    }
+    clock_bt_switch_requested = false;
+    if (!clock_a2dp_connect_address(clock_autoconnect_target))
+        clock_reconnect_schedule();
+    return true;
+}
+
 static void clock_reconnect_timer_handler(btstack_timer_source_t *timer){
     (void)timer;
     clock_reconnect_pending = false;
@@ -71,7 +189,9 @@ static void clock_reconnect_timer_handler(btstack_timer_source_t *timer){
 }
 
 static void clock_reconnect_schedule(void){
-    if (clock_autoconnect_target[0] == 0 || clock_reconnect_pending) return;
+    if (clock_autoconnect_target[0] == 0 || clock_reconnect_pending ||
+        clock_bt_scan_requested || clock_bt_scan_running ||
+        clock_bt_switch_requested) return;
     uint32_t index = clock_reconnect_failures < 3u ? clock_reconnect_failures : 2u;
     uint32_t delay = clock_backoff_ms[index];
     clock_reconnect_failures++;
@@ -98,8 +218,8 @@ set(_new_boot_scan [=[
             if (clock_autoconnect_target[0] != 0){
                 printf("[BT] Boot direct connect target %s\n", clock_autoconnect_target);
                 if (!clock_a2dp_connect_address(clock_autoconnect_target)){
-                    printf("[BT] Direct start refused; falling back to scan\n");
-                    a2dp_source_demo_start_scanning();
+                    printf("[BT] Boot sink unavailable; LOCAL fallback, retry later\n");
+                    clock_reconnect_schedule();
                 }
             } else {
                 a2dp_source_demo_start_scanning();
@@ -136,7 +256,8 @@ set(_old_failed_connection [=[
 ]=])
 set(_new_failed_connection [=[
                 media_tracker.a2dp_cid = 0;
-                clock_reconnect_schedule();
+                if (clock_bt_scan_requested) clock_bt_scan_begin();
+                else clock_reconnect_schedule();
                 break;
 ]=])
 string(FIND "${_source}" "${_old_failed_connection}" _failed_position)
@@ -168,7 +289,12 @@ set(_old_signal_released [=[
 set(_new_signal_released [=[
                 media_tracker.a2dp_cid = 0;
                 printf("A2DP Source: Signaling released.\n\n");
-                clock_reconnect_schedule();
+                if (clock_bt_scan_requested) clock_bt_scan_begin();
+                else if (clock_bt_switch_requested){
+                    clock_bt_switch_requested = false;
+                    if (!clock_a2dp_connect_address(clock_autoconnect_target))
+                        clock_reconnect_schedule();
+                } else clock_reconnect_schedule();
 ]=])
 string(FIND "${_source}" "${_old_signal_released}" _signal_release_pos)
 if(_signal_release_pos EQUAL -1)
@@ -362,6 +488,52 @@ if (_stop_at EQUAL -1)
     message(FATAL_ERROR "BTstack stream-stop handler changed")
 endif()
 string(REPLACE "${_old_stop}" "${_new_stop}" _source "${_source}")
+
+
+# On-demand discoverable Classic device enumeration, bypass upstream's
+# "connect first speaker" behavior while manually browsing.
+set(_bt_new_inquiry [=[
+        case GAP_EVENT_INQUIRY_RESULT:
+            if (clock_bt_scan_running){
+                clock_bt_capture_inquiry(packet);
+                break;
+            }
+]=])
+string(FIND "${_source}" "        case GAP_EVENT_INQUIRY_RESULT:" _bt_found)
+if(_bt_found EQUAL -1)
+    message(FATAL_ERROR "BTstack inquiry result anchor changed")
+endif()
+string(REPLACE "        case GAP_EVENT_INQUIRY_RESULT:" "${_bt_new_inquiry}" _source "${_source}")
+
+set(_bt_new_inquiry_done [=[
+        case GAP_EVENT_INQUIRY_COMPLETE:
+            if (clock_bt_scan_running){
+                clock_bt_scan_running = false;
+                clock_bt_scan_requested = false;
+                printf("[BT-SCAN] COMPLETE devices=%u\n", clock_bt_found_count);
+                break;
+            }
+            if (clock_bt_scan_requested){
+                clock_bt_scan_begin();
+                break;
+            }
+]=])
+string(FIND "${_source}" "        case GAP_EVENT_INQUIRY_COMPLETE:" _bt_done_found)
+if(_bt_done_found EQUAL -1)
+    message(FATAL_ERROR "BTstack inquiry completion anchor changed")
+endif()
+string(REPLACE "        case GAP_EVENT_INQUIRY_COMPLETE:" "${_bt_new_inquiry_done}" _source "${_source}")
+
+set(_bt_new_working [=[
+        case BTSTACK_EVENT_STATE:
+            if (btstack_event_state_get_state(packet) == HCI_STATE_WORKING)
+                clock_bt_stack_ready = true;
+]=])
+string(FIND "${_source}" "        case BTSTACK_EVENT_STATE:" _bt_ready_found)
+if(_bt_ready_found EQUAL -1)
+    message(FATAL_ERROR "BTstack working state anchor changed")
+endif()
+string(REPLACE "        case BTSTACK_EVENT_STATE:" "${_bt_new_working}" _source "${_source}")
 
 file(WRITE "${PATCHED_SOURCE}" "${_source}")
 message(STATUS "Generated locally patched A2DP source: ${PATCHED_SOURCE}")
