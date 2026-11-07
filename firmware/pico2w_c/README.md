@@ -1897,3 +1897,83 @@ Hardware acceptance:
 
 Firmware changes need compilation and on-device acceptance before
 calling this feature verified.
+
+
+## Bluetooth device discovery and selection on LCD1602 (2026-11-07)
+
+**Experimental, needs compile and on-device validation.** The 9th SETTINGS
+item is now **Bluetooth**, alongside **Audio Output**. It controls the
+actual Bluetooth A2DP sink to which the clock connects. The four independent
+Manual/Hourly/Timer/Alarm LOCAL or JBL output preferences remain unchanged:
+"JBL" in those categories now means *the selected A2DP sink*.
+
+Usage:
+
+1. Put a Bluetooth Classic A2DP speaker or headphones into **pairing /
+   discoverable mode** and ensure another phone has disconnected.
+2. SETTINGS -> Bluetooth -> Scan devices -> press SETTINGS or TIMER.
+   Inquiry can take about 10 seconds. It intentionally disconnects the
+   previously connected sink; do not do this during active timer/alarm audio.
+3. When discovery ends, turn the TIMER encoder to browse up to 12 entries,
+   showing their broadcast names when available. Press on a device and
+   confirm on the **BT CONNECT?** screen. MINUS cancels without changing
+   the selected sink.
+4. The firmware negotiates A2DP asynchronously. A device becomes a
+   **saved** preference only after the new A2DP stream becomes ACTIVE,
+   followed by ordinary Flash autosave when the menu is closed and audio
+   is idle. Failed selections are not persisted to Flash; on reboot the
+   previous saved device is restored.
+5. The A2DP reconnect policy continues to target the selected MAC.
+   With an unavailable sink, all JBL-preferred speech/timer/alarm events
+   can fall back to the local DFPlayer.
+
+Diagnostic COM8 commands:
+
+- \`bt-scan\` - start a manual Classic inquiry (refused during active audio)
+- \`bt-devices\` - show the found device numbers, MAC, name and RSSI
+- \`bt-use N\` - request connection to entry N (1-based)
+- \`bt-use AA:BB:CC:DD:EE:FF\` - select a known Classic Bluetooth MAC
+- \`bt-target\` - current target, A2DP state and pending validation
+- \`bt-status\` - stream state and target
+- \`bt-scan-stop\` - cancel scanning and resume reconnect
+
+Limitations:
+
+- Only **Bluetooth Classic A2DP Sink** devices compatible with the
+  BTstack SBC source are supported. BLE-only devices, Bluetooth
+  microphones/HFP-only headsets, Wi-Fi speakers and Chromecast/Google
+  Cast protocol endpoints are not supported by this A2DP path.
+- Discovery uses general Classic Inquiry and may show phones/computers
+  that do not support A2DP Sink. Selecting those may fail to connect.
+- The scan shows EIR-advertised names when available; some devices
+  appear under fallback labels or Bluetooth addresses.
+- This is one active sink at a time, not multi-room playback.
+- The upstream BTstack demo currently automatically accepts SSP numeric
+  confirmation but rejects legacy PIN pairing. Do not pair with
+  untrusted devices. Legacy PIN-only headsets may be incompatible.
+- Existing BTstack link key banks at the end of Flash are preserved.
+  A newly selected sink address uses **Flash settings v5** (v1-v4 remain
+  readable); it is NOT stored in the reserved BTstack banks.
+- Changing sink without selecting new audio output preferences retains
+  the current Manual/Hourly/Timer/Alarm settings.
+
+**First hardware check** - before testing through LCD, verify the base
+A2DP/MP3 playback still works after compilation. Run \`flash-info\`,
+\`audio-settings\`, \`bt-target\`, and \`bt-status\` first. The existing
+saved v4 preferences and build-time speaker should remain usable.
+
+**Second check** - make a speaker discoverable; run \`bt-scan\`, then
+\`bt-devices\` after 10-15 seconds. Scan results include numbered entries
+and names; no Flash settings should change from scanning alone.
+
+**Third check** - run \`bt-use N\` for a compatible speaker. Wait for
+\`A2DP Source: Stream started\` and \`[BT-SELECT] stream ACTIVE\`.
+Exit menus if open and verify \`[FLASH] autosave=OK\`. Use
+\`alarm-audio-test 1\` to verify actual SBC sound on the NEW speaker,
+then inspect \`bt-target\` and \`flash-info\`. Restart and verify auto
+reconnection to the same sink. Finally test the LCD Bluetooth menu and
+restore the original speaker if preferred.
+
+If an unsupported target is selected, return to the saved original
+after reboot or use \`bt-use AA:BB:CC:DD:EE:FF\` with the known MAC.
+Do not flash a new image during an alarm or while writing Flash.
