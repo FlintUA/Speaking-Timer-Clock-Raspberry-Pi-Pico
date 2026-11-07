@@ -122,6 +122,8 @@ static bool bt_speech_start(uint8_t hour, uint8_t minute, bool automatic);
 static uint8_t saved_audio_manual, saved_audio_hourly;
 static uint8_t saved_audio_timer, saved_audio_alarm;
 #endif
+// Save selected Bluetooth sink MAC even in BT-free firmware builds.
+static uint8_t saved_bt_target_addr[6];
 static uint8_t volume = 10; // Default; overridden by saved flash settings.
 static bool sound_enabled = true;
 static speech_language_t language = SPEECH_RU;
@@ -143,7 +145,10 @@ typedef enum {
     MENU_EDIT_HALF_HOUR,
     MENU_EDIT_EXACT,
     MENU_AUDIO_LIST,
-    MENU_EDIT_AUDIO_OUTPUT
+    MENU_EDIT_AUDIO_OUTPUT,
+    MENU_BT_LIST,
+    MENU_BT_SCANNING,
+    MENU_BT_CONFIRM
 } menu_state_t;
 static menu_state_t menu_state;
 static uint8_t menu_index;
@@ -151,6 +156,7 @@ static speech_language_t menu_language_choice;
 static uint8_t menu_volume_choice;
 static uint8_t menu_audio_index; // 0=manual 1=hourly 2=timer 3=alarm
 static bool menu_audio_jbl_choice; // draft, committed on button confirmation
+static uint8_t menu_bt_index; // 0=scan, 1..N=discovered devices
 static bool menu_exact_choice;
 static bool menu_quiet_enabled_choice;
 static uint8_t menu_quiet_start_choice;
@@ -159,7 +165,7 @@ static bool menu_half_hour_choice;
 static ds1302_datetime_t menu_rtc_choice;
 static uint64_t menu_last_input_ms;
 #define SETTINGS_MENU_TIMEOUT_MS 20000u
-#define SETTINGS_MENU_ITEMS 8u
+#define SETTINGS_MENU_ITEMS 9u
 #define SETTINGS_AUDIO_ITEMS 4u
 // Alarm editor is separate from settings; changes stay in draft until DONE.
 typedef enum {
@@ -875,6 +881,7 @@ static clock_settings_t settings_snapshot(void) {
 #endif
     };
     memcpy(cfg.alarms, alarms, sizeof(cfg.alarms));
+    memcpy(cfg.bt_target_addr, saved_bt_target_addr, sizeof(cfg.bt_target_addr));
     return cfg;
 }
 
@@ -888,7 +895,9 @@ static bool settings_equal(clock_settings_t a, clock_settings_t b) {
         a.audio_manual_jbl != b.audio_manual_jbl ||
         a.audio_hourly_jbl != b.audio_hourly_jbl ||
         a.audio_timer_jbl != b.audio_timer_jbl ||
-        a.audio_alarm_jbl != b.audio_alarm_jbl) return false;
+        a.audio_alarm_jbl != b.audio_alarm_jbl ||
+        memcmp(a.bt_target_addr, b.bt_target_addr, sizeof(a.bt_target_addr)) != 0)
+        return false;
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
         const alarm_entry_t *x = &a.alarms[i], *y = &b.alarms[i];
         if (x->enabled != y->enabled || x->hour != y->hour ||
@@ -1386,10 +1395,54 @@ static void alarm_ui_back(uint64_t now) {
     }
 }
 
+#ifdef CLOCK_ENABLE_A2DP
+// Explicitly changing the Bluetooth sink is safe only when no audio owns
+// the current stream. Selecting another sink does not alter LOCAL/JBL flags.
+static bool bt_sink_change_allowed(void){
+    return !timer.running && alarm_active_index < 0 &&
+           !bt_speech_running && !bt_timer_running &&
+           !bt_alarm_running && !mp3_play_active() &&
+           !mp3_probe_active() && !routed_test_pending &&
+           !sd_fat32_stream_active() && !music_ui_open &&
+           audio_queue_idle(&audio_queue) && !dfplayer_busy();
+}
+static bool bt_sink_select(const char *mac){
+    unsigned b[6];
+    char end;
+    if (sscanf(mac, "%2x:%2x:%2x:%2x:%2x:%2x%c",
+               &b[0],&b[1],&b[2],&b[3],&b[4],&b[5],&end) != 6)
+        return false;
+    if (!bt_sink_change_allowed()){
+        puts("[BT-SELECT] Busy audio/timer; selection refused");
+        return false;
+    }
+    if (!clock_a2dp_select_target(mac)) return false;
+    for (unsigned i=0;i<6u;i++)
+        saved_bt_target_addr[i] = (uint8_t)b[i];
+    settings_mark_changed();
+    printf("[BT-SELECT] preferred=%s, connect requested; LOCAL fallback remains\n",
+           clock_a2dp_target());
+    return true;
+}
+static void bt_scan_list(void){
+    printf("[BT-SCAN] count=%u active=%s preferred=%s\n",
+           clock_a2dp_scan_count(),
+           clock_a2dp_scan_active() ? "YES" : "NO",
+           clock_a2dp_target());
+    clock_bt_device_t d;
+    for (unsigned i=0;i<clock_a2dp_scan_count();i++){
+        if (clock_a2dp_scan_get(i,&d))
+            printf("[BT-SCAN] %u address=%s name=%s rssi=%d\n",
+                   i+1u,d.address,d.name,(int)d.rssi);
+    }
+}
+#endif
+
 static const char *menu_item_name(unsigned index) {
     static const char *names[SETTINGS_MENU_ITEMS] = {
         "Language", "Time", "Date", "Quiet mode",
-        "Half-hour beep", "Exact-hour word", "Volume", "Audio Output"
+        "Half-hour beep", "Exact-hour word", "Volume", "Audio Output",
+        "Bluetooth"
     };
     return index < SETTINGS_MENU_ITEMS ? names[index] : "?";
 }
@@ -1760,6 +1813,25 @@ static void load_settings_at_boot(void) {
         half_hour_enabled = saved.half_hour_enabled;
         clock_mode = saved.clock_mode;
         memcpy(alarms, saved.alarms, sizeof(alarms));
+        memcpy(saved_bt_target_addr, saved.bt_target_addr,
+               sizeof(saved_bt_target_addr));
+#ifdef CLOCK_ENABLE_A2DP
+        // All zeroes in a legacy record mean "use build-time sink".
+        bool address_saved = false;
+        for (unsigned k = 0; k < sizeof(saved_bt_target_addr); ++k)
+            address_saved |= saved_bt_target_addr[k] != 0;
+        if (address_saved) {
+            char mac[18];
+            snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
+                     saved_bt_target_addr[0], saved_bt_target_addr[1],
+                     saved_bt_target_addr[2], saved_bt_target_addr[3],
+                     saved_bt_target_addr[4], saved_bt_target_addr[5]);
+            if (!clock_a2dp_select_target(mac))
+                puts("[BT] Saved sink MAC rejected; using build-time default");
+            else
+                printf("[FLASH] preferred Bluetooth sink=%s\n", mac);
+        }
+#endif
         printf("[FLASH] audio preferences loaded manual=%u hourly=%u timer=%u alarm=%u\n",
                (unsigned)saved.audio_manual_jbl, (unsigned)saved.audio_hourly_jbl,
                (unsigned)saved.audio_timer_jbl, (unsigned)saved.audio_alarm_jbl);
