@@ -31,6 +31,7 @@ add_executable(speaking_clock_c
     audio/router.c
     audio/speech.c
     audio/mp3_probe.c
+    audio/pcm_ring.c
     services/settings_store.c
 )
 target_include_directories(speaking_clock_c PRIVATE
