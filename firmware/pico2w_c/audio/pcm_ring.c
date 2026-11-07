@@ -5,7 +5,40 @@
 static int16_t samples[CLOCK_PCM_RING_FRAMES * 2u];
 static uint32_t head, tail, count, underruns, consumed, produced;
 static bool active, paused, source_eof;
+// First-fault snapshot is written in the same short PCM path as the counters.
+// Avoid printf, dynamic allocation and callbacks in the audio consumer.
+static clock_pcm_ring_diag_t diag;
+static uint32_t pop_depth;
+static void pcm_diag_capture(uint32_t code, uint32_t phase,
+                             uint32_t request, uint32_t take) {
+    if (diag.fault_code) return;
+    diag.fault_code = code;
+    diag.phase = phase;
+    diag.produced = produced;
+    diag.consumed = consumed;
+    diag.buffered = count;
+    diag.head = head;
+    diag.tail = tail;
+    diag.request = request;
+    diag.take = take;
+}
+static void pcm_diag_check(uint32_t phase, uint32_t request, uint32_t take) {
+    if (count > CLOCK_PCM_RING_FRAMES || head >= CLOCK_PCM_RING_FRAMES ||
+        tail >= CLOCK_PCM_RING_FRAMES) {
+        pcm_diag_capture(4u, phase, request, take);
+    } else if (consumed > produced || produced - consumed != count) {
+        pcm_diag_capture(1u, phase, request, take);
+    }
+}
 void clock_pcm_ring_reset(void) {
+    // A reset while a media callback is reading is a serious ownership
+    // violation. Capture it, but do not change playback semantics.
+    if (pop_depth) {
+        ++diag.resets_during_pop;
+        pcm_diag_capture(3u, 4u, 0u, 0u);
+    } else {
+        memset(&diag, 0, sizeof(diag));
+    }
     active = false;
     paused = false;
     source_eof = false;
@@ -14,6 +47,7 @@ void clock_pcm_ring_reset(void) {
 uint32_t clock_pcm_ring_available(void) { return count; }
 uint32_t clock_pcm_ring_free(void) { return CLOCK_PCM_RING_FRAMES - count; }
 bool clock_pcm_ring_push(int16_t l, int16_t r) {
+    pcm_diag_check(1u, 0u, 0u);
     if (count == CLOCK_PCM_RING_FRAMES) return false;
     samples[2u * head] = l;
     samples[2u * head + 1u] = r;
@@ -23,9 +57,15 @@ bool clock_pcm_ring_push(int16_t l, int16_t r) {
     return true;
 }
 uint32_t clock_pcm_ring_pop(int16_t *dst, uint32_t frames) {
+    ++pop_depth;
+    ++diag.pop_calls;
+    if (pop_depth > diag.max_pop_depth) diag.max_pop_depth = pop_depth;
+    if (pop_depth > 1u) pcm_diag_capture(2u, 2u, frames, 0u);
+    pcm_diag_check(2u, frames, 0u);
     // Pause means silence to A2DP, but do not consume or discard queued PCM.
     if (paused) {
         memset(dst, 0, (size_t)frames * 2u * sizeof(int16_t));
+        --pop_depth;
         return 0u;
     }
     uint32_t take = frames < count ? frames : count;
@@ -41,6 +81,8 @@ uint32_t clock_pcm_ring_pop(int16_t *dst, uint32_t frames) {
         memset(dst + 2u * take, 0,
                (size_t)(frames - take) * 2u * sizeof(int16_t));
     }
+    pcm_diag_check(3u, frames, take);
+    --pop_depth;
     return take;
 }
 void clock_pcm_ring_set_active(bool enabled) { active = enabled; }
@@ -52,3 +94,7 @@ bool clock_pcm_ring_active(void) { return active; }
 uint32_t clock_pcm_ring_underruns(void) { return underruns; }
 uint32_t clock_pcm_ring_consumed(void) { return consumed; }
 uint32_t clock_pcm_ring_produced(void) { return produced; }
+
+void clock_pcm_ring_diagnostics(clock_pcm_ring_diag_t *snapshot) {
+    if (snapshot) *snapshot = diag;
+}
