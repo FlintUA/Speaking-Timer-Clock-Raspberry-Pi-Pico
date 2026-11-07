@@ -752,7 +752,13 @@ static clock_settings_t settings_snapshot(void) {
         .quiet_start = quiet_start,
         .quiet_end = quiet_end,
         .half_hour_enabled = half_hour_enabled,
-        .clock_mode = clock_mode
+        .clock_mode = clock_mode,
+        .audio_manual_jbl = audio_router.requested == AUDIO_OUTPUT_BT_JBL ? 1u : 0u,
+#ifdef CLOCK_ENABLE_A2DP
+        .audio_hourly_jbl = auto_voice_jbl_enabled ? 1u : 0u,
+        .audio_timer_jbl = timer_audio_jbl_enabled ? 1u : 0u,
+        .audio_alarm_jbl = alarm_audio_jbl_enabled ? 1u : 0u
+#endif
     };
     memcpy(cfg.alarms, alarms, sizeof(cfg.alarms));
     return cfg;
@@ -764,7 +770,11 @@ static bool settings_equal(clock_settings_t a, clock_settings_t b) {
         a.exact_hour != b.exact_hour || a.quiet_enabled != b.quiet_enabled ||
         a.quiet_start != b.quiet_start || a.quiet_end != b.quiet_end ||
         a.half_hour_enabled != b.half_hour_enabled ||
-        a.clock_mode != b.clock_mode) return false;
+        a.clock_mode != b.clock_mode ||
+        a.audio_manual_jbl != b.audio_manual_jbl ||
+        a.audio_hourly_jbl != b.audio_hourly_jbl ||
+        a.audio_timer_jbl != b.audio_timer_jbl ||
+        a.audio_alarm_jbl != b.audio_alarm_jbl) return false;
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
         const alarm_entry_t *x = &a.alarms[i], *y = &b.alarms[i];
         if (x->enabled != y->enabled || x->hour != y->hour ||
@@ -797,7 +807,12 @@ static void autosave_service(uint64_t now_ms) {
     if (timer.running || alarm_active_index >= 0 || menu_state != MENU_CLOSED ||
         alarm_ui_state != ALARM_UI_CLOSED || music_ui_open ||
         (finished_screen_until_ms && now_ms < finished_screen_until_ms) ||
-        !audio_queue_idle(&audio_queue) || dfplayer_busy()) return;
+        !audio_queue_idle(&audio_queue) || dfplayer_busy()
+#ifdef CLOCK_ENABLE_A2DP
+        || bt_speech_running || bt_timer_running || bt_alarm_running ||
+        routed_test_pending || mp3_play_active() || sd_fat32_stream_active()
+#endif
+       ) return;
 
     clock_settings_t cfg = settings_snapshot();
     if (settings_equal(cfg, last_persisted_settings)) {
@@ -1526,6 +1541,14 @@ static void load_settings_at_boot(void) {
         half_hour_enabled = saved.half_hour_enabled;
         clock_mode = saved.clock_mode;
         memcpy(alarms, saved.alarms, sizeof(alarms));
+#ifdef CLOCK_ENABLE_A2DP
+        auto_voice_jbl_enabled = saved.audio_hourly_jbl != 0u;
+        timer_audio_jbl_enabled = saved.audio_timer_jbl != 0u;
+        alarm_audio_jbl_enabled = saved.audio_alarm_jbl != 0u;
+        audio_router_select(&audio_router,
+            saved.audio_manual_jbl ? AUDIO_OUTPUT_BT_JBL : AUDIO_OUTPUT_LOCAL);
+        audio_router_bluetooth_state(&audio_router, clock_a2dp_stream_active());
+#endif
         printf("[FLASH] loaded lang=%s volume=%u exact=%s quiet=%s %02u-%02u half_hour=%s mode=%s\n",
                speech_language_name(language), (unsigned)volume,
                exact_hour_phrase ? "ON" : "OFF",
