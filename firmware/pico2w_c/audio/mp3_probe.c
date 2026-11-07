@@ -79,23 +79,21 @@ void mp3_probe_service(void) {
     started = false;
 }
 
-// A deliberately bounded five-second playback test. Decode one 256-frame
-// block per main-loop pass, never in the Bluetooth media callback.
+// Full-file playback with a bounded per-loop decode workload.
+// Never read SD or invoke Helix from the Bluetooth media callback.
 #define MP3_PLAY_BLOCK 256u
-#define MP3_PLAY_LIMIT_SECONDS 5u
 #define MP3_PLAY_PREFILL 4096u
 static int16_t play_pcm[MP3_PLAY_BLOCK * 2u];
-static bool play_eof, play_first, play_decoder_open;
+static bool play_eof, play_first, play_decoder_open, play_paused;
 static uint32_t play_src_rate, play_dst_rate, play_phase;
 static uint32_t play_frames_decoded, play_frames_pushed;
-static uint32_t play_budget_frames;
 static uint64_t play_decode_time_us;
 static int16_t play_prev_l, play_prev_r;
 
 bool mp3_play_active(void) { return playing; }
 void mp3_play_status(void) {
-    printf("[MP3-PLAY] active=%s buffered=%lu/%u source=%luHz target=%luHz decoded=%lu output=%lu consumed=%lu underruns=%lu eof=%s decode_us=%llu\n",
-           playing ? "YES" : "NO",
+    printf("[MP3-PLAY] active=%s paused=%s buffered=%lu/%u source=%luHz target=%luHz decoded=%lu output=%lu consumed=%lu underruns=%lu eof=%s decode_us=%llu\n",
+           playing ? "YES" : "NO", play_paused ? "YES" : "NO",
            (unsigned long)clock_pcm_ring_available(), CLOCK_PCM_RING_FRAMES,
            (unsigned long)play_src_rate, (unsigned long)play_dst_rate,
            (unsigned long)play_frames_decoded,
@@ -116,8 +114,23 @@ void mp3_play_stop(void) {
         }
     }
     playing = false;
+    play_paused = false;
     play_eof = false;
     clock_pcm_ring_reset();
+}
+bool mp3_play_pause(void) {
+    if (!playing || play_paused) return false;
+    play_paused = true;
+    clock_pcm_ring_set_paused(true);
+    puts("[MP3-PLAY] PAUSED (PCM preserved, SBC silence)");
+    return true;
+}
+bool mp3_play_resume(void) {
+    if (!playing || !play_paused) return false;
+    play_paused = false;
+    clock_pcm_ring_set_paused(false);
+    puts("[MP3-PLAY] RESUMED");
+    return true;
 }
 bool mp3_play_start(const char *path, uint32_t a2dp_rate) {
     if (started || playing || clock_pcm_ring_active()) {
@@ -157,31 +170,27 @@ bool mp3_play_start(const char *path, uint32_t a2dp_rate) {
     playing = true;
     play_decoder_open = true;
     play_eof = false;
+    play_paused = false;
     play_first = true;
     play_phase = 0;
     play_frames_decoded = play_frames_pushed = 0;
     play_decode_time_us = init_elapsed;
-    play_budget_frames = play_src_rate * MP3_PLAY_LIMIT_SECONDS;
-    printf("[MP3-PLAY] START /%s: %luHz %lu bps -> 44100Hz, max %u seconds, gain 40%%\n",
+    printf("[MP3-PLAY] START /%s: %luHz %lu bps -> 44100Hz, full file, gain 40%%\n",
            path, (unsigned long)play_src_rate,
-           (unsigned long)helix_mp3_get_bitrate(&decoder),
-           MP3_PLAY_LIMIT_SECONDS);
+           (unsigned long)helix_mp3_get_bitrate(&decoder));
     return true;
 }
 static void mp3_play_service(void) {
-    if (!playing) return;
+    if (!playing || play_paused) return;
     if (!play_eof && clock_pcm_ring_free() >= MP3_PLAY_BLOCK + 4u &&
         clock_pcm_ring_available() <= CLOCK_PCM_RING_FRAMES - 512u) {
-        uint32_t remain = play_budget_frames - play_frames_decoded;
-        size_t request = remain < MP3_PLAY_BLOCK ? remain : MP3_PLAY_BLOCK;
-        size_t received = 0;
-        if (request) {
-            uint64_t now = time_us_64();
-            received = helix_mp3_read_pcm_frames_s16(&decoder, play_pcm, request);
-            play_decode_time_us += time_us_64() - now;
-        }
+        uint64_t now = time_us_64();
+        size_t received = helix_mp3_read_pcm_frames_s16(&decoder, play_pcm,
+                                                       MP3_PLAY_BLOCK);
+        play_decode_time_us += time_us_64() - now;
         if (!received) {
             play_eof = true;
+            clock_pcm_ring_set_eof(true);
             if (play_decoder_open) {
                 helix_mp3_deinit(&decoder);
                 sd_fat32_close_read();
@@ -219,13 +228,7 @@ static void mp3_play_service(void) {
                 play_prev_l = left;
                 play_prev_r = right;
             }
-            if (play_frames_decoded >= play_budget_frames)
-                play_eof = true;
-            if (play_eof && play_decoder_open) {
-                helix_mp3_deinit(&decoder);
-                sd_fat32_close_read();
-                play_decoder_open = false;
-            }
+            // Final short Helix read is valid PCM. Next read signals EOF.
         }
     }
     if (!clock_pcm_ring_active() &&
@@ -258,6 +261,8 @@ bool mp3_play_start(const char *path, uint32_t rate) {
 }
 void mp3_play_stop(void) {}
 bool mp3_play_active(void) { return false; }
+bool mp3_play_pause(void) { return false; }
+bool mp3_play_resume(void) { return false; }
 void mp3_play_status(void) {
     puts("[MP3-PLAY] MP3 support not compiled");
 }
