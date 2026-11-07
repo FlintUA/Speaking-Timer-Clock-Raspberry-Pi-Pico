@@ -448,3 +448,39 @@ remain LOCAL and are *not* redirected by `audio-select jbl`.
 - COM8 hardware compile, remote/local test, failover on disconnect and
 event preemption remain to be verified before activating automatic queue
 routing.
+
+
+## Opt-in manual speech sequence over JBL - staged 2026-11-07
+
+User validated the LOCAL `say 08 25` sequence from folder 01/008 and
+02/025 and first BT-vs-LOCAL `audio-route-test` stage. Observed
+`A2DP Source: Connection failed, status 0x04`, with a delayed
+retry `Direct connect ... status=0x00`; the latter indicates
+that a connection request was accepted, not that an active stream
+was later established. Root cause unknown.
+
+New logic added to `main.c`:
+- `announce_time()` uses the selected JBL only for manual speech
+  when the actual A2DP stream is active at 44.1kHz. Otherwise local
+  DFPlayer playback remains available.
+- Build at most two `audio_track_t` items with the existing
+  `speech_enqueue_time()`, preserving RU/DE language and exact-hour
+  selection. Do not change persisted settings or the production queue.
+- In cooperative main loop, `bt_speech_service()` serially starts
+  each MP3 and advances only once `mp3_play_active()` is false
+  after complete ring drain. Each MP3 uses 53.3% digital gain.
+- A2DP drop / file open failure replays the interrupted fragment and
+  remaining fragments locally, unless a higher-priority alarm/timer/
+  local-audio event owns the output. Such priority cancels the manual
+  sequence instead; no critical alarm route is modified.
+- `audio-select local` during manual speech routes the unfinished
+  sequence to DFPlayer; `mp3-stop` cancels it. Concurrent MP3 and
+  route-test commands refuse while a sequence is pending.
+- Automatic hourly, timer, alarm, music, and chime output still uses
+  DFPlayer as previously. Reboot continues selecting LOCAL.
+
+**Pending hardware checks:** rebuild with `-Bluetooth -Mp3`;
+`sd-test`, `bt-status`, `audio-select jbl`, `say 08 25` to hear
+both words with ordered `[BT-SPEECH] SEGMENT 1/2`, `2/2`, and
+`COMPLETE`. Then repeat after `audio-select local`. Next test
+disconnect/fallback only after verified two-word playback.
