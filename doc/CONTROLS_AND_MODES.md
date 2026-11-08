@@ -39,7 +39,7 @@ Turn the timer encoder to choose an item or value. SETTINGS or the timer encoder
 
 A hardware blinking character cursor marks the first character of the value being edited. The LCD controller generates the blink without periodic host commands; this is a blinking character cell rather than a blinking underline. It moves between hours/minutes/seconds or day/month/year, and marks the current scalar value in other editors. In the custom weekday editor it marks ON/OFF beside the day name. The same cue is used in the precise timer and alarm editors. Lists, About, music, ringing/snooze and ordinary clock screens hide the cursor; save, cancel and timeout also remove it. The user accepted the earlier steady underline mode; the subsequent hardware blinking mode was also accepted by the user in build 755f55b.
 
-The settings menu has nine items, in this order:
+The settings menu has ten items, in this order:
 
 1. Language
 2. Time
@@ -49,7 +49,8 @@ The settings menu has nine items, in this order:
 6. Exact-hour word
 7. Audio Output
 8. Bluetooth
-9. About
+9. Birthdays
+10. About
 
 Volume is adjusted directly with the left encoder, including while settings are open; there is no separate Volume editor. The encoder follows the active audio output and retains independent LOCAL and Bluetooth levels. The encoder button toggles sound without replacing either stored level. USB vol N and bt-vol N remain available for explicit LOCAL and Bluetooth adjustment.
 
@@ -68,6 +69,30 @@ The list contains Scan devices, saved speakers, then newly found addresses not a
 Press to choose a speaker, then press again to confirm. Backing out or timing out after discovery resumes the preferred target. Connection establishment is asynchronous; only an active stream with the selected MAC makes a new target eligible for autosave.
 
 USB commands: bt-scan, bt-scan-stop, bt-devices, bt-known, bt-use N|name|MAC, bt-target, bt-status, bt-forget N|MAC, bt-volume and bt-vol 0..30. Bare bt-forget prints usage and devices.
+
+## Birthdays
+
+Five independent annual dates are available under SETTINGS -> Birthdays. Each is numbered 1..5, disabled by default, and initially set to January 1 at 09:00. There are no one-time reminders, personal-name fields or new spoken reminder recordings.
+
+Rotate TIMER to select a slot, press TIMER or SETTINGS to edit ON/OFF -> MONTH -> DAY -> HOUR -> MINUTE. Rotate to change each value; confirm the minute to save the whole draft. MINUS steps back, or discards the draft from ON/OFF; MINUS from the slot list returns to settings. The normal 20-second settings timeout discards unfinished edits. Month changes clamp the day to a valid value; February 29 is accepted and fires only in leap years. The blinking cursor marks the edited field.
+
+On the matching local calendar minute the event is claimed once per year. The handled year is saved with the date to suppress repeats after reboot, DST or backward clock correction. Enabling/disabling retains that year; explicitly changing the date or time resets it for the new schedule. All five co-due dates are retained and delivered sequentially. No catch-up runs for minutes missed while powered off or skipped by a clock adjustment. A match in the first valid RTC minute after boot is consumed without playback.
+
+Birthday melody 07/000.mp3 follows the Manual output preference, with the existing Bluetooth-to-LOCAL fallback; it is language-neutral and does not add synthesized speech. Both cards need the file. Playback waits for an idle clock/audio path, closed menus/player, sound enabled and non-quiet hours. It does not interrupt music, timers or alarms. Waiting expires after 30 monotonic minutes, including while muted or quiet. A consumed event is not retried later that year if it expires; waiting delivery is RAM-only and is lost on reset. Disable or change a date to cancel its waiting notification. On delivery LCD shows BIRTHDAY N and the date for eight seconds.
+
+USB commands (close settings before USB editing):
+
+```text
+birthday-status
+birthday-set 1 25 12 09 00 on
+birthday-set 1 25 12 09 00 off
+birthday-test 1
+birthday-pending-clear
+```
+
+birthday-set uses slot/day/month/hour/minute/on-or-off and rejects invalid dates. birthday-test queues a RAM-only playback test using normal quiet/priority/expiry rules, even for a disabled slot; it does not change the saved date or handled year. It refuses to replace an already waiting occurrence. birthday-pending-clear discards waiting notifications without resetting saved years. BOOTSEL refuses while a birthday notification is waiting. No test command generates a saved date automatically.
+
+Flash v10 adds five dates and their handled years; v1-v9 load with all birthday slots disabled. Physical menu, melody, routing and save/reboot acceptance remain pending.
 
 ## Alarms
 

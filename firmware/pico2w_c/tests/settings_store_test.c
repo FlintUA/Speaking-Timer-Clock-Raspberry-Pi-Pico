@@ -21,7 +21,7 @@ int flash_safe_execute(void (*callback)(void *), void *arg, unsigned timeout) {
     callback(arg); return PICO_OK;
 }
 static void legacy(unsigned version) {
-    settings_record_v9_t r={0};
+    settings_record_v10_t r={0};
     r.magic=RECORD_MAGIC; r.version=version; r.sequence=17;
     r.language=1; r.volume=18; r.bt_volume=12;
     r.quiet_start=22; r.quiet_end=7;
@@ -119,9 +119,9 @@ int main(void) {
     assert(migrated.alarms[0].track==200 && migrated.alarms[0].weekdays==0x7f);
     assert(!strcmp(migrated.wifi_ssid,"SavedNetwork"));
     assert(settings_store_save(&migrated)==SETTINGS_STORE_OK);
-    settings_record_v9_t latest;
+    settings_record_v10_t latest;
     memcpy(&latest,test_flash+SLOT0_OFFSET,sizeof(latest));
-    assert(latest.version==9 && latest.sequence==old.sequence+1);
+    assert(latest.version==10 && latest.sequence==old.sequence+1);
     assert(!memcmp(test_flash+SLOT1_OFFSET,&old,sizeof(old))); // Old fallback retained.
     assert(settings_store_load(&migrated)==SETTINGS_STORE_OK);
     migrated.alarms[0].weekdays=0x60;
@@ -129,18 +129,56 @@ int main(void) {
     assert(settings_store_load(&migrated)==SETTINGS_STORE_OK && migrated.alarms[0].weekdays==0x60);
     memcpy(&latest,test_flash+SLOT1_OFFSET,sizeof(latest));
     for(unsigned invalid=0;invalid<=0x80;invalid+=0x80) {
-        settings_record_v9_t bad=latest;
+        settings_record_v10_t bad=latest;
         bad.alarm_weekdays[0]=(uint8_t)invalid;
-        bad.crc32=record_crc_bytes(&bad,offsetof(settings_record_v9_t,crc32));
+        bad.crc32=record_crc_bytes(&bad,offsetof(settings_record_v10_t,crc32));
         memcpy(test_flash+SLOT1_OFFSET,&bad,sizeof(bad));
         assert(settings_store_load(&migrated)==SETTINGS_STORE_OK);
         assert(migrated.alarms[0].weekdays==CLOCK_ALARM_DAYS_ALL);
         assert(settings_store_save(&migrated)==SETTINGS_STORE_OCCUPIED);
     }
+    // Installed v9 migration: preserve weekdays, Wi-Fi, speaker registry and volumes.
+    settings_record_v9_t v9;
+    memcpy(&v9,&latest,sizeof(v9));
+    v9.version=9; v9.sequence=200;
+    v9.alarms[0][0]=1; v9.alarm_weekdays[0]=0x60;
+    v9.crc32=record_crc_bytes(&v9,offsetof(settings_record_v9_t,crc32));
+    memset(test_flash,0xff,sizeof(test_flash));
+    memcpy(test_flash+SLOT0_OFFSET,&v9,sizeof(v9));
+    settings_record_v9_t older_v9=v9;
+    older_v9.sequence--;
+    older_v9.crc32=record_crc_bytes(&older_v9,offsetof(settings_record_v9_t,crc32));
+    memcpy(test_flash+SLOT1_OFFSET,&older_v9,sizeof(older_v9));
+    assert(settings_store_load(&migrated)==SETTINGS_STORE_OK);
+    assert(migrated.alarms[0].weekdays==0x60 && migrated.alarms[0].enabled);
+    for(unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i)
+        assert(!migrated.birthdays[i].enabled && birthday_valid(&migrated.birthdays[i]));
+    assert(!memcmp(test_flash+SLOT0_OFFSET,&v9,sizeof(v9))); // Load never writes.
+    migrated.birthdays[0]=(birthday_t){.enabled=true,.month=2,.day=29,.hour=9,.minute=12,.last_year=2024};
+    assert(settings_store_save(&migrated)==SETTINGS_STORE_OK);
+    assert(!memcmp(test_flash+SLOT0_OFFSET,&v9,sizeof(v9))); // v9 remains fallback.
+    clock_settings_t roundtrip;
+    assert(settings_store_load(&roundtrip)==SETTINGS_STORE_OK);
+    assert(roundtrip.birthdays[0].enabled && roundtrip.birthdays[0].day==29 && roundtrip.birthdays[0].last_year==2024);
+    assert(roundtrip.alarms[0].weekdays==0x60);
+    assert(!strcmp(roundtrip.wifi_ssid,migrated.wifi_ssid));
+    assert(!strcmp(roundtrip.wifi_password,migrated.wifi_password));
+    assert(roundtrip.bt_volume==migrated.bt_volume && roundtrip.volume==migrated.volume);
+    assert(!memcmp(roundtrip.bt_known,migrated.bt_known,sizeof(roundtrip.bt_known)));
+    migrated.birthdays[0].month=4; migrated.birthdays[0].day=31;
+    assert(settings_store_save(&migrated)==SETTINGS_STORE_UNSUPPORTED);
+    settings_record_v10_t corrupt;
+    memcpy(&corrupt,test_flash+SLOT1_OFFSET,sizeof(corrupt));
+    corrupt.birthdays[0][2]=32;
+    corrupt.crc32=record_crc_bytes(&corrupt,offsetof(settings_record_v10_t,crc32));
+    memcpy(test_flash+SLOT1_OFFSET,&corrupt,sizeof(corrupt));
+    assert(settings_store_load(&roundtrip)==SETTINGS_STORE_OK && !roundtrip.birthdays[0].enabled);
+    assert(settings_store_save(&roundtrip)==SETTINGS_STORE_OCCUPIED); // Even valid CRC cannot authorize invalid content.
     memset(test_flash,0xff,sizeof(test_flash));
     test_flash[SLOT0_OFFSET]=0x42;
     clock_settings_t cfg={.quiet_start=22,.quiet_end=7};
     alarm_defaults(cfg.alarms);
+    birthday_defaults(cfg.birthdays);
     assert(settings_store_save(&cfg)==SETTINGS_STORE_OCCUPIED);
     assert(test_flash[SLOT0_OFFSET]==0x42);
     puts("settings_store_test: PASS");

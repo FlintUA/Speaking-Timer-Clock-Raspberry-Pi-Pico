@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "alarm_engine.h"
+#include "birthday.h"
 
 #define CLOCK_BT_KNOWN_MAX 4u
 #define CLOCK_BT_NAME_SIZE 25u
@@ -39,6 +40,7 @@ typedef struct {
     // v8: provisioned over USB; never printed by status/diagnostics.
     char wifi_ssid[33];
     char wifi_password[65];
+    birthday_t birthdays[CLOCK_BIRTHDAY_COUNT]; // v10; v1-v9 default disabled.
 } clock_settings_t;
 
 typedef enum {
@@ -60,5 +62,5 @@ void settings_store_inspect(void);
 void settings_store_dump_tail(void);
 settings_store_result_t settings_store_load(clock_settings_t *out);
 // Writes occur only when requested by the application; load never migrates.
-// Current writes use v9; historical v1-v8 records remain readable.
+// Current writes use v10; historical v1-v9 records remain readable.
 settings_store_result_t settings_store_save(const clock_settings_t *settings);

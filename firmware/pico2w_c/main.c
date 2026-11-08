@@ -14,6 +14,7 @@
 #include "timer_controls.h"
 #include "music_playlist.h"
 #include "music_sleep.h"
+#include "birthday.h"
 #include "alarm_engine.h"
 #include "controls.h"
 #include "dfplayer.h"
@@ -180,6 +181,12 @@ typedef enum {
     MENU_BT_LIST,
     MENU_BT_SCANNING,
     MENU_BT_CONFIRM,
+    MENU_BIRTHDAY_LIST,
+    MENU_BIRTHDAY_ENABLED,
+    MENU_BIRTHDAY_MONTH,
+    MENU_BIRTHDAY_DAY,
+    MENU_BIRTHDAY_HOUR,
+    MENU_BIRTHDAY_MINUTE,
     MENU_ABOUT,
     MENU_TIMER_EDITOR
 } menu_state_t;
@@ -198,7 +205,7 @@ static bool menu_half_hour_choice;
 static ds1302_datetime_t menu_rtc_choice;
 static uint64_t menu_last_input_ms;
 #define SETTINGS_MENU_TIMEOUT_MS 20000u
-#define SETTINGS_MENU_ITEMS 9u
+#define SETTINGS_MENU_ITEMS 10u
 #define SETTINGS_AUDIO_ITEMS 4u
 // Alarm editor is separate from settings; changes stay in draft until DONE.
 typedef enum {
@@ -247,6 +254,12 @@ static bool half_hour_enabled;
 static uint8_t clock_mode; // 0=VOICE, 1=CHIME.
 static uint64_t mode_pressed_at_ms;
 static bool mode_press_active;
+static birthday_t birthdays[CLOCK_BIRTHDAY_COUNT], birthday_draft;
+static uint8_t birthday_index, birthday_pending_mask;
+static uint64_t birthday_queued_ms[CLOCK_BIRTHDAY_COUNT];
+static bool birthday_rtc_primed;
+static bool birthday_rtc_valid;
+static ds1302_datetime_t birthday_now;
 static bool info_press_active;
 static uint64_t info_pressed_at_ms, info_overlay_until_ms;
 static char info_overlay_top[17], info_overlay_bottom[17];
@@ -822,26 +835,26 @@ static void announce_rtc_time(void) {
     announce_time(dt.hour, dt.minute);
 }
 
-static void announce_info_plan(const audio_queue_t *plan) {
+static bool announce_info_plan(const audio_queue_t *plan) {
     if (!sound_enabled || !audio_queue_idle(&audio_queue) || dfplayer_busy() ||
         timer.running || alarm_active_index>=0 || music_ui_open ||
         menu_state!=MENU_CLOSED || alarm_ui_state!=ALARM_UI_CLOSED ||
         mp3_play_active() || mp3_probe_active() || sd_fat32_stream_active()) {
         puts("[INFO] Speech skipped: mute or audio/UI busy; LCD information retained");
-        return;
+        return false;
     }
 #ifdef CLOCK_ENABLE_A2DP
-    if (bt_speech_running || bt_timer_running || bt_alarm_running || routed_test_pending) return;
+    if (bt_speech_running || bt_timer_running || bt_alarm_running || routed_test_pending) return false;
     if (audio_router.requested==AUDIO_OUTPUT_BT_JBL && clock_a2dp_stream_active() &&
         clock_a2dp_current_rate()==44100u) {
-        (void)bt_speech_plan_start(plan);
-        return;
+        return bt_speech_plan_start(plan);
     }
 #endif
     for (unsigned i=0;i<plan->size;++i) {
         audio_track_t t=plan->items[(plan->head+i)%AUDIO_QUEUE_CAPACITY];
         audio_queue_enqueue(&audio_queue,t.folder,t.track);
     }
+    return true;
 }
 
 static void announce_clock_info(bool nearest_alarm) {
@@ -1076,6 +1089,7 @@ static clock_settings_t settings_snapshot(void) {
 #endif
     };
     memcpy(cfg.alarms, alarms, sizeof(cfg.alarms));
+    memcpy(cfg.birthdays,birthdays,sizeof(birthdays));
     memcpy(cfg.bt_target_addr, saved_bt_target_addr, sizeof(cfg.bt_target_addr));
     cfg.bt_known_count = bt_known_count;
     memcpy(cfg.bt_known, bt_known, sizeof(cfg.bt_known));
@@ -1106,6 +1120,11 @@ static bool settings_equal(clock_settings_t a, clock_settings_t b) {
         if (x->enabled != y->enabled || x->hour != y->hour ||
             x->minute != y->minute || x->sound != y->sound ||
             x->track != y->track || x->weekdays!=y->weekdays) return false;
+    }
+    for (unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i) {
+        const birthday_t *x=&a.birthdays[i], *y=&b.birthdays[i];
+        if (x->enabled!=y->enabled || x->month!=y->month || x->day!=y->day ||
+            x->hour!=y->hour || x->minute!=y->minute || x->last_year!=y->last_year) return false;
     }
     return true;
 }
@@ -1841,7 +1860,7 @@ static const char *menu_item_name(unsigned index) {
     static const char *names[SETTINGS_MENU_ITEMS] = {
         "Language", "Time", "Date", "Quiet mode",
         "Half-hour beep", "Exact-hour word", "Audio Output",
-        "Bluetooth", "About"
+        "Bluetooth", "Birthdays", "About"
     };
     return index < SETTINGS_MENU_ITEMS ? names[index] : "?";
 }
@@ -1904,6 +1923,73 @@ static void menu_audio_apply(unsigned index, bool jbl) {
     (void)jbl;
     puts("[MENU-AUDIO] BT unavailable in this firmware; LOCAL only");
 #endif
+}
+
+static void birthday_status(void) {
+    for (unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i) {
+        const birthday_t *b=&birthdays[i];
+        printf("[BIRTHDAY] %u enabled=%s date=%02u-%02u time=%02u:%02u last_year=%u pending=%s\n",
+            i+1,b->enabled?"ON":"OFF",(unsigned)b->day,(unsigned)b->month,
+            (unsigned)b->hour,(unsigned)b->minute,(unsigned)b->last_year,
+            birthday_pending_mask&(1u<<i)?"YES":"NO");
+    }
+}
+
+static void birthday_apply(unsigned index, birthday_t draft) {
+    birthday_t *b=&birthdays[index];
+    bool changed=b->month!=draft.month || b->day!=draft.day || b->hour!=draft.hour || b->minute!=draft.minute;
+    draft.last_year=changed?0:b->last_year;
+    if (changed || b->enabled!=draft.enabled)
+        birthday_pending_mask&=(uint8_t)~(1u<<index);
+    *b=draft;
+    settings_mark_changed();
+    birthday_status();
+}
+
+static void birthday_observe(const ds1302_datetime_t *dt, uint64_t now) {
+    birthday_now=*dt;
+    birthday_rtc_valid=true;
+    uint8_t due=birthday_claim(birthdays,dt);
+    if (due) {
+        settings_mark_changed();
+        if (birthday_rtc_primed) {
+            birthday_pending_mask|=due;
+            for(unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i)
+                if(due&(1u<<i)) birthday_queued_ms[i]=now;
+            printf("[BIRTHDAY] due_mask=0x%02x; wait up to 30m for idle/non-quiet audio\n",due);
+        } else puts("[BIRTHDAY] Boot minute consumed without replay");
+    }
+    birthday_rtc_primed=true;
+}
+
+static void birthday_service(uint64_t now) {
+    for(unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i) {
+        uint8_t bit=(uint8_t)(1u<<i);
+        if (!(birthday_pending_mask&bit)) continue;
+        if (birthday_wait_expired(birthday_queued_ms[i],now)) {
+            birthday_pending_mask&=(uint8_t)~bit;
+            printf("[BIRTHDAY] %u expired after 30m\n",i+1);
+            continue;
+        }
+        if (!birthday_rtc_valid || auto_quiet_at(birthday_now.hour) || !sound_enabled ||
+            timer.running || alarm_active_index>=0 || music_ui_open ||
+            menu_state!=MENU_CLOSED || alarm_ui_state!=ALARM_UI_CLOSED ||
+            !audio_queue_idle(&audio_queue) || dfplayer_busy() ||
+            mp3_play_active() || mp3_probe_active() || sd_fat32_stream_active()) return;
+#ifdef CLOCK_ENABLE_A2DP
+        if(bt_speech_running || bt_timer_running || bt_alarm_running || routed_test_pending) return;
+#endif
+        audio_queue_t plan={0};
+        audio_queue_enqueue(&plan,7,0); // Existing language-neutral birthday melody.
+        if (!announce_info_plan(&plan)) return;
+        birthday_pending_mask&=(uint8_t)~bit;
+        snprintf(info_overlay_top,sizeof(info_overlay_top),"BIRTHDAY %u",i+1);
+        snprintf(info_overlay_bottom,sizeof(info_overlay_bottom),"%02u.%02u CELEBRATE",
+            (unsigned)birthdays[i].day,(unsigned)birthdays[i].month);
+        info_overlay_until_ms=now+8000u;
+        printf("[BIRTHDAY] %u playback requested via Manual output; file=07/000.mp3\n",i+1);
+        return;
+    }
 }
 
 static void menu_close(void) {
@@ -1976,6 +2062,10 @@ static void menu_begin_edit(uint64_t now) {
 #endif
             return;
         case 8:
+            birthday_index=0;
+            menu_state=MENU_BIRTHDAY_LIST;
+            return;
+        case 9:
             menu_about_version = false;
             menu_state = MENU_ABOUT;
             puts("[MENU-ABOUT] Speaking Clock / Pico 2 W");
@@ -2000,6 +2090,19 @@ static void menu_commit(uint64_t now) {
             }
             return;
         }
+        case MENU_BIRTHDAY_LIST:
+            birthday_draft=birthdays[birthday_index];
+            menu_state=MENU_BIRTHDAY_ENABLED;
+            return;
+        case MENU_BIRTHDAY_ENABLED: menu_state=MENU_BIRTHDAY_MONTH; return;
+        case MENU_BIRTHDAY_MONTH: menu_state=MENU_BIRTHDAY_DAY; return;
+        case MENU_BIRTHDAY_DAY: menu_state=MENU_BIRTHDAY_HOUR; return;
+        case MENU_BIRTHDAY_HOUR: menu_state=MENU_BIRTHDAY_MINUTE; return;
+        case MENU_BIRTHDAY_MINUTE:
+            if (!birthday_valid(&birthday_draft)) return;
+            birthday_apply(birthday_index,birthday_draft);
+            menu_state=MENU_BIRTHDAY_LIST;
+            return;
         case MENU_ABOUT:
             return; // Information only; rotate TIMER to change pages.
         case MENU_EDIT_LANGUAGE:
@@ -2134,6 +2237,11 @@ static void menu_back(uint64_t now) {
         menu_close();
     } else if (menu_state == MENU_TIMER_EDITOR) {
         if (timer_editor_back(&timer_editor)) menu_close();
+    } else if(menu_state==MENU_BIRTHDAY_LIST) {
+        menu_state=MENU_LIST;
+    } else if(menu_state>=MENU_BIRTHDAY_ENABLED && menu_state<=MENU_BIRTHDAY_MINUTE) {
+        if(menu_state==MENU_BIRTHDAY_ENABLED) menu_state=MENU_BIRTHDAY_LIST;
+        else menu_state=(menu_state_t)(menu_state-1);
     } else if (menu_state == MENU_ABOUT) {
         menu_state = MENU_LIST;
         puts("[MENU-ABOUT] Back to settings");
@@ -2177,6 +2285,20 @@ static void menu_rotate(int direction, uint64_t now) {
                                   SETTINGS_MENU_ITEMS);
             printf("[MENU] Item: %s\n", menu_item_name(menu_index));
             break;
+        case MENU_BIRTHDAY_LIST:
+            birthday_index=wrap_u8(birthday_index,0,CLOCK_BIRTHDAY_COUNT-1,direction);
+            break;
+        case MENU_BIRTHDAY_ENABLED: birthday_draft.enabled=!birthday_draft.enabled; break;
+        case MENU_BIRTHDAY_MONTH:
+            birthday_draft.month=wrap_u8(birthday_draft.month,1,12,direction);
+            if(birthday_draft.day>menu_month_days(2000,birthday_draft.month))
+                birthday_draft.day=menu_month_days(2000,birthday_draft.month);
+            break;
+        case MENU_BIRTHDAY_DAY:
+            birthday_draft.day=wrap_u8(birthday_draft.day,1,menu_month_days(2000,birthday_draft.month),direction);
+            break;
+        case MENU_BIRTHDAY_HOUR: birthday_draft.hour=wrap_u8(birthday_draft.hour,0,23,direction); break;
+        case MENU_BIRTHDAY_MINUTE: birthday_draft.minute=wrap_u8(birthday_draft.minute,0,59,direction); break;
         case MENU_ABOUT:
             menu_about_version = !menu_about_version;
             if (menu_about_version)
@@ -2314,6 +2436,7 @@ static void load_settings_at_boot(void) {
         half_hour_enabled = saved.half_hour_enabled;
         clock_mode = saved.clock_mode;
         memcpy(alarms, saved.alarms, sizeof(alarms));
+        memcpy(birthdays,saved.birthdays,sizeof(birthdays));
         memcpy(saved_bt_target_addr, saved.bt_target_addr,
                sizeof(saved_bt_target_addr));
         bt_known_count = saved.bt_known_count;
@@ -2432,7 +2555,7 @@ static void print_rtc_debug(void) {
 }
 
 static void alarm_status(void) {
-    printf("[ALARM] flash v9 capable; active=%d (0=none)\n",
+    printf("[ALARM] flash v10 capable; active=%d (0=none)\n",
            alarm_active_index + 1);
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
         const alarm_entry_t *a = &alarms[i];
@@ -2838,6 +2961,10 @@ static void alarm_test(char *args) {
 }
 
 static bool bootsel_safe(uint64_t now) {
+    if(birthday_pending_mask) {
+        puts("[BOOTSEL] REFUSED: birthday notification waiting; check birthday-status");
+        return false;
+    }
     if (alarm_active_index >= 0 || timer.running ||
         (finished_screen_until_ms && now < finished_screen_until_ms) ||
         menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED ||
@@ -3368,7 +3495,37 @@ static void handle_command(char *line) {
         puts("[INPUT] GP28=timer H/M/S editor; TIMER/SETTINGS=next/start; MINUS=back; GP28=cancel; quick encoder=1/5/10 min");
         puts("[INPUT] VOLUME push=sound toggle in clock/settings/player/editor; ringing alarm uses ALARM=stop");
         puts("[INFO] MINUS short=date, hold >=900ms=next alarm on idle clock; say-date / next-alarm via USB");
+        puts("[BIRTHDAY] birthday-status; birthday-set N DD MM HH MM on|off; birthday-test N; birthday-pending-clear");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
+    } else if (strcmp(line,"birthday-status")==0) {
+        birthday_status();
+    } else if (strncmp(line,"birthday-set ",13)==0) {
+        unsigned n,day,month,hour,minute;
+        char action[4],extra;
+        if (sscanf(line+13,"%u %u %u %u %u %3s %c",&n,&day,&month,&hour,&minute,action,&extra)!=6 ||
+            n<1 || n>CLOCK_BIRTHDAY_COUNT || day>31 || month>12 || hour>23 || minute>59 ||
+            (strcmp(action,"on") && strcmp(action,"off"))) {
+            puts("[BIRTHDAY] Usage: birthday-set N DD MM HH MM on|off");
+        } else if (menu_state!=MENU_CLOSED) puts("[BIRTHDAY] Close settings before USB configuration");
+        else {
+            birthday_t draft={.enabled=strcmp(action,"on")==0,.day=(uint8_t)day,.month=(uint8_t)month,
+                .hour=(uint8_t)hour,.minute=(uint8_t)minute};
+            if (!birthday_valid(&draft)) puts("[BIRTHDAY] Invalid date/time");
+            else birthday_apply(n-1,draft);
+        }
+    } else if (strncmp(line,"birthday-test ",14)==0) {
+        unsigned n; char extra;
+        if(sscanf(line+14,"%u %c",&n,&extra)!=1 || n<1 || n>CLOCK_BIRTHDAY_COUNT)
+            puts("[BIRTHDAY] Usage: birthday-test 1..5 (RAM only; same quiet/priority rules)");
+        else if(birthday_pending_mask&(1u<<(n-1))) puts("[BIRTHDAY] Already pending; test refused");
+        else {
+            birthday_pending_mask|=(uint8_t)(1u<<(n-1));
+            birthday_queued_ms[n-1]=now;
+            puts("[BIRTHDAY] TEST queued in RAM; saved date/year unchanged");
+        }
+    } else if(strcmp(line,"birthday-pending-clear")==0) {
+        birthday_pending_mask=0;
+        puts("[BIRTHDAY] Waiting notifications cleared; saved dates/year unchanged");
     } else if (strcmp(line, "say-date") == 0) {
         announce_clock_info(false);
     } else if (strcmp(line, "next-alarm") == 0) {
@@ -3944,6 +4101,7 @@ int main(void) {
     audio_queue_init(&audio_queue);
     audio_router_init(&audio_router);
     alarm_defaults(alarms);
+    birthday_defaults(birthdays);
     alarm_scheduler_init(&alarm_scheduler);
     load_settings_at_boot();
 #ifdef CLOCK_ENABLE_WIFI
@@ -4148,9 +4306,11 @@ int main(void) {
                 printf("[RTC] %s %s\n", rtc_top, rtc_bottom);
                 alarm_service_rtc(&dt, now);
                 auto_service_rtc(&dt);
+                birthday_observe(&dt,now);
             } else {
                 snprintf(rtc_top, sizeof(rtc_top), "RTC unavailable");
                 snprintf(rtc_bottom, sizeof(rtc_bottom), "Check GP2/5/4");
+                birthday_rtc_valid=false;
                 // RTC is polled once a second, but missing RTC doesn't stop controls.
                 puts("[RTC] Invalid/unavailable (run rtc-debug for raw bytes and error reasons)");
             }
@@ -4158,6 +4318,7 @@ int main(void) {
 
         alarm_snooze_service(now);
         alarm_pending_service(now);
+        birthday_service(now);
 #ifdef CLOCK_ENABLE_A2DP
         if (menu_state == MENU_BT_SCANNING && !clock_a2dp_scan_active()) {
             menu_state = MENU_BT_LIST;
@@ -4181,6 +4342,23 @@ int main(void) {
                     (unsigned)music_ui_track,(unsigned)music_track_count,
                     !sound_enabled?"MUTE":music_ui_pending?"WAIT":music_ui_paused?"PAUS":music_ui_playing?"PLAY":"STOP",
                     music_sleep_minutes(&music_sleep,now));
+            }
+        } else if(menu_state==MENU_BIRTHDAY_LIST) {
+            const birthday_t *b=&birthdays[birthday_index];
+            snprintf(top,sizeof(top),"BIRTHDAY %u/5 %s",(unsigned)birthday_index+1,b->enabled?"ON":"OFF");
+            snprintf(bottom,sizeof(bottom),"%02u.%02u %02u:%02u",
+                (unsigned)b->day,(unsigned)b->month,(unsigned)b->hour,(unsigned)b->minute);
+        } else if(menu_state>=MENU_BIRTHDAY_ENABLED && menu_state<=MENU_BIRTHDAY_MINUTE) {
+            static const char *fields[]={"ON/OFF","MONTH","DAY","HOUR","MINUTE"};
+            snprintf(top,sizeof(top),"BDAY %u %s",(unsigned)birthday_index+1,fields[menu_state-MENU_BIRTHDAY_ENABLED]);
+            if(menu_state==MENU_BIRTHDAY_ENABLED) {
+                snprintf(bottom,sizeof(bottom),"%s PRESS=NEXT",birthday_draft.enabled?"ON":"OFF");
+                cursor_column=0;
+            } else {
+                snprintf(bottom,sizeof(bottom),"%02u.%02u %02u:%02u",
+                    (unsigned)birthday_draft.day,(unsigned)birthday_draft.month,
+                    (unsigned)birthday_draft.hour,(unsigned)birthday_draft.minute);
+                cursor_column=menu_state==MENU_BIRTHDAY_DAY?0:menu_state==MENU_BIRTHDAY_MONTH?3:menu_state==MENU_BIRTHDAY_HOUR?6:9;
             }
         } else if (alarm_ui_state == ALARM_UI_LIST) {
             const alarm_entry_t *a = &alarms[alarm_ui_index];
@@ -4236,7 +4414,12 @@ int main(void) {
             snprintf(bottom,sizeof(bottom),"%02u:%02u:%02u",
                 (unsigned)timer_editor.hour,(unsigned)timer_editor.minute,
                 (unsigned)timer_editor.second);
-        } else if (menu_state == MENU_ABOUT) {
+        } else if(menu_state==MENU_BIRTHDAY_LIST) {
+        menu_state=MENU_LIST;
+    } else if(menu_state>=MENU_BIRTHDAY_ENABLED && menu_state<=MENU_BIRTHDAY_MINUTE) {
+        if(menu_state==MENU_BIRTHDAY_ENABLED) menu_state=MENU_BIRTHDAY_LIST;
+        else menu_state=(menu_state_t)(menu_state-1);
+    } else if (menu_state == MENU_ABOUT) {
             if (menu_about_version) {
                 snprintf(top, sizeof(top), "v%.15s", CLOCK_DISPLAY_VERSION);
                 snprintf(bottom, sizeof(bottom), "by FlintUA");

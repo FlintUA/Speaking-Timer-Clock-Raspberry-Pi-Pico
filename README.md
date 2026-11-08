@@ -2,7 +2,7 @@
 
 The main project is C / Pico SDK firmware for **Pico 2 W (RP2350)**. MicroPython sources and the original Pico schematic are retained as historical material.
 
-Current tagged release candidate: **1.0.0-rc.1**. Main also contains subsequent player, weekday/snooze and Flash v9 changes. See [release notes](CHANGELOG.md), the [current roadmap](doc/ROADMAP.md) and [verification instructions](doc/TESTING.md). New features require on-device acceptance before the stable release.
+Current tagged release candidate: **1.0.0-rc.1**. Main also contains subsequent player, weekday/snooze and Flash v10/birthday changes. See [release notes](CHANGELOG.md), the [current roadmap](doc/ROADMAP.md) and [verification instructions](doc/TESTING.md). New features require on-device acceptance before the stable release.
 
 Firmware versions are derived automatically from local Git release tags. About shows the tag version with + for later changes; USB version includes the commit metadata. See [version rules](doc/TESTING.md#automatic-firmware-version), including tag fetching and archive fallback.
 
@@ -18,7 +18,8 @@ The clock uses an I2C LCD1602, DS1302 RTC, DFPlayer Mini, two rotary encoders an
 - One volume encoder controls the active output. DFPlayer and Bluetooth volume levels are stored separately.
 - Bluetooth discovery, selection by name/MAC, automatic SSP pairing, up to four known devices and direct connection to the saved MAC.
 - Optional Wi-Fi/NTP correction with Europe/Berlin CET/CEST and offline RTC fallback.
-- Flash settings v9 reads formats v1-v8, stores alarm weekday masks and Wi-Fi provisioning, and supports alarm music tracks through 255. BTstack stores pairing keys separately. See [migration and rollback](doc/NETWORK_TIME.md#settings-compatibility-and-rollback).
+- Five annual birthday dates with menu/USB editing and the existing melody; device acceptance pending. One-time reminders are excluded.
+- Flash settings v10 reads formats v1-v9, stores birthday dates/handled years, alarm weekday masks and Wi-Fi provisioning, and supports alarm music tracks through 255. BTstack stores pairing keys separately. See [migration and rollback](doc/NETWORK_TIME.md#settings-compatibility-and-rollback).
 - Read-only FAT32 and MP3 access on the SPI microSD card.
 
 Hardware tests confirm the relocated timer encoder, volume button, SPI SD/FAT32, MP3 reads and Bluetooth playback; see [test evidence](doc/HARDWARE_TEST_EVIDENCE.md). Registry v7 tests cover discovery, saving, Portable reconnection after power loss, deletion with autosave and Portable <-> Nest switching without scanning, followed by speech on both speakers. Switching initially returned status 0x56, then recovered through an automatic retry after five seconds; details are in the evidence summary. GP6 is reserved for external illumination; its PWM driver is not implemented.
