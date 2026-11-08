@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Added cursor focus for editable LCD values, including precise timer, alarm/day and settings fields. After user acceptance of steady underline focus, switched to the requested hardware blinking character cursor for better visibility. Cursor state is restored after repaint and cached to avoid repeated I2C commands; blinking needs no periodic host updates. Driver tests cover command sequencing and failures; physical acceptance of the blinking mode is pending.
+- Removed the redundant Volume settings editor. The nine-item menu now ends with Audio Output (7), Bluetooth (8) and About (9). The left encoder, mute button, separate LOCAL/BT levels, autosave and explicit USB volume commands are unchanged; no settings-format migration is required. Device acceptance of the menu removal is pending.
+
+- Added cursor focus for editable LCD values, including precise timer, alarm/day and settings fields. After user acceptance of steady underline focus, switched to the requested hardware blinking character cursor for better visibility. Cursor state is restored after repaint and cached to avoid repeated I2C commands; blinking needs no periodic host updates. Driver tests cover command sequencing and failures; the user accepted hardware blinking in build 755f55b.
 - Reduced snooze from five to three minutes at the user's request. Deadline, status and USB help use one duration constant; no settings-format change is needed. The new duration awaits hardware acceptance.
 - Added weekday schedules (Daily/Mon-Fri/Sat-Sun/custom) and five-minute GP28/USB snooze with monotonic deadlines, cancellation and existing audio priorities. Flash v9 reads v1-v8 and retains daily behavior for old alarms. Current-format rollback needs a v9-capable build. Device acceptance is pending.
 - Added MINUS hold (at least 900 ms) to exit music while retaining short-press Previous. Added timestamped, read-only COM capture for intermittent Bluetooth diagnosis.

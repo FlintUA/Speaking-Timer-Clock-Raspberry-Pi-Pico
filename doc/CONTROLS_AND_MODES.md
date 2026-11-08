@@ -25,9 +25,21 @@ The precise timer editor starts from the selected duration. TIMER or SETTINGS ad
 
 Turn the timer encoder to choose an item or value. SETTINGS or the timer encoder button enters/confirms. MINUS returns or cancels an uncommitted edit. Idle menus time out after 20 seconds; active Bluetooth discovery/name resolution is allowed to finish.
 
-A hardware blinking character cursor marks the first character of the value being edited. The LCD controller generates the blink without periodic host commands; this is a blinking character cell rather than a blinking underline. It moves between hours/minutes/seconds or day/month/year, and marks the current scalar value in other editors. In the custom weekday editor it marks ON/OFF beside the day name. The same cue is used in the precise timer and alarm editors. Lists, About, music, ringing/snooze and ordinary clock screens hide the cursor; save, cancel and timeout also remove it. The user accepted the earlier steady underline mode; the blinking mode still requires LCD hardware acceptance.
+A hardware blinking character cursor marks the first character of the value being edited. The LCD controller generates the blink without periodic host commands; this is a blinking character cell rather than a blinking underline. It moves between hours/minutes/seconds or day/month/year, and marks the current scalar value in other editors. In the custom weekday editor it marks ON/OFF beside the day name. The same cue is used in the precise timer and alarm editors. Lists, About, music, ringing/snooze and ordinary clock screens hide the cursor; save, cancel and timeout also remove it. The user accepted the earlier steady underline mode; the subsequent hardware blinking mode was also accepted by the user in build 755f55b.
 
-Items: Language, Time, Date, Quiet mode, Half-hour beep, Exact-hour word, Volume, Audio Output, Bluetooth and About.
+The settings menu has nine items, in this order:
+
+1. Language
+2. Time
+3. Date
+4. Quiet mode
+5. Half-hour beep
+6. Exact-hour word
+7. Audio Output
+8. Bluetooth
+9. About
+
+Volume is adjusted directly with the left encoder, including while settings are open; there is no separate Volume editor. The encoder follows the active audio output and retains independent LOCAL and Bluetooth levels. The encoder button toggles sound without replacing either stored level. USB vol N and bt-vol N remain available for explicit LOCAL and Bluetooth adjustment.
 
 About has two read-only pages: Speaking Clock / Pico 2 W, then the firmware version / by FlintUA. Turn the timer encoder in either direction to switch pages. MINUS returns to the settings list. The normal 20-second idle timeout applies. The build ID remains available through the USB version command.
 

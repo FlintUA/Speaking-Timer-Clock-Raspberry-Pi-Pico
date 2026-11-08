@@ -19,7 +19,7 @@ update-pico.ps1 automatically checks Flash and alarm responses, but does not rep
 
 ## Controls and diagnostics
 
-One volume encoder adjusts the active output; its button toggles sound. The timer encoder sets the duration; its button starts/cancels the timer and confirms menu selections.
+The left volume encoder adjusts the active output directly, including in settings; its button toggles sound. LOCAL and Bluetooth levels remain separate. There is no separate Volume menu item; see the current [nine-item settings list](../../doc/CONTROLS_AND_MODES.md#settings). The timer encoder sets the duration; its button starts/cancels the timer and confirms menu selections.
 
 SETTINGS opens the menu, the timer encoder selects an item, SETTINGS or the timer encoder button confirms, and MINUS goes back. Run help for the complete USB command list. Serial speed: 115200.
 

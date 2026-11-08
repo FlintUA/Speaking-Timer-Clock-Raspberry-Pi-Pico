@@ -156,7 +156,6 @@ static uint8_t volume = 10; // Local DFPlayer 0..30.
 static uint8_t bt_volume = 16; // Independent Bluetooth output 0..30.
 static bool volume_overlay_bluetooth;
 static bool bt_volume_remote_synced;
-static bool menu_volume_bluetooth;
 static bool sound_enabled = true;
 static speech_language_t language = SPEECH_RU;
 // Two-level settings menu, following the MicroPython navigation model.
@@ -170,7 +169,6 @@ typedef enum {
     MENU_EDIT_DATE_D,
     MENU_EDIT_DATE_M,
     MENU_EDIT_DATE_Y,
-    MENU_EDIT_VOLUME,
     MENU_EDIT_QUIET_ENABLED,
     MENU_EDIT_QUIET_START,
     MENU_EDIT_QUIET_END,
@@ -188,7 +186,6 @@ static menu_state_t menu_state;
 static uint8_t menu_index;
 static bool menu_about_version;
 static speech_language_t menu_language_choice;
-static uint8_t menu_volume_choice;
 static uint8_t menu_audio_index; // 0=manual 1=hourly 2=timer 3=alarm
 static bool menu_audio_jbl_choice; // draft, committed on button confirmation
 static uint8_t menu_bt_index; // 0=scan, 1..N=discovered devices
@@ -200,7 +197,7 @@ static bool menu_half_hour_choice;
 static ds1302_datetime_t menu_rtc_choice;
 static uint64_t menu_last_input_ms;
 #define SETTINGS_MENU_TIMEOUT_MS 20000u
-#define SETTINGS_MENU_ITEMS 10u
+#define SETTINGS_MENU_ITEMS 9u
 #define SETTINGS_AUDIO_ITEMS 4u
 // Alarm editor is separate from settings; changes stay in draft until DONE.
 typedef enum {
@@ -1714,7 +1711,7 @@ static void bt_scan_list(void){
 static const char *menu_item_name(unsigned index) {
     static const char *names[SETTINGS_MENU_ITEMS] = {
         "Language", "Time", "Date", "Quiet mode",
-        "Half-hour beep", "Exact-hour word", "Volume", "Audio Output",
+        "Half-hour beep", "Exact-hour word", "Audio Output",
         "Bluetooth", "About"
     };
     return index < SETTINGS_MENU_ITEMS ? names[index] : "?";
@@ -1833,18 +1830,13 @@ static void menu_begin_edit(uint64_t now) {
             menu_state = MENU_EDIT_EXACT;
             break;
         case 6:
-            menu_volume_bluetooth = volume_for_bluetooth();
-            menu_volume_choice = menu_volume_bluetooth ? bt_volume : volume;
-            menu_state = MENU_EDIT_VOLUME;
-            break;
-        case 7:
             menu_audio_index = 0u;
             menu_state = MENU_AUDIO_LIST;
             printf("[MENU-AUDIO] Open: %s preferred=%s\n",
                    menu_audio_name(menu_audio_index),
                    menu_audio_selected_jbl(menu_audio_index) ? "BT" : "LOCAL");
             return;
-        case 8:
+        case 7:
             menu_bt_index = 0;
             menu_state = MENU_BT_LIST;
 #ifdef CLOCK_ENABLE_A2DP
@@ -1854,7 +1846,7 @@ static void menu_begin_edit(uint64_t now) {
             puts("[MENU-BT] Bluetooth not enabled in this build");
 #endif
             return;
-        case 9:
+        case 8:
             menu_about_version = false;
             menu_state = MENU_ABOUT;
             puts("[MENU-ABOUT] Speaking Clock / Pico 2 W");
@@ -1887,12 +1879,6 @@ static void menu_commit(uint64_t now) {
                 settings_mark_changed();
             }
             printf("[MENU] Language selected: %s\n", speech_language_name(language));
-            break;
-        case MENU_EDIT_VOLUME:
-            set_output_volume(menu_volume_bluetooth, menu_volume_choice);
-            printf("[MENU] Volume selected: %s=%u/30\n",
-                   menu_volume_bluetooth ? "BT" : "LOCAL",
-                   (unsigned)menu_volume_choice);
             break;
         case MENU_EDIT_TIME_H:
             menu_state = MENU_EDIT_TIME_M;
@@ -2133,14 +2119,6 @@ static void menu_rotate(int direction, uint64_t now) {
             if (menu_rtc_choice.day > menu_month_days(menu_rtc_choice.year, menu_rtc_choice.month))
                 menu_rtc_choice.day = menu_month_days(menu_rtc_choice.year, menu_rtc_choice.month);
             break;
-        case MENU_EDIT_VOLUME: {
-            int choice = (int)menu_volume_choice + direction;
-            if (choice < 0) choice = 0;
-            if (choice > 30) choice = 30;
-            menu_volume_choice = (uint8_t)choice;
-            printf("[MENU] Volume candidate: %u/30\n", (unsigned)menu_volume_choice);
-            break;
-        }
         case MENU_EDIT_QUIET_ENABLED:
             menu_quiet_enabled_choice = !menu_quiet_enabled_choice;
             printf("[MENU] Quiet candidate: %s\n", menu_quiet_enabled_choice ? "ON" : "OFF");
@@ -4182,12 +4160,6 @@ int main(void) {
             snprintf(bottom, sizeof(bottom), "%02u.%02u.%04u",
                      (unsigned)menu_rtc_choice.day, (unsigned)menu_rtc_choice.month,
                      (unsigned)menu_rtc_choice.year);
-        } else if (menu_state == MENU_EDIT_VOLUME) {
-            cursor_column=0;
-            snprintf(top, sizeof(top), "VOLUME %s",
-                     menu_volume_bluetooth ? "BT" : "LOCAL");
-            snprintf(bottom, sizeof(bottom), "%u / 30 PRESS=OK",
-                     (unsigned)menu_volume_choice);
         } else if (menu_state == MENU_EDIT_QUIET_ENABLED) {
             cursor_column=0;
             snprintf(top, sizeof(top), "QUIET MODE");

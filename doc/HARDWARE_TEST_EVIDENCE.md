@@ -8,7 +8,7 @@ The user confirmed weekday alarm setup/firing and the delayed repeat work on the
 
 ## November 8 LCD cursor acceptance
 
-Build a0d5a9e (1.0.0-rc.1+11.ga0d5a9e, BT/MP3/Wi-Fi) was installed with separate approval. COM8 verification confirmed the exact build, Flash guard, unchanged five alarm entries, separate LOCAL/BT volumes, both known speakers and Portable A2DP ACTIVE at 44100 Hz. The user confirmed that steady underline focus works, then requested a more visible blinking cursor and selected hardware character-cell blinking. This follow-up mode has not yet been installed or accepted on the physical LCD.
+Build a0d5a9e (1.0.0-rc.1+11.ga0d5a9e, BT/MP3/Wi-Fi) was installed with separate approval. COM8 verification confirmed the exact build, Flash guard, unchanged five alarm entries, separate LOCAL/BT volumes, both known speakers and Portable A2DP ACTIVE at 44100 Hz. The user confirmed that steady underline focus works, then requested a more visible blinking cursor and selected hardware character-cell blinking. Build 755f55b (1.0.0-rc.1+12.g755f55b) was then installed with separate approval. COM8 confirmed the expected version, unchanged five alarm entries and output volumes, both saved speakers, and Portable A2DP ACTIVE. The user confirmed that hardware blinking is more visible. Removal of the redundant Volume menu item is a later change and has not yet been installed or physically accepted.
 
 ## November 8 weekday/snooze firmware smoke test
 
