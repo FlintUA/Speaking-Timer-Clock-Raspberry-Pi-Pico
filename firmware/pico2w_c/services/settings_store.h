@@ -22,8 +22,8 @@ typedef struct {
     uint8_t quiet_end;   // 0..23
     bool half_hour_enabled;
     uint8_t clock_mode; // 0=VOICE, 1=CHIME
-    alarm_entry_t alarms[CLOCK_ALARM_COUNT]; // v3/v4; old v1/v2 defaults OFF
-    // v4: independent preferred output flags. 0=LOCAL, 1=A2DP JBL.
+    alarm_entry_t alarms[CLOCK_ALARM_COUNT]; // v9 days; old v1/v2 OFF, v3-v8 daily.
+    // v4: independent preferred output flags. 0=LOCAL, 1=A2DP BT.
     // Flash stores preferences, not connection state; LOCAL fallback remains mandatory.
     uint8_t audio_manual_jbl;
     uint8_t audio_hourly_jbl;
@@ -60,5 +60,5 @@ void settings_store_inspect(void);
 void settings_store_dump_tail(void);
 settings_store_result_t settings_store_load(clock_settings_t *out);
 // Writes occur only when requested by the application; load never migrates.
-// Current writes use v8; historical v1-v7 records remain readable.
+// Current writes use v9; historical v1-v8 records remain readable.
 settings_store_result_t settings_store_save(const clock_settings_t *settings);

@@ -18,7 +18,7 @@ Implemented for the first release candidate:
 
 Before declaring v1.0.0 stable:
 - Test Wi-Fi/NTP alongside A2DP and MP3 on the assembled clock.
-- Verify v7 -> v8 save/reboot with existing alarms, separate volumes and known speakers intact.
+- Verify v7/v8 -> v9 save/reboot with existing alarms, daily defaults, separate volumes, network settings and known speakers intact.
 - Test unavailable access point, unavailable NTP server and later recovery.
 - Verify Bluetooth list deduplication, name retention and return after leaving discovery.
 - Verify alarm selection above track 45 using files present on both cards.
@@ -32,7 +32,7 @@ Control restoration stage 1 is implemented. Hardware logs confirm accelerated se
 
 Stage 2 is implemented, awaiting hardware acceptance: brand-neutral BT labels, normal/shuffle/repeat-one, immediate Next/Previous with bounded history, consistent physical controls and mode/count display. Position-preserving pause needs separate LOCAL/Bluetooth transport work; the old MicroPython pause restarted the track.
 
-1. Alarm snooze and weekday schedules, with explicit editor and storage changes.
+1. Alarm snooze and weekday schedules are implemented, awaiting device acceptance: Daily/Mon-Fri/Sat-Sun/custom days, GP28 five-minute snooze, explicit cancellation and Flash v9 migration. See TESTING.md.
 2. Music sleep timer and position-preserving pause on LOCAL/Bluetooth; preserve existing playback modes, no-repeat shuffle and audio priorities.
 3. Spoken date and nearest-alarm information, plus a dedicated startup indication. The two-page LCD About screen is implemented.
 4. Birthday/reminder events after checking available recordings.
@@ -46,6 +46,8 @@ Each milestone requires focused tests and a hardware acceptance step. These item
 1. Investigate initial Bluetooth switch status 0x56 and optimize switching latency. Existing five-second retry is retained.
 2. Physical external LCD illumination, followed by GP6 PWM, OFF/ON/AUTO modes and night dimming. Hardware is not installed.
 3. German spoken timer-completion phrase, last. The recording is currently absent. Keep the existing signal behavior until the correct recording is supplied and verified.
+
+The intermittent double Bluetooth sound is deferred until the planned feature work is finished, at the user's request. The completed passive-capture findings remain in HARDWARE_TEST_EVIDENCE.md; the cause is unresolved.
 
 ## Existing behavior retained
 

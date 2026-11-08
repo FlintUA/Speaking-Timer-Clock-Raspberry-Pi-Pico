@@ -25,7 +25,7 @@ SETTINGS opens the menu, the timer encoder selects an item, SETTINGS or the time
 
 ## Storage
 
-Clock Flash A/B occupies sectors -6/-5 from the end of Flash; legacy sector -4 is read for migration. BTstack uses -3/-2; the final sector is reserved. CRC-protected v8 records store settings, four names/MACs and Wi-Fi credentials, while v1-v7 remain readable. v8 uses two programmed pages within each existing clock sector. BTstack stores pairing keys separately.
+Clock Flash A/B occupies sectors -6/-5 from the end of Flash; legacy sector -4 is read for migration. BTstack uses -3/-2; the final sector is reserved. CRC-protected v9 records add five weekday masks to settings, four names/MACs and Wi-Fi credentials, while v1-v8 remain readable. v9 still uses two programmed pages within each existing clock sector. Old alarms retain all seven days; loading does not rewrite Flash. BTstack stores pairing keys separately. Older v8 firmware cannot read the newest records after both A/B slots migrate; use a current -NoWifi build for a compatible fallback.
 
 A device is added only after an active A2DP stream with a matching MAC. Builds without Bluetooth preserve these fields when saving other settings. SPI SD access is read-only.
 

@@ -6,6 +6,10 @@
 // Music tracks are 1..255, from folder 08; the editor uses detected count.
 #define CLOCK_ALARM_COUNT 5u
 #define CLOCK_ALARM_MAX_TRACK 255u
+#define CLOCK_ALARM_DAYS_ALL 0x7fu
+#define CLOCK_ALARM_DAYS_WEEKDAYS 0x1fu
+#define CLOCK_ALARM_DAYS_WEEKEND 0x60u
+#define CLOCK_ALARM_SNOOZE_MS 300000u
 
 typedef enum {
     ALARM_SOUND_SIGNAL = 0,
@@ -18,7 +22,21 @@ typedef struct {
     uint8_t minute; // 0..59
     alarm_sound_t sound;
     uint8_t track;  // 1..255, used only for music
+    uint8_t weekdays; // Bit 0=Monday ... bit 6=Sunday; nonzero.
 } alarm_entry_t;
+
+typedef struct {
+    bool pending, test;
+    uint8_t hour, minute;
+    uint64_t deadline_ms;
+} alarm_snooze_t;
+
+bool alarm_day_matches(const alarm_entry_t *alarm, uint16_t year, uint8_t month, uint8_t day);
+bool alarm_days_parse(const char *text, uint8_t *mask);
+const char *alarm_days_name(uint8_t mask);
+void alarm_snooze_schedule(alarm_snooze_t *state, uint64_t now_ms,
+                           uint8_t hour, uint8_t minute, bool test);
+bool alarm_snooze_take(alarm_snooze_t *state, uint64_t now_ms, alarm_snooze_t *due);
 
 // Uses the entire calendar date and clock minute. This state is RAM-only.
 // The caller passes false for busy=false when no alarm is currently ringing.

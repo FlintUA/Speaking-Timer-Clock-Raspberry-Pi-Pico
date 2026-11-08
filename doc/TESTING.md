@@ -13,10 +13,10 @@ ctest --test-dir build/host-tests -C Debug --output-on-failure
 GitHub CI runs this suite on Windows and Linux.
 
 The seven suites cover:
-- Alarm validity, scheduling, simultaneous slots and duplicate suppression.
+- Alarm validity, weekday filtering, leap/calendar boundaries, simultaneous slots, duplicate suppression and independent monotonic snooze deadlines/cancellation.
 - Calendar conversion, leap days, Europe/Berlin transitions, NTP era rollover, invalid headers and mismatched request nonces.
 - MAC parsing, unique combined catalogs and preservation of useful saved names.
-- Settings v1-v7 decoding and migration to v8, Wi-Fi fields, extended alarm tracks, A/B fallback after corruption, failed writes and refusal to erase unknown sectors. Flash is simulated, so this is not a physical Flash endurance test.
+- Settings v1-v8 decoding and migration to v9, daily defaults for old alarms, weekday-mask persistence/validation, Wi-Fi fields, output preferences, extended alarm tracks, real v8 A/B-slot migration, A/B fallback after corruption, failed writes and refusal to erase unknown sectors. Simulated Flash erase/program is restricted to clock A/B slots. This is not a physical Flash endurance test.
 - Git-derived versions: no tags, exact lightweight and annotated tags, commits after a tag, tracked changes, unrelated tags and source archives.
 - Precise timer draft/confirmation/cancellation, field wrapping and four-hour limit, accelerated minute selection and monotonic one-shot countdown completion.
 - Music modes, repeat-one versus explicit Next, backward/forward history, bounded history retention, single-track libraries and shuffle cycle/boundary protection for 2, 7, 8, 78 and 255 tracks.
@@ -52,6 +52,8 @@ About reserves the second line for by FlintUA; version text is bounded to the LC
 Fetch tags before building if the checkout does not have them: git fetch --tags. A shallow checkout must include a reachable release tag, or fetch full history using git fetch --unshallow --tags. Tag creation alone does not alter firmware already installed on a board; rebuild and flash it.
 
 ## Device acceptance before stable release
+
+Weekday/snooze stage: verify old v8 settings load with Daily on all slots, then configure Daily, Mon-Fri, Sat-Sun and a custom mask using LCD/USB. Test draft cancellation and rejecting an empty custom selection. Save/reboot and check masks, alarm times/enabled/sounds, volumes, known speakers and network settings. Use alarm-audio-test N to ring a slot without changing its schedule; GP28 or alarm-snooze should stop it and ring once after five minutes. Verify repeated snooze, ALARM cancellation on the main screen, disabling/editing a snoozed slot, restart cancellation, timer/mute deferral and music preemption. Check both LOCAL and BT. These paths need device acceptance; weekday/migration/snooze host tests have passed.
 
 Restored timer controls require device checks: GP28 editor entry/cancel, HOUR/MIN/SEC confirmation using TIMER/SETTINGS, MINUS/back, timeout cancellation, one-second completion and four-hour limit. Check fast rotation and direction reversal in quick selection. In the music player test mute/unmute on LOCAL and Bluetooth: music stops, levels remain intact and unmute requires explicit playback. These paths have not yet been accepted on the device.
 

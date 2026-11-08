@@ -1,4 +1,5 @@
 #include "alarm_engine.h"
+#include "clock_time.h"
 #include <string.h>
 
 void alarm_defaults(alarm_entry_t alarms[CLOCK_ALARM_COUNT]) {
@@ -9,13 +10,49 @@ void alarm_defaults(alarm_entry_t alarms[CLOCK_ALARM_COUNT]) {
         alarms[i].minute = 0u;
         alarms[i].sound = ALARM_SOUND_SIGNAL;
         alarms[i].track = 1u;
+        alarms[i].weekdays=CLOCK_ALARM_DAYS_ALL;
     }
 }
 
 bool alarm_entry_valid(const alarm_entry_t *a) {
     return a && a->hour <= 23u && a->minute <= 59u &&
            (a->sound == ALARM_SOUND_SIGNAL || a->sound == ALARM_SOUND_MUSIC) &&
-           a->track >= 1u; // uint8_t transport supports tracks 1..255.
+           a->track >= 1u && a->weekdays>=1 && a->weekdays<=CLOCK_ALARM_DAYS_ALL;
+}
+
+bool alarm_day_matches(const alarm_entry_t *a, uint16_t year, uint8_t month, uint8_t day) {
+    ds1302_datetime_t d={.year=year,.month=month,.day=day};
+    uint64_t epoch;
+    return a && clock_datetime_to_utc(&d,&epoch) && clock_utc_to_datetime(epoch,&d) &&
+           (a->weekdays & (1u<<(d.weekday-1)))!=0;
+}
+bool alarm_days_parse(const char *text, uint8_t *mask) {
+    if(!text || !mask || !*text) return false;
+    if(!strcmp(text,"daily")) { *mask=CLOCK_ALARM_DAYS_ALL; return true; }
+    if(!strcmp(text,"weekdays")) { *mask=CLOCK_ALARM_DAYS_WEEKDAYS; return true; }
+    if(!strcmp(text,"weekends")) { *mask=CLOCK_ALARM_DAYS_WEEKEND; return true; }
+    uint8_t value=0;
+    for(const char *p=text;*p;++p) {
+        if(*p<'1' || *p>'7' || (value & (1u<<(*p-'1')))) return false;
+        value|=(uint8_t)(1u<<(*p-'1'));
+    }
+    *mask=value;
+    return true;
+}
+const char *alarm_days_name(uint8_t mask) {
+    if(mask==CLOCK_ALARM_DAYS_ALL) return "Daily";
+    if(mask==CLOCK_ALARM_DAYS_WEEKDAYS) return "Mon-Fri";
+    if(mask==CLOCK_ALARM_DAYS_WEEKEND) return "Sat-Sun";
+    return "Custom";
+}
+void alarm_snooze_schedule(alarm_snooze_t *s, uint64_t now, uint8_t hour, uint8_t minute, bool test) {
+    *s=(alarm_snooze_t){.pending=true,.test=test,.hour=hour,.minute=minute,
+                        .deadline_ms=now+CLOCK_ALARM_SNOOZE_MS};
+}
+bool alarm_snooze_take(alarm_snooze_t *s, uint64_t now, alarm_snooze_t *due) {
+    if(!s->pending || now<s->deadline_ms) return false;
+    *due=*s; s->pending=false;
+    return true;
 }
 
 void alarm_scheduler_init(alarm_scheduler_t *state) {
@@ -46,7 +83,8 @@ int alarm_scheduler_pick(alarm_scheduler_t *state,
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
         const alarm_entry_t *a = &alarms[i];
         if ((state->fired_mask & (1u << i)) || !alarm_entry_valid(a) ||
-            !a->enabled || a->hour != hour || a->minute != minute) {
+            !a->enabled || a->hour != hour || a->minute != minute ||
+            !alarm_day_matches(a,year,month,day)) {
             continue;
         }
         state->fired_mask |= (uint8_t)(1u << i);
@@ -75,7 +113,8 @@ int alarm_scheduler_claim_due(alarm_scheduler_t *state,
         const alarm_entry_t *a = &alarms[i];
         uint8_t bit = (uint8_t)(1u << i);
         if ((state->fired_mask & bit) || !alarm_entry_valid(a) ||
-            !a->enabled || a->hour != hour || a->minute != minute) continue;
+            !a->enabled || a->hour != hour || a->minute != minute ||
+            !alarm_day_matches(a,year,month,day)) continue;
         state->fired_mask |= bit;
         if (winner < 0) winner = (int)i;
         else skipped |= bit;

@@ -67,4 +67,4 @@ To build the previous Bluetooth-only radio profile, pass -NoWifi to build-clock-
 
 ## Settings compatibility and rollback
 
-The first new save writes Flash v8 without moving sectors. Existing v1-v7 records are read and their settings retained; loading alone does not migrate them. After both A/B slots contain v8, old v7 firmware cannot read those latest settings. Use a current -NoWifi build for a network-free fallback that still understands v8. Do not expect an old UF2 to restore settings changed under v8.
+Current main writes Flash v9 without moving sectors; v9 adds alarm weekday masks. Existing v1-v8 records remain readable: old alarms keep all seven days and existing network, output, volume and speaker settings are retained. Loading alone does not migrate records. The first settings change or explicit save writes v9. After both A/B slots contain v9, old v8 firmware cannot read the latest settings and may fall back to an older legacy record. Use a current -NoWifi build for a network-free fallback that still understands v9. Do not expect an old UF2 to restore settings changed under v9. Snooze deadlines are RAM-only and are not stored in Flash.

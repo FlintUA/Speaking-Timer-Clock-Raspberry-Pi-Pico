@@ -17,7 +17,7 @@ This document describes main, starting with 1.0.0-rc.1. The previous MicroPython
 | MODE short press | Switch VOICE/CHIME |
 | MODE hold, at least 900 ms | Announce current time when idle |
 
-While an alarm rings, ALARM stops it and volume remains adjustable. Timer/alarm/audio ownership can block settings or playback actions. GPIO events for other original front-panel labels may be logged without an assigned new action.
+While an alarm rings, ALARM stops it, TIMER_MODE/GP28 snoozes it for five minutes and volume remains adjustable. Timer/alarm/audio ownership can block settings or playback actions.
 
 The precise timer editor starts from the selected duration. TIMER or SETTINGS advances HOUR -> MIN -> SEC; confirming SEC commits the duration and starts the countdown. MINUS goes to the previous field, or cancels from HOUR. GP28 and the 20-second idle timeout cancel without changing the selected duration. Values wrap within each field; the limit is exactly 04:00:00 and a zero duration starts as one second. The editor is unavailable during a running countdown, alarm, player or another menu. Quick minute adjustment discards sub-minute precision; use the editor for seconds. Consecutive same-direction detents less than 260 ms apart reach 5-minute steps on the third detent and 10-minute steps on the fifth. A pause or direction reversal resets acceleration.
 
@@ -45,13 +45,19 @@ USB commands: bt-scan, bt-scan-stop, bt-devices, bt-known, bt-use N|name|MAC, bt
 
 ## Alarms
 
-There are five daily alarm slots. The timer encoder selects a slot and changes editor fields: enabled, hour, minute, sound and music track. TIMER confirms/advances. In the track field, SETTINGS starts/stops preview rather than saving; MINUS goes back.
+There are five alarm slots. The timer encoder selects a slot and changes editor fields: enabled, hour, minute, days, sound and music track. TIMER confirms/advances; SETTINGS also advances except in the track field, where it starts/stops preview rather than saving. Changes remain a draft until final confirmation.
+
+Days offers Daily, Mon-Fri, Sat-Sun and Custom. In Custom, TIMER steps Monday through Sunday and turning the encoder toggles the displayed day. MINUS goes to the previous day, or back to the Days selector from Monday. At least one day must be selected. In the other alarm fields MINUS returns to the alarm list and discards the draft. The list shows the selected day preset; alarm-status includes the exact mask (bit 0=Monday, bit 6=Sunday).
+
+During ringing, GP28 stops the current sound and schedules one repeat five minutes later. Repeated snooze is supported. The deadline uses monotonic uptime, so RTC/NTP corrections and midnight do not move it. At the deadline, the alarm enters the existing deferred-audio queue: a running countdown, mute or open editor may postpone it further, with the usual 30-minute expiry measured from that deadline. Ready snoozes preempt music through the normal alarm priority path. The repeat uses the original alarm time and current sound/output preferences.
+
+The clock screen shows the next snoozed alarm and remaining time. ALARM cancels all snoozes when the main screen is active; ALARM during ringing still stops only the ringing alarm. Disabling or editing a slot cancels its pending/snoozed occurrence. Snoozes live only in RAM and disappear on restart; weekday schedules are saved in Flash.
 
 Music comes from folder 08. The editor uses the detected DFPlayer folder count, or the cached/default count if unavailable, and preserves any already selected higher track. Storage and explicit USB configuration support 1..255. Mirror the same music files onto the separate SPI card when using Bluetooth.
 
 Existing alarms remain independent of quiet-hour automatic speech. Concurrent due events and timer priority use the existing deferred-alarm handling and safety timeout.
 
-Snooze and weekday schedules are planned, not part of this release.
+USB: alarm-days N daily|weekdays|weekends|135 (1=Monday, 7=Sunday); alarm-snooze; alarm-snooze-status; alarm-snooze-cancel. For example, alarm-days 2 135 selects Monday/Wednesday/Friday for slot 2 without changing its enabled state or time. Existing alarm-set/alarm-config commands preserve the selected days. alarm-pending-clear clears both deferred occurrences and future snoozes without disabling schedules.
 
 ## Music player
 
@@ -72,7 +78,7 @@ MINUS acts on release: a short press selects Previous, while a hold exits withou
 
 The first LCD line shows mode and effective output, for example MUSIC SHUF BT. The second shows selected track/count and PLAY, STOP, WAIT or MUTED. WAIT represents a pending start while transport ownership or the preceding LOCAL pause command settles. Rapid navigation replaces the pending selection with the latest one. Muted navigation selects tracks without starting playback.
 
-The volume encoder button toggles sound in the player and alarm editor as well as on the main/settings screens. Muting stops active music on either output and shows MUTED in the player. Unmuting does not restart music; press TIMER to start it. Separate LOCAL/Bluetooth levels are retained. During a ringing alarm the existing policy is unchanged: use ALARM to stop it; rotating volume remains available.
+The volume encoder button toggles sound in the player and alarm editor as well as on the main/settings screens. Muting stops active music on either output and shows MUTED in the player. Unmuting does not restart music; press TIMER to start it. Separate LOCAL/Bluetooth levels are retained. During a ringing alarm use ALARM to stop or GP28 to snooze; rotating volume remains available.
 
 The output follows the manual audio preference when entering the player. Bluetooth requires matching folder 08 files on the SPI FAT32 card. A lost Bluetooth link falls back to LOCAL and restarts the selected track when the local transport is idle. This does not advance the playlist. UI stop is not a position-preserving pause; separate mp3-pause/mp3-resume commands exist for direct playback diagnostics.
 

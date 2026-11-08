@@ -60,7 +60,7 @@ static int detect_lcd_address(void) {
 static countdown_t timer;
 static timer_editor_t timer_editor;
 static timer_acceleration_t timer_acceleration;
-// Five daily alarms; legacy v1/v2 loads disabled defaults.
+// Five calendar alarms; legacy v1/v2 loads disabled defaults.
 // v3 persists alarm entries alongside existing settings.
 static alarm_entry_t alarms[CLOCK_ALARM_COUNT];
 static alarm_scheduler_t alarm_scheduler;
@@ -75,15 +75,18 @@ static bool alarm_audio_armed;
 typedef struct {
     bool pending;
     bool test;
+    bool snoozed;
     uint8_t hour;
     uint8_t minute;
     uint64_t queued_ms;
 } deferred_alarm_t;
 static deferred_alarm_t deferred_alarms[CLOCK_ALARM_COUNT];
+static alarm_snooze_t alarm_snoozes[CLOCK_ALARM_COUNT];
 static uint8_t active_alarm_hour, active_alarm_minute;
 static bool active_alarm_test;
 static uint64_t active_alarm_due_ms;
 static void alarm_stop(const char *reason);
+static void alarm_consume_current_minute(unsigned index);
 static void alarm_preview_stop(const char *reason);
 static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
                               uint64_t now, bool test);
@@ -206,11 +209,15 @@ typedef enum {
     ALARM_UI_ENABLED,
     ALARM_UI_HOUR,
     ALARM_UI_MINUTE,
+    ALARM_UI_DAYS,
+    ALARM_UI_DAY,
     ALARM_UI_SOUND,
     ALARM_UI_TRACK
 } alarm_ui_state_t;
 static alarm_ui_state_t alarm_ui_state;
 static uint8_t alarm_ui_index;
+static uint8_t alarm_ui_days_choice, alarm_ui_day_index, alarm_ui_custom_days;
+static bool alarm_ui_days_invalid;
 static alarm_entry_t alarm_ui_draft;
 static uint64_t alarm_ui_last_input_ms;
 static bool alarm_preview_active;
@@ -813,6 +820,61 @@ static void alarm_pending_add(unsigned index, uint8_t hour,
            index + 1u, (unsigned)hour, (unsigned)minute,
            test ? " TEST" : "");
 }
+static void alarm_clear_waiting(unsigned index) {
+    alarm_snoozes[index].pending=false;
+    deferred_alarms[index].pending=false;
+}
+static int alarm_snooze_next(uint64_t now, uint64_t *remaining) {
+    int first=-1;
+    uint64_t deadline=UINT64_MAX;
+    for(unsigned i=0;i<CLOCK_ALARM_COUNT;++i) {
+        bool waiting=deferred_alarms[i].pending && deferred_alarms[i].snoozed;
+        if(!alarm_snoozes[i].pending && !waiting) continue;
+        uint64_t candidate=waiting ? now : alarm_snoozes[i].deadline_ms;
+        if(first<0 || candidate<deadline) { first=(int)i; deadline=candidate; }
+    }
+    if(remaining) *remaining=first<0 || now>=deadline ? 0 : (deadline-now+999)/1000;
+    return first;
+}
+static void alarm_snooze_cancel_all(void) {
+    for(unsigned i=0;i<CLOCK_ALARM_COUNT;++i) {
+        alarm_snoozes[i].pending=false;
+        if(deferred_alarms[i].snoozed) deferred_alarms[i].pending=false;
+    }
+    puts("[SNOOZE] cancelled; daily schedules unchanged");
+}
+static void alarm_snooze_start(uint64_t now) {
+    if(alarm_active_index<0) { puts("[SNOOZE] no ringing alarm"); return; }
+    unsigned slot=(unsigned)alarm_active_index;
+    alarm_snooze_schedule(&alarm_snoozes[slot],now,active_alarm_hour,
+                           active_alarm_minute,active_alarm_test);
+    alarm_stop("SNOOZE_5_MIN");
+    printf("[SNOOZE] slot=%u delay=300s (monotonic, RAM only)\n",slot+1);
+}
+static void alarm_snooze_status(uint64_t now) {
+    unsigned count=0;
+    for(unsigned i=0;i<CLOCK_ALARM_COUNT;++i) {
+        bool waiting=deferred_alarms[i].pending && deferred_alarms[i].snoozed;
+        if(!alarm_snoozes[i].pending && !waiting) continue;
+        uint64_t remaining=waiting || now>=alarm_snoozes[i].deadline_ms ? 0 :
+            (alarm_snoozes[i].deadline_ms-now+999)/1000;
+        printf("[SNOOZE] slot=%u remaining=%llus state=%s\n",i+1,
+            (unsigned long long)remaining,waiting?"WAITING_AUDIO":"SLEEPING");
+        ++count;
+    }
+    printf("[SNOOZE] count=%u delay=300s; ALARM cancels on clock screen\n",count);
+}
+static void alarm_snooze_service(uint64_t now) {
+    for(unsigned i=0;i<CLOCK_ALARM_COUNT;++i) {
+        alarm_snooze_t due;
+        if(!alarm_snooze_take(&alarm_snoozes[i],now,&due)) continue;
+        if(!deferred_alarms[i].pending) {
+            alarm_pending_add(i,due.hour,due.minute,now,due.test);
+            deferred_alarms[i].snoozed=true;
+        }
+        printf("[SNOOZE] due=%u; normal audio priority and 30m expiry apply\n",i+1);
+    }
+}
 static void alarm_pending_status(uint64_t now) {
     unsigned count = 0u;
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
@@ -949,7 +1011,7 @@ static bool settings_equal(clock_settings_t a, clock_settings_t b) {
         const alarm_entry_t *x = &a.alarms[i], *y = &b.alarms[i];
         if (x->enabled != y->enabled || x->hour != y->hour ||
             x->minute != y->minute || x->sound != y->sound ||
-            x->track != y->track) return false;
+            x->track != y->track || x->weekdays!=y->weekdays) return false;
     }
     return true;
 }
@@ -1396,6 +1458,11 @@ static void alarm_ui_open(uint64_t now) {
 static void alarm_ui_begin_edit(uint64_t now) {
     if (alarm_ui_state != ALARM_UI_LIST) return;
     alarm_ui_draft = alarms[alarm_ui_index];
+    alarm_ui_custom_days=alarm_ui_draft.weekdays;
+    alarm_ui_days_choice=alarm_ui_custom_days==CLOCK_ALARM_DAYS_ALL?0:
+        alarm_ui_custom_days==CLOCK_ALARM_DAYS_WEEKDAYS?1:
+        alarm_ui_custom_days==CLOCK_ALARM_DAYS_WEEKEND?2:3;
+    alarm_ui_days_invalid=false;
     alarm_ui_state = ALARM_UI_ENABLED;
     alarm_ui_last_input_ms = now;
     printf("[ALARM-UI] editing alarm %u (draft; no flash write)\n",
@@ -1412,7 +1479,20 @@ static void alarm_ui_next(uint64_t now) {
     switch (alarm_ui_state) {
         case ALARM_UI_ENABLED: alarm_ui_state = ALARM_UI_HOUR; break;
         case ALARM_UI_HOUR: alarm_ui_state = ALARM_UI_MINUTE; break;
-        case ALARM_UI_MINUTE: alarm_ui_state = ALARM_UI_SOUND; break;
+        case ALARM_UI_MINUTE: alarm_ui_state = ALARM_UI_DAYS; break;
+        case ALARM_UI_DAYS:
+            alarm_ui_day_index=0; alarm_ui_days_invalid=false;
+            alarm_ui_state=alarm_ui_days_choice==3 ? ALARM_UI_DAY : ALARM_UI_SOUND;
+            break;
+        case ALARM_UI_DAY:
+            if(alarm_ui_day_index<6) { ++alarm_ui_day_index; break; }
+            if(!alarm_ui_draft.weekdays) {
+                alarm_ui_days_invalid=true;
+                puts("[ALARM-UI] choose at least one day; MINUS goes to previous day");
+                return;
+            }
+            alarm_ui_state=ALARM_UI_SOUND;
+            break;
         case ALARM_UI_SOUND:
             if (alarm_ui_draft.sound == ALARM_SOUND_MUSIC) {
                 alarm_ui_state = ALARM_UI_TRACK;
@@ -1433,24 +1513,12 @@ commit:
                                saved->hour != alarm_ui_draft.hour ||
                                saved->minute != alarm_ui_draft.minute ||
                                saved->sound != alarm_ui_draft.sound ||
-                               saved->track != alarm_ui_draft.track;
+                               saved->track != alarm_ui_draft.track ||
+                               saved->weekdays!=alarm_ui_draft.weekdays;
                 *saved = alarm_ui_draft;
                 if (changed) {
-                    // Consume current minute if this alarm was just
-                    // enabled or edited for the current RTC minute.
-                    ds1302_datetime_t dt = {0};
-                    if (saved->enabled && ds1302_read_datetime(&dt) &&
-                        dt.hour == saved->hour && dt.minute == saved->minute) {
-                        uint64_t key = auto_minute_key(&dt);
-                        if (!alarm_scheduler.minute_valid ||
-                            alarm_scheduler.minute_key != key) {
-                            alarm_scheduler.minute_valid = true;
-                            alarm_scheduler.minute_key = key;
-                            alarm_scheduler.fired_mask = 0u;
-                        }
-                        alarm_scheduler.fired_mask |=
-                            (uint8_t)(1u << alarm_ui_index);
-                    }
+                    alarm_clear_waiting(alarm_ui_index);
+                    alarm_consume_current_minute(alarm_ui_index);
                     settings_mark_changed();
                 }
                 printf("[ALARM-UI] saved #%u %s %02u:%02u %s track=%u changed=%s\n",
@@ -1486,6 +1554,17 @@ static void alarm_ui_rotate(int direction, uint64_t now) {
         case ALARM_UI_MINUTE:
             alarm_ui_draft.minute = wrap_u8(alarm_ui_draft.minute, 0u, 59u, direction);
             break;
+        case ALARM_UI_DAYS:
+            alarm_ui_days_choice=wrap_u8(alarm_ui_days_choice,0,3,direction);
+            alarm_ui_draft.weekdays=alarm_ui_days_choice==0?CLOCK_ALARM_DAYS_ALL:
+                alarm_ui_days_choice==1?CLOCK_ALARM_DAYS_WEEKDAYS:
+                alarm_ui_days_choice==2?CLOCK_ALARM_DAYS_WEEKEND:alarm_ui_custom_days;
+            break;
+        case ALARM_UI_DAY:
+            alarm_ui_draft.weekdays^=(uint8_t)(1u<<alarm_ui_day_index);
+            alarm_ui_custom_days=alarm_ui_draft.weekdays;
+            alarm_ui_days_invalid=false;
+            break;
         case ALARM_UI_SOUND:
             alarm_ui_draft.sound =
                 alarm_ui_draft.sound == ALARM_SOUND_SIGNAL ?
@@ -1511,6 +1590,10 @@ static void alarm_ui_back(uint64_t now) {
     alarm_preview_stop("BACK");
     if (alarm_ui_state == ALARM_UI_LIST) {
         alarm_ui_close("MINUS");
+    } else if(alarm_ui_state==ALARM_UI_DAY) {
+        alarm_ui_days_invalid=false;
+        if(alarm_ui_day_index) --alarm_ui_day_index;
+        else alarm_ui_state=ALARM_UI_DAYS;
     } else {
         // Never apply an incomplete draft.
         alarm_ui_state = ALARM_UI_LIST;
@@ -2240,15 +2323,16 @@ static void print_rtc_debug(void) {
 }
 
 static void alarm_status(void) {
-    printf("[ALARM] flash v4 capable; active=%d (0=none)\n",
+    printf("[ALARM] flash v9 capable; active=%d (0=none)\n",
            alarm_active_index + 1);
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
         const alarm_entry_t *a = &alarms[i];
-        printf("[ALARM] %u enabled=%s time=%02u:%02u sound=%s track=%u valid=%s\n",
+        printf("[ALARM] %u enabled=%s time=%02u:%02u sound=%s track=%u days=%s mask=0x%02x valid=%s\n",
                i + 1u, a->enabled ? "ON" : "OFF",
                (unsigned)a->hour, (unsigned)a->minute,
                a->sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL",
-               (unsigned)a->track, alarm_entry_valid(a) ? "YES" : "NO");
+               (unsigned)a->track,alarm_days_name(a->weekdays),(unsigned)a->weekdays,
+               alarm_entry_valid(a) ? "YES" : "NO");
     }
 }
 
@@ -2465,6 +2549,33 @@ static void alarm_service_rtc(const ds1302_datetime_t *dt, uint64_t now) {
     }
 }
 
+static void alarm_consume_current_minute(unsigned index) {
+    ds1302_datetime_t dt;
+    if(!ds1302_read_datetime(&dt) || !alarms[index].enabled ||
+       dt.hour!=alarms[index].hour || dt.minute!=alarms[index].minute) return;
+    uint64_t key=auto_minute_key(&dt);
+    if(!alarm_scheduler.minute_valid || alarm_scheduler.minute_key!=key) {
+        alarm_scheduler.minute_valid=true; alarm_scheduler.minute_key=key;
+        alarm_scheduler.fired_mask=0;
+    }
+    alarm_scheduler.fired_mask|=(uint8_t)(1u<<index);
+}
+static void alarm_days_command(char *args) {
+    unsigned slot; char text[16], extra; uint8_t mask;
+    if(sscanf(args,"%u %15s %c",&slot,text,&extra)!=2 || slot<1 ||
+       slot>CLOCK_ALARM_COUNT || !alarm_days_parse(text,&mask)) {
+        puts("[ALARM] alarm-days N daily|weekdays|weekends|135 (1=Mon,7=Sun)"); return;
+    }
+    if(alarm_active_index>=0 || alarm_ui_state!=ALARM_UI_CLOSED || music_ui_open) {
+        puts("[ALARM] close editor/player and stop ringing before configuration"); return;
+    }
+    if(alarms[slot-1].weekdays!=mask) {
+        alarms[slot-1].weekdays=mask;
+        alarm_clear_waiting(slot-1); alarm_consume_current_minute(slot-1);
+        settings_mark_changed();
+    }
+    alarm_status();
+}
 static void alarm_set(char *args) {
     unsigned hh = 0u, mm = 0u, track = 1u;
     char kind[12] = {0};
@@ -2483,20 +2594,14 @@ static void alarm_set(char *args) {
         puts("[ALARM] Stop ringing alarm or close editor/player before configuration");
         return;
     }
+    alarm_clear_waiting(0);
     alarms[0].enabled = true;
     alarms[0].hour = (uint8_t)hh;
     alarms[0].minute = (uint8_t)mm;
     alarms[0].sound = music ? ALARM_SOUND_MUSIC : ALARM_SOUND_SIGNAL;
     alarms[0].track = music ? (uint8_t)track : 1u;
-    // Reset one-shot state for a newly configured test alarm;
-    // never replay an already active current minute immediately.
-    alarm_scheduler_init(&alarm_scheduler);
-    ds1302_datetime_t current = {0};
-    if (ds1302_read_datetime(&current)) {
-        (void)alarm_scheduler_pick(&alarm_scheduler, alarms,
-                   current.year, current.month, current.day,
-                   current.hour, current.minute, false);
-    }
+    // Consume only this slot; preserve other already-fired alarms.
+    alarm_consume_current_minute(0);
     settings_mark_changed();
     printf("[ALARM] 1 enabled=ON time=%02u:%02u sound=%s track=%u\n",
            hh, mm, music ? "MUSIC" : "SIGNAL", music ? track : 1u);
@@ -2521,6 +2626,7 @@ static void alarm_config(char *args) {
         puts("[ALARM] config blocked: alarm ringing or editor/player open");
         return;
     }
+    alarm_clear_waiting(slot-1u);
     alarm_entry_t *a = &alarms[slot - 1u];
     a->enabled = true;
     a->hour = (uint8_t)hh;
@@ -2559,7 +2665,9 @@ static void alarm_enable(char *args) {
         return;
     }
     alarm_entry_t *a = &alarms[slot - 1u];
-    a->enabled = strcmp(action, "on") == 0;
+    bool enabled=strcmp(action,"on")==0;
+    if(a->enabled!=enabled) alarm_clear_waiting(slot-1u);
+    a->enabled = enabled;
     if (a->enabled) {
         // Do not retroactively trigger during the currently active minute.
         ds1302_datetime_t dt = {0};
@@ -3142,6 +3250,8 @@ static void handle_command(char *line) {
         puts("[BT-VOL] bt-volume shows independent Bluetooth level; bt-vol 0..30 sets it; VOLUME encoder follows audio route");
         puts("[AUDIO-HEALTH] audio-health shows read-only owner, queue and Bluetooth status");
         puts("[ALARM-PENDING] alarm-pending, alarm-pending-test N, alarm-pending-clear (RAM only)");
+        puts("[ALARM] alarm-days N daily|weekdays|weekends|135; alarm-snooze; alarm-snooze-status; alarm-snooze-cancel");
+        puts("[SNOOZE] ringing: GP28 snoozes 5 min; ALARM stops. On clock screen ALARM cancels snoozes");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[NETWORK] wifi-config SSID|password; wifi-clear; ntp-status; ntp-sync; version");
         puts("[INPUT] ALARM short=alarm editor; ALARM hold >=900ms=music; MUSIC TIMER=play/stop, encoder/SETTINGS/MINUS=next/previous, ALARM=mode; hold ALARM/MODE/MINUS=exit");
@@ -3219,11 +3329,19 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "alarm-status") == 0) {
         alarm_status();
         alarm_pending_status(now);
+        alarm_snooze_status(now);
+    } else if (strncmp(line,"alarm-days ",11)==0) {
+        alarm_days_command(line+11);
+    } else if(strcmp(line,"alarm-snooze")==0) {
+        alarm_snooze_start(now);
+    } else if(strcmp(line,"alarm-snooze-status")==0) {
+        alarm_snooze_status(now);
+    } else if(strcmp(line,"alarm-snooze-cancel")==0) {
+        alarm_snooze_cancel_all();
     } else if (strcmp(line, "alarm-pending") == 0) {
         alarm_pending_status(now);
     } else if (strcmp(line, "alarm-pending-clear") == 0) {
-        for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i)
-            deferred_alarms[i].pending = false;
+        for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) alarm_clear_waiting(i);
         puts("[ALARM-PENDING] cleared by user (RAM only, alarm schedule unchanged)");
     } else if (strncmp(line, "alarm-pending-test ", 19) == 0) {
         unsigned slot = 0;
@@ -3246,6 +3364,7 @@ static void handle_command(char *line) {
         if (alarm_ui_state != ALARM_UI_CLOSED || music_ui_open) {
             puts("[ALARM] close editor/player before changing alarm 1");
         } else {
+            alarm_clear_waiting(0);
             alarms[0].enabled = false;
             settings_mark_changed();
             puts("[ALARM] 1 enabled=OFF");
@@ -3522,6 +3641,11 @@ static void on_control_event(const control_event_t *event, void *context) {
                 alarm_button_pressed_at_ms = now;
                 alarm_button_consumed = alarm_active_index >= 0;
                 if (alarm_active_index >= 0) alarm_stop("BUTTON");
+                else if(menu_state==MENU_CLOSED && alarm_ui_state==ALARM_UI_CLOSED &&
+                        !music_ui_open && alarm_snooze_next(now,NULL)>=0) {
+                    alarm_snooze_cancel_all();
+                    alarm_button_consumed=true;
+                }
             } else if (event->type == CONTROL_BUTTON_RELEASE &&
                        alarm_button_pressed) {
                 alarm_button_pressed = false;
@@ -3544,8 +3668,12 @@ static void on_control_event(const control_event_t *event, void *context) {
             }
             return;
         }
-        // During ringing, only ALARM stop and VOLUME remain interactive.
-        if (alarm_active_index >= 0) return;
+        // GP28 snoozes only a ringing alarm; ALARM still stops it.
+        if (alarm_active_index >= 0) {
+            if(event->type==CONTROL_BUTTON_PRESS && event->button==BUTTON_TIMER_MODE)
+                alarm_snooze_start(now);
+            return;
+        }
         // Sound toggle is available before the player/editor consume buttons.
         if (event->button==BUTTON_VOLUME && event->type==CONTROL_BUTTON_PRESS) {
             toggle_sound();
@@ -3897,6 +4025,7 @@ int main(void) {
             }
         }
 
+        alarm_snooze_service(now);
         alarm_pending_service(now);
 #ifdef CLOCK_ENABLE_A2DP
         if (menu_state == MENU_BT_SCANNING && !clock_a2dp_scan_active()) {
@@ -3917,11 +4046,22 @@ int main(void) {
                 !sound_enabled?"MUTED":music_ui_pending?"WAIT":music_ui_playing?"PLAY":"STOP");
         } else if (alarm_ui_state == ALARM_UI_LIST) {
             const alarm_entry_t *a = &alarms[alarm_ui_index];
-            snprintf(top, sizeof(top), "ALARM %u/5 %s",
-                     (unsigned)(alarm_ui_index + 1u), a->enabled ? "ON" : "OFF");
+            snprintf(top, sizeof(top), "A%u/5 %s %s",
+                     (unsigned)(alarm_ui_index + 1u), a->enabled ? "ON" : "OFF",
+                     alarm_days_name(a->weekdays));
             snprintf(bottom, sizeof(bottom), "%02u:%02u %s",
                      (unsigned)a->hour, (unsigned)a->minute,
                      a->sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL");
+        } else if(alarm_ui_state==ALARM_UI_DAYS) {
+            snprintf(top,sizeof(top),"ALARM %u DAYS",(unsigned)alarm_ui_index+1);
+            snprintf(bottom,sizeof(bottom),"%s T=%s",alarm_ui_days_choice==3?"Custom":alarm_days_name(alarm_ui_draft.weekdays),
+                alarm_ui_days_choice==3?"EDIT":"NEXT");
+        } else if(alarm_ui_state==ALARM_UI_DAY) {
+            static const char *days[]={"Mon","Tue","Wed","Thu","Fri","Sat","Sun"};
+            if(alarm_ui_days_invalid) snprintf(top,sizeof(top),"SELECT >=1 DAY");
+            else snprintf(top,sizeof(top),"ALARM %u DAYS",(unsigned)alarm_ui_index+1);
+            snprintf(bottom,sizeof(bottom),"%s %s T=NEXT",days[alarm_ui_day_index],
+                alarm_ui_draft.weekdays&(1u<<alarm_ui_day_index)?"ON":"OFF");
         } else if (alarm_ui_state != ALARM_UI_CLOSED) {
             const char *field = alarm_ui_state == ALARM_UI_ENABLED ? "ON/OFF" :
                                 alarm_ui_state == ALARM_UI_HOUR ? "HOUR" :
@@ -4057,7 +4197,7 @@ int main(void) {
                      menu_exact_choice ? "ON" : "OFF");
         } else if (alarm_active_index >= 0) {
             snprintf(top, sizeof(top), "ALARM %d RINGING", alarm_active_index + 1);
-            snprintf(bottom, sizeof(bottom), "ALARM BTN=STOP");
+            snprintf(bottom, sizeof(bottom), "A=STOP TM=SNOOZE");
         } else if (mode_overlay_until_ms && now < mode_overlay_until_ms) {
             snprintf(top, sizeof(top), "CLOCK MODE");
             snprintf(bottom, sizeof(bottom), "%s", clock_mode ? "CHIME" : "VOICE");
@@ -4082,6 +4222,12 @@ int main(void) {
                      (unsigned long)(remaining / 3600u),
                      (unsigned long)((remaining / 60u) % 60u),
                      (unsigned long)(remaining % 60u));
+        } else if(alarm_snooze_next(now,NULL)>=0) {
+            uint64_t remaining;
+            int slot=alarm_snooze_next(now,&remaining);
+            snprintf(top,sizeof(top),"ALARM %u SNOOZE",(unsigned)slot+1);
+            snprintf(bottom,sizeof(bottom),"%02u:%02u A=CANCEL",
+                (unsigned)(remaining/60),(unsigned)(remaining%60));
         } else {
             snprintf(top, sizeof(top), "%s", rtc_top);
             snprintf(bottom, sizeof(bottom), "%s", rtc_bottom);

@@ -1,5 +1,5 @@
 // Host test, no Pico SDK required:
-//   cc -std=c11 -Wall -Wextra -Werror -Iapp app/alarm_engine.c
+//   cc -std=c11 -Wall -Wextra -Werror -Iapp app/alarm_engine.c app/clock_time.c
 //      tests/alarm_engine_host_test.c -o alarm_engine_test && ./alarm_engine_test
 #include "alarm_engine.h"
 #include <assert.h>
@@ -64,6 +64,56 @@ int main(void) {
     assert(alarm_scheduler_claim_due(&state, a, 2026, 11, 8,
                                      10, 15, &skipped) == 3);
     assert(skipped == 0u);
+    // The daily scheduler filters real calendar weekdays, including leap dates.
+    alarm_defaults(a); a[0].enabled=true; a[0].weekdays=CLOCK_ALARM_DAYS_WEEKDAYS;
+    alarm_scheduler_init(&state);
+    assert(alarm_scheduler_claim_due(&state,a,2026,11,7,7,0,&skipped)==-1); // Saturday.
+    assert(alarm_scheduler_claim_due(&state,a,2026,11,8,7,0,&skipped)==-1); // Sunday.
+    assert(alarm_scheduler_claim_due(&state,a,2026,11,9,7,0,&skipped)==0); // Monday.
+    assert(alarm_scheduler_claim_due(&state,a,2026,11,9,7,0,&skipped)==-1);
+    alarm_scheduler_init(&state);
+    assert(alarm_scheduler_pick(&state,a,2026,11,8,7,0,false)==-1);
+    assert(alarm_scheduler_pick(&state,a,2026,11,9,7,0,false)==0);
+    a[1].enabled=true; a[1].hour=7; a[1].weekdays=CLOCK_ALARM_DAYS_WEEKEND;
+    assert(alarm_scheduler_claim_due(&state,a,2026,11,8,7,0,&skipped)==1 && skipped==0);
+    a[0].weekdays=CLOCK_ALARM_DAYS_WEEKEND;
+    assert(alarm_day_matches(&a[0],2026,11,8));
+    assert(!alarm_day_matches(&a[0],2026,11,9));
+    a[0].weekdays=CLOCK_ALARM_DAYS_WEEKDAYS;
+    assert(alarm_day_matches(&a[0],2027,1,1));
+    a[0].weekdays=1u<<3; // Thursday.
+    assert(alarm_day_matches(&a[0],2024,2,29));
+    assert(!alarm_day_matches(&a[0],2025,2,29));
+    a[0].weekdays=0; assert(!alarm_entry_valid(&a[0]));
+    a[0].weekdays=0x80; assert(!alarm_entry_valid(&a[0]));
+    uint8_t mask=0;
+    assert(alarm_days_parse("135",&mask) && mask==0x15);
+    assert(alarm_days_parse("daily",&mask) && mask==0x7f);
+    assert(alarm_days_parse("weekdays",&mask) && mask==0x1f);
+    assert(alarm_days_parse("weekends",&mask) && mask==0x60);
+    assert(!alarm_days_parse("",&mask)); assert(!alarm_days_parse("11",&mask));
+    assert(!alarm_days_parse("0",&mask)); assert(!alarm_days_parse("18",&mask));
+    for(unsigned days=1;days<=0x7f;++days) {
+        a[0].weekdays=(uint8_t)days;
+        for(unsigned day=0;day<7;++day)
+            assert(alarm_day_matches(&a[0],2026,11,(uint8_t)(9+day))==((days&(1u<<day))!=0));
+    }
+    // Snooze is an independent, one-shot monotonic deadline for each slot.
+    alarm_snooze_t snoozes[CLOCK_ALARM_COUNT]={0}, due;
+    alarm_snooze_schedule(&snoozes[0],1000,23,59,false);
+    alarm_snooze_schedule(&snoozes[1],2000,8,30,true);
+    assert(!alarm_snooze_take(&snoozes[0],300999,&due));
+    assert(alarm_snooze_take(&snoozes[0],301000,&due));
+    assert(due.hour==23 && due.minute==59 && !due.test);
+    assert(!alarm_snooze_take(&snoozes[0],301001,&due));
+    assert(!alarm_snooze_take(&snoozes[1],301999,&due));
+    assert(alarm_snooze_take(&snoozes[1],302000,&due) && due.test);
+    alarm_snooze_schedule(&snoozes[0],302000,23,59,false); // Repeated snooze.
+    assert(!alarm_snooze_take(&snoozes[0],601999,&due));
+    assert(alarm_snooze_take(&snoozes[0],602000,&due));
+    alarm_snooze_schedule(&snoozes[0],603000,23,59,false);
+    snoozes[0].pending=false; // Explicit cancellation / restart.
+    assert(!alarm_snooze_take(&snoozes[0],1000000,&due));
     puts("alarm_engine_host_test: PASS");
     return 0;
 }
