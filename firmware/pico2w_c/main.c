@@ -171,10 +171,12 @@ typedef enum {
     MENU_EDIT_AUDIO_OUTPUT,
     MENU_BT_LIST,
     MENU_BT_SCANNING,
-    MENU_BT_CONFIRM
+    MENU_BT_CONFIRM,
+    MENU_ABOUT
 } menu_state_t;
 static menu_state_t menu_state;
 static uint8_t menu_index;
+static bool menu_about_version;
 static speech_language_t menu_language_choice;
 static uint8_t menu_volume_choice;
 static uint8_t menu_audio_index; // 0=manual 1=hourly 2=timer 3=alarm
@@ -188,7 +190,7 @@ static bool menu_half_hour_choice;
 static ds1302_datetime_t menu_rtc_choice;
 static uint64_t menu_last_input_ms;
 #define SETTINGS_MENU_TIMEOUT_MS 20000u
-#define SETTINGS_MENU_ITEMS 9u
+#define SETTINGS_MENU_ITEMS 10u
 #define SETTINGS_AUDIO_ITEMS 4u
 // Alarm editor is separate from settings; changes stay in draft until DONE.
 typedef enum {
@@ -1672,7 +1674,7 @@ static const char *menu_item_name(unsigned index) {
     static const char *names[SETTINGS_MENU_ITEMS] = {
         "Language", "Time", "Date", "Quiet mode",
         "Half-hour beep", "Exact-hour word", "Volume", "Audio Output",
-        "Bluetooth"
+        "Bluetooth", "About"
     };
     return index < SETTINGS_MENU_ITEMS ? names[index] : "?";
 }
@@ -1811,6 +1813,11 @@ static void menu_begin_edit(uint64_t now) {
             puts("[MENU-BT] Bluetooth not enabled in this build");
 #endif
             return;
+        case 9:
+            menu_about_version = false;
+            menu_state = MENU_ABOUT;
+            puts("[MENU-ABOUT] Speaking Clock / Pico 2 W");
+            return;
         default:
             return;
     }
@@ -1820,6 +1827,8 @@ static void menu_begin_edit(uint64_t now) {
 static void menu_commit(uint64_t now) {
     menu_last_input_ms = now;
     switch (menu_state) {
+        case MENU_ABOUT:
+            return; // Information only; rotate TIMER to change pages.
         case MENU_EDIT_LANGUAGE:
             if (language != menu_language_choice) {
                 language = menu_language_choice;
@@ -1956,6 +1965,9 @@ static void menu_back(uint64_t now) {
     menu_last_input_ms = now;
     if (menu_state == MENU_LIST) {
         menu_close();
+    } else if (menu_state == MENU_ABOUT) {
+        menu_state = MENU_LIST;
+        puts("[MENU-ABOUT] Back to settings");
     } else if (menu_state == MENU_EDIT_AUDIO_OUTPUT) {
         puts("[MENU-AUDIO] Choice discarded");
         menu_state = MENU_AUDIO_LIST;
@@ -1992,6 +2004,13 @@ static void menu_rotate(int direction, uint64_t now) {
                                   (direction > 0 ? 1u : SETTINGS_MENU_ITEMS - 1u)) %
                                   SETTINGS_MENU_ITEMS);
             printf("[MENU] Item: %s\n", menu_item_name(menu_index));
+            break;
+        case MENU_ABOUT:
+            menu_about_version = !menu_about_version;
+            if (menu_about_version)
+                printf("[MENU-ABOUT] v%s / by FlintUA\n", CLOCK_FIRMWARE_VERSION);
+            else
+                puts("[MENU-ABOUT] Speaking Clock / Pico 2 W");
             break;
         case MENU_EDIT_LANGUAGE:
             menu_language_choice = menu_language_choice == SPEECH_RU ? SPEECH_DE : SPEECH_RU;
@@ -3918,6 +3937,14 @@ int main(void) {
             snprintf(top, sizeof(top), "SETTINGS %u/%u",
                      (unsigned)(menu_index + 1u), (unsigned)SETTINGS_MENU_ITEMS);
             snprintf(bottom, sizeof(bottom), "%s", menu_item_name(menu_index));
+        } else if (menu_state == MENU_ABOUT) {
+            if (menu_about_version) {
+                snprintf(top, sizeof(top), "v%s", CLOCK_FIRMWARE_VERSION);
+                snprintf(bottom, sizeof(bottom), "by FlintUA");
+            } else {
+                snprintf(top, sizeof(top), "Speaking Clock");
+                snprintf(bottom, sizeof(bottom), "Pico 2 W");
+            }
         } else if (menu_state == MENU_BT_SCANNING) {
 #ifdef CLOCK_ENABLE_A2DP
             snprintf(top, sizeof(top), "BT SCAN+NAMES");

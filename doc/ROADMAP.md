@@ -30,7 +30,7 @@ Before declaring v1.0.0 stable:
 
 1. Alarm snooze and weekday schedules, with explicit editor and storage changes.
 2. Music sleep timer and selectable playback modes; preserve existing no-repeat shuffle and audio priorities.
-3. Spoken date and nearest-alarm information, plus an LCD service/version screen and a dedicated startup indication.
+3. Spoken date and nearest-alarm information, plus a dedicated startup indication. The two-page LCD About screen is implemented.
 4. Birthday/reminder events after checking available recordings.
 5. Offline RTC drift calibration if hourly NTP correction is insufficient for extended offline use.
 6. Complete the electrical schematic for the installed Pico 2 W wiring and power modules.

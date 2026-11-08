@@ -22,7 +22,9 @@ While an alarm rings, ALARM stops it and volume remains adjustable. Timer/alarm/
 
 Turn the timer encoder to choose an item or value. SETTINGS or the timer encoder button enters/confirms. MINUS returns or cancels an uncommitted edit. Idle menus time out after 20 seconds; active Bluetooth discovery/name resolution is allowed to finish.
 
-Items: Language, Time, Date, Quiet mode, Half-hour beep, Exact-hour word, Volume, Audio Output and Bluetooth.
+Items: Language, Time, Date, Quiet mode, Half-hour beep, Exact-hour word, Volume, Audio Output, Bluetooth and About.
+
+About has two read-only pages: Speaking Clock / Pico 2 W, then the firmware version / by FlintUA. Turn the timer encoder in either direction to switch pages. MINUS returns to the settings list. The normal 20-second idle timeout applies. The build ID remains available through the USB version command.
 
 Time/date writes occur only after confirming the final field. When network time is configured, later NTP synchronization applies Europe/Berlin time.
 
