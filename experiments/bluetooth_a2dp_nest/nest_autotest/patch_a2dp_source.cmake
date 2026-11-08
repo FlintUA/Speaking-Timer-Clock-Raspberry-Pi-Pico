@@ -7,6 +7,7 @@ if (NOT DEFINED UPSTREAM_SOURCE OR NOT DEFINED PATCHED_SOURCE)
 endif()
 
 file(READ "${UPSTREAM_SOURCE}" _source)
+string(PREPEND _source "#include \"clock_a2dp_control.h\"\n#include \"clock_bt_policy.h\"\n")
 
 # Direct connect to an already known Bluetooth MAC without requiring inquiry mode.
 # The upstream example only connects after a discoverable inquiry result.
@@ -18,6 +19,7 @@ set(_new_scan_function [=[
 #include "clock_a2dp_control.h"
 // Flash v5 overrides the legacy build-time default at boot.
 static char clock_autoconnect_target[18] = "__CLOCK_AUTO_TARGET__";
+static bool clock_bt_boot_held;
 static bd_addr_t clock_connected_addr;
 static bool clock_connected_addr_valid;
 bool clock_a2dp_stream_matches(const uint8_t address[6]){
@@ -58,6 +60,7 @@ static uint8_t clock_bt_name_needed[CLOCK_BT_MAX_DEVICES];
 static int clock_bt_name_pending = -1;
 static void clock_bt_scan_names_next(void);
 const char *clock_a2dp_target(void){ return clock_autoconnect_target; }
+bool clock_a2dp_autoconnect_enabled(void){ return !clock_bt_boot_held && clock_autoconnect_target[0]!=0; }
 unsigned clock_a2dp_scan_count(void){ return clock_bt_found_count; }
 bool clock_a2dp_scan_active(void){
     return clock_bt_scan_requested || clock_bt_scan_running ||
@@ -173,6 +176,11 @@ static bool clock_a2dp_connect_address(const char *text){
         return false;
     }
     sscanf_bd_addr(text, device_addr);
+    if (clock_bt_boot_held || !clock_bt_target_accepts(clock_autoconnect_target,device_addr,
+            clock_bt_scan_requested || clock_bt_scan_running)) {
+        puts("[BT-POLICY] Outgoing connection blocked: no matching selected target");
+        return false;
+    }
     if (scan_active){
         scan_active = false;
         gap_inquiry_stop();
@@ -183,7 +191,7 @@ static bool clock_a2dp_connect_address(const char *text){
 }
 
 bool clock_a2dp_connect(const char *address){
-    return clock_a2dp_connect_address(address);
+    return clock_a2dp_select_target(address);
 }
 
 // All reconnect callbacks run on the BTstack event loop.
@@ -203,7 +211,8 @@ static void clock_reconnect_cancel(void){
 bool clock_a2dp_scan_start(void){
     if (!clock_bt_stack_ready || clock_bt_scan_requested ||
         clock_bt_switch_requested) return false;
-    clock_reconnect_cancel();
+    clock_a2dp_clear_target();
+    puts("[BT-POLICY] auto=OFF reason=SCAN; explicit Connect required");
     clock_bt_found_count = 0;
     clock_bt_name_pending = -1;
     memset(clock_bt_name_needed, 0, sizeof(clock_bt_name_needed));
@@ -234,7 +243,18 @@ void clock_a2dp_scan_stop(void){
         clock_bt_scan_running = false;
         gap_inquiry_stop();
     }
-    clock_reconnect_schedule();
+    puts("[BT-SCAN] Stopped; connection policy unchanged");
+}
+void clock_a2dp_boot_hold(bool hold){
+    clock_bt_boot_held=hold;
+    if (hold) clock_reconnect_cancel();
+    if (!clock_bt_stack_ready) return;
+    gap_connectable_control(clock_a2dp_autoconnect_enabled()?1:0);
+    if (!hold && clock_bt_retry_allowed(clock_autoconnect_target,
+        clock_bt_scan_requested || clock_bt_scan_running,clock_bt_switch_requested,
+        media_tracker.a2dp_cid!=0)) {
+        if (!clock_a2dp_connect_address(clock_autoconnect_target)) clock_reconnect_schedule();
+    }
 }
 bool clock_a2dp_has_link_key(const char *address){
     if (!address || strlen(address) != 17u) return false;
@@ -248,6 +268,20 @@ void clock_a2dp_clear_target(void){
     clock_reconnect_cancel();
     clock_autoconnect_target[0] = 0;
     clock_bt_switch_requested = false;
+    clock_connected_addr_valid = false;
+    clock_a2dp_stream_running = false;
+    clock_a2dp_stop_tone();
+    gap_connectable_control(0);
+    if (media_tracker.avrcp_cid) avrcp_disconnect(media_tracker.avrcp_cid);
+}
+void clock_a2dp_disconnect(void){
+    clock_a2dp_scan_stop();
+    clock_a2dp_clear_target();
+    puts("[BT-POLICY] auto=OFF reason=USER_DISCONNECT; pairing keys retained");
+    if (media_tracker.a2dp_cid) {
+        uint8_t rc=a2dp_source_disconnect(media_tracker.a2dp_cid);
+        printf("[BT] Disconnect requested status=0x%02x\n",rc);
+    }
 }
 bool clock_a2dp_forget(const char *address){
     if (!address || strlen(address) != 17u) return false;
@@ -283,14 +317,16 @@ bool clock_a2dp_select_target(const char *address){
     char previous_target[18];
     memcpy(previous_target, clock_autoconnect_target, sizeof(previous_target));
     memcpy(clock_autoconnect_target, address, 18u);
-    printf("[BT] Selected sink %s\n", clock_autoconnect_target);
-    if (!clock_bt_stack_ready) return true;
+    printf("[BT-POLICY] auto=ON reason=CONNECT target=%s\n", clock_autoconnect_target);
+    gap_connectable_control(clock_a2dp_autoconnect_enabled()?1:0);
+    if (!clock_bt_stack_ready || clock_bt_boot_held) return true;
     if (media_tracker.a2dp_cid != 0){
         clock_bt_switch_requested = true;
         uint8_t rc = a2dp_source_disconnect(media_tracker.a2dp_cid);
         if (rc != ERROR_CODE_SUCCESS){
             clock_bt_switch_requested = false;
             memcpy(clock_autoconnect_target, previous_target, sizeof(previous_target));
+            gap_connectable_control(clock_a2dp_autoconnect_enabled()?1:0);
             printf("[BT] switch disconnect failed 0x%02x\n", rc);
             clock_reconnect_schedule();
             return false;
@@ -306,8 +342,9 @@ bool clock_a2dp_select_target(const char *address){
 static void clock_reconnect_timer_handler(btstack_timer_source_t *timer){
     (void)timer;
     clock_reconnect_pending = false;
-    if (clock_autoconnect_target[0] == 0) return;
-    if (media_tracker.a2dp_cid != 0) return;
+    if (clock_bt_boot_held || !clock_bt_retry_allowed(clock_autoconnect_target,
+            clock_bt_scan_requested || clock_bt_scan_running,clock_bt_switch_requested,
+            media_tracker.a2dp_cid!=0)) return;
     printf("[BT] Reconnect attempt %u to %s\n",
            clock_reconnect_failures, clock_autoconnect_target);
     if (!clock_a2dp_connect_address(clock_autoconnect_target)){
@@ -316,9 +353,9 @@ static void clock_reconnect_timer_handler(btstack_timer_source_t *timer){
 }
 
 static void clock_reconnect_schedule(void){
-    if (clock_autoconnect_target[0] == 0 || clock_reconnect_pending ||
-        clock_bt_scan_requested || clock_bt_scan_running ||
-        clock_bt_switch_requested) return;
+    if (clock_bt_boot_held || clock_reconnect_pending || !clock_bt_retry_allowed(clock_autoconnect_target,
+        clock_bt_scan_requested || clock_bt_scan_running,clock_bt_switch_requested,
+        media_tracker.a2dp_cid!=0)) return;
     uint32_t index = clock_reconnect_failures < 3u ? clock_reconnect_failures : 2u;
     uint32_t delay = clock_backoff_ms[index];
     clock_reconnect_failures++;
@@ -382,6 +419,10 @@ set(_old_failed_connection [=[
                 break;
 ]=])
 set(_new_failed_connection [=[
+                if (cid && media_tracker.a2dp_cid && cid!=media_tracker.a2dp_cid) {
+                    puts("[BT-POLICY] Ignoring stale connection failure");
+                    break;
+                }
                 media_tracker.a2dp_cid = 0;
                 clock_connected_addr_valid = false;
                 if (clock_bt_scan_requested) clock_bt_scan_begin();
@@ -399,6 +440,13 @@ set(_old_connected [=[
             media_tracker.volume = 32;
 ]=])
 set(_new_connected [=[
+            if (clock_bt_boot_held || !clock_bt_target_accepts(clock_autoconnect_target,address,
+                    clock_bt_scan_requested || clock_bt_scan_running)) {
+                if (media_tracker.a2dp_cid==cid) clock_connected_addr_valid=false;
+                puts("[BT-POLICY] Reject signaling: disconnected/scanning or stale peer");
+                a2dp_source_disconnect(cid);
+                break;
+            }
             media_tracker.a2dp_cid = cid;
             memcpy(clock_connected_addr, address, 6);
             clock_connected_addr_valid = true;
@@ -425,7 +473,10 @@ set(_new_signal_released [=[
                     clock_bt_switch_requested = false;
                     if (!clock_a2dp_connect_address(clock_autoconnect_target))
                         clock_reconnect_schedule();
-                } else clock_reconnect_schedule();
+                } else {
+                    if (clock_autoconnect_target[0]) puts("[BT-POLICY] reason=LINK_LOST; retry permitted");
+                    clock_reconnect_schedule();
+                }
 ]=])
 string(FIND "${_source}" "${_old_signal_released}" _signal_release_pos)
 if(_signal_release_pos EQUAL -1)
@@ -494,10 +545,11 @@ void clock_a2dp_stop_tone(void){
 // True only after the A2DP media stream has started. Do not equate a
 // signaling-only connection with an audio-ready remote output.
 bool clock_a2dp_stream_active(void){
-    return clock_a2dp_stream_running;
+    return clock_a2dp_stream_running && clock_a2dp_autoconnect_enabled();
 }
 
 void clock_a2dp_print_status(void){
+    printf("[BT-POLICY] auto=%s target=%s\n",clock_a2dp_autoconnect_enabled()?"ON":"OFF",clock_a2dp_target());
     printf("[INFO] A2DP stream: %s; audio: %s; sample rate: %d Hz; samples remaining: %lu\n",
            clock_a2dp_stream_running ? "ACTIVE" : "INACTIVE",
            clock_pcm_ring_active() ? "MP3_PCM" : (clock_clip_playing ? "PCM_CLIP" : (clock_tone_samples_remaining ? "TONE" : "SILENCE")),
@@ -715,8 +767,10 @@ string(REPLACE "        case GAP_EVENT_INQUIRY_COMPLETE:"
 
 set(_bt_new_working [=[
         case  BTSTACK_EVENT_STATE:
-            if (btstack_event_state_get_state(packet) == HCI_STATE_WORKING)
+            if (btstack_event_state_get_state(packet) == HCI_STATE_WORKING){
                 clock_bt_stack_ready = true;
+                gap_connectable_control(clock_a2dp_autoconnect_enabled()?1:0);
+            }
 ]=])
 string(FIND "${_source}" "        case  BTSTACK_EVENT_STATE:" _bt_ready_found)
 if(_bt_ready_found EQUAL -1)
@@ -725,6 +779,47 @@ endif()
 string(REPLACE "        case  BTSTACK_EVENT_STATE:" "${_bt_new_working}" _source "${_source}")
 
 
+# Suppress incoming paging before application settings have been loaded.
+string(FIND "${_source}" "    gap_discoverable_control(1);" _paging_anchor)
+if(_paging_anchor EQUAL -1)
+    message(FATAL_ERROR "BTstack paging/discoverability initialization changed")
+endif()
+string(REPLACE "    gap_discoverable_control(1);"
+    "    gap_discoverable_control(0);\n    gap_connectable_control(0);" _source "${_source}")
+foreach(_event A2DP_SUBEVENT_STREAM_ESTABLISHED A2DP_SUBEVENT_STREAM_STARTED A2DP_SUBEVENT_STREAM_RECONFIGURED A2DP_SUBEVENT_STREAM_SUSPENDED A2DP_SUBEVENT_STREAM_RELEASED)
+    set(_event_anchor "        case ${_event}:")
+    string(FIND "${_source}" "${_event_anchor}" _event_pos)
+    if(_event_pos EQUAL -1)
+        message(FATAL_ERROR "BTstack stream event changed: ${_event}")
+    endif()
+    string(TOLOWER "${_event}" _event_getter)
+    set(_stream_policy "")
+    if(NOT _event STREQUAL "A2DP_SUBEVENT_STREAM_SUSPENDED" AND NOT _event STREQUAL "A2DP_SUBEVENT_STREAM_RELEASED")
+        set(_stream_policy "
+            if (clock_bt_boot_held || !clock_connected_addr_valid ||
+                !clock_bt_target_accepts(clock_a2dp_target(),clock_connected_addr,false)) {
+                puts(\"[BT-POLICY] Reject late stream event\");
+                if (media_tracker.a2dp_cid) a2dp_source_disconnect(media_tracker.a2dp_cid);
+                break;
+            }")
+    endif()
+    string(REPLACE "${_event_anchor}" "${_event_anchor}
+            cid = ${_event_getter}_get_a2dp_cid(packet);
+            if (cid!=media_tracker.a2dp_cid) {
+                puts(\"[BT-POLICY] Ignoring stale stream CID\");
+                break;
+            }${_stream_policy}" _source "${_source}")
+endforeach()
+string(REPLACE "Accepting Pairing - TODO: require actual user action" "Pairing restricted to explicitly selected sink" _source "${_source}")
+set(_pair_old "            gap_ssp_confirmation_response(address);")
+string(FIND "${_source}" "${_pair_old}" _pair_anchor)
+if(_pair_anchor EQUAL -1)
+    message(FATAL_ERROR "BTstack SSP confirmation handler changed")
+endif()
+string(REPLACE "${_pair_old}" "            if (!clock_bt_boot_held && clock_bt_target_accepts(clock_a2dp_target(),address,clock_a2dp_scan_active()))
+                gap_ssp_confirmation_response(address);
+            else gap_ssp_confirmation_negative(address);" _source "${_source}")
+
 # Apply AVRCP callbacks to the upstream generated source. These do not
 # overwrite the BTstack example in the SDK checkout.
 set(_clock_avrcp_connect_old [=[
@@ -732,10 +827,15 @@ set(_clock_avrcp_connect_old [=[
             avrcp_subevent_connection_established_get_bd_addr(packet, event_addr);
 ]=])
 set(_clock_avrcp_connect_new [=[
+            avrcp_subevent_connection_established_get_bd_addr(packet, event_addr);
+            if (clock_bt_boot_held || !clock_bt_target_accepts(clock_a2dp_target(),event_addr,clock_a2dp_scan_active())) {
+                puts("[BT-POLICY] Reject AVRCP: no matching selected sink");
+                avrcp_disconnect(local_cid);
+                return;
+            }
             media_tracker.avrcp_cid = local_cid;
             clock_bt_pcm_fallback = false;
             clock_bt_remote_volume = 255u;
-            avrcp_subevent_connection_established_get_bd_addr(packet, event_addr);
 ]=])
 string(FIND "${_source}" "${_clock_avrcp_connect_old}" _clock_avrcp_conn_at)
 if(_clock_avrcp_conn_at EQUAL -1)
@@ -751,6 +851,7 @@ set(_clock_avrcp_release_old [=[
 ]=])
 set(_clock_avrcp_release_new [=[
         case AVRCP_SUBEVENT_CONNECTION_RELEASED:
+            if (avrcp_subevent_connection_released_get_avrcp_cid(packet)!=media_tracker.avrcp_cid) return;
             printf("AVRCP Target: Disconnected, avrcp_cid 0x%02x\n", avrcp_subevent_connection_released_get_avrcp_cid(packet));
             media_tracker.avrcp_cid = 0;
             clock_bt_pcm_fallback = true;

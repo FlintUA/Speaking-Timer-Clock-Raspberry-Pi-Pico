@@ -14,7 +14,7 @@ GitHub CI runs this suite on Windows and Linux.
 
 If a local Windows/MSVC build misses a changed header (for example due to localized include diagnostics), use a fresh build directory or cmake --build build/host-tests --clean-first before rerunning CTest. The three-minute snooze change was verified with a fresh local build after an incremental cache retained an old object. GitHub CI uses fresh checkouts.
 
-The twelve suites cover:
+The thirteen suites cover:
 - Alarm validity, weekday filtering, leap/calendar boundaries, simultaneous slots, duplicate suppression and independent monotonic snooze deadlines/cancellation.
 - Calendar conversion, leap days, Europe/Berlin transitions, NTP era rollover, invalid headers and mismatched request nonces.
 - MAC parsing, unique combined catalogs and preservation of useful saved names.
@@ -25,6 +25,7 @@ The twelve suites cover:
 - LOCAL queue pause/resume using a mock DFPlayer: delayed UART readiness, pause-before-start, rapid pause/resume/pause, volume changes during pause, no EOF advancement during a long pause, delayed BUSY after resume, natural EOF and clearing pending resume for exit/priority interruption. These tests do not validate a physical DFPlayer clone.
 - Date speech RU/DE folder ordering, calendar-derived weekday, supported/unsupported year ranges, leap-day validation, ring wrap and all-or-nothing queue capacity. Nearest alarm covers disabled/invalid slots, weekday masks, ties, strict future selection, next-week, leap-day and year boundaries.
 - Annual birthday validation, co-due dates, persistent-year duplicate suppression/reboot, backward corrections, next year, leap-day behavior, no missed-minute catch-up and exact monotonic expiry across 32-bit milliseconds.
+- Bluetooth connection policy: chosen peer matching, old-peer rejection after switching, OFF during/after scan, repeated stale callback decisions, retry guards for active/connecting/switching states and malformed addresses. Flash roundtrip of the existing OFF marker preserves known devices, network, birthday/alarm settings and independent volumes. Real BTstack event timing and incoming-paging behavior require hardware acceptance.
 - Music sleep presets, deadline replacement/cancellation, rounded remaining minutes, exact expiry and a deadline crossing 32-bit milliseconds.
 - LCD cursor commands decoded from mocked PCF8574 writes: correct row/column and underline/blink/off controls, no repeated I2C traffic for unchanged focus, restoration after text repaint, bounds and failure handling. These do not validate the appearance of a physical LCD.
 
@@ -59,6 +60,15 @@ About reserves the second line for by FlintUA; version text is bounded to the LC
 Fetch tags before building if the checkout does not have them: git fetch --tags. A shallow checkout must include a reachable release tag, or fetch full history using git fetch --unshallow --tags. Tag creation alone does not alter firmware already installed on a board; rebuild and flash it.
 
 ## Device acceptance before stable release
+
+### Bluetooth explicit disconnect/scan policy (pending hardware acceptance)
+
+With Portable connected and audio idle, choose SETTINGS -> Bluetooth -> Disconnect (last entry, one CCW step from Scan devices) or send bt-disconnect. Expect auto=OFF, LOCAL fallback and both saved names/keys retained. Close settings, wait for autosave=OK, then confirm no reconnect after at least the longest existing retry interval (30 seconds). Power-cycle only after saving and verify OFF persists. Incoming reconnect attempts from Portable must not establish A2DP or start the tone.
+
+From a connected idle state, start discovery. Confirm auto=OFF and the previous link closes; check natural scan completion, MINUS cancellation, exit and the 20-second menu timeout separately. None should restore Portable. Compare bt-known before/after; names/pairing must remain. Save before reboot and repeat OFF verification. When browsing without actually scanning/disconnecting, an existing ON/retry policy should remain unchanged.
+
+Select Portable or Nest and confirm Connect (or use bt-use N/name/MAC). Expect normal connection, auto=ON and target persistence only after ACTIVE. Check saved-device selection without scanning, accidental speaker power loss/recovery, rapid disconnect followed by Connect/scan, and no stale callback reconnect to the previous peer. Verify independent LOCAL/BT volumes, Manual/hourly/timer/alarm preferences, birthdays and Wi-Fi/NTP remain unchanged. Current audio/timer/alarm ownership must refuse disconnect/scan safely. This update does not establish the cause of the intermittent double speaker sound; listen/log separately.
+
 
 ### Annual birthdays (UI/save broadly accepted; timed/audio coverage remains)
 

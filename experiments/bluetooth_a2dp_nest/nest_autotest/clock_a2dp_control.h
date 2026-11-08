@@ -28,6 +28,11 @@ const char *clock_a2dp_target(void);
 bool clock_a2dp_has_link_key(const char *address);
 bool clock_a2dp_forget(const char *address);
 void clock_a2dp_clear_target(void);
+// Preserve pairing keys. Empty target disables retry and incoming connections.
+void clock_a2dp_disconnect(void);
+bool clock_a2dp_autoconnect_enabled(void);
+// Application holds boot connections until persistent policy has been loaded.
+void clock_a2dp_boot_hold(bool hold);
 
 // Preferred 0..30 Bluetooth level: AVRCP Absolute Volume when available,
 // otherwise gain applied to the outgoing SBC PCM. Never changes DFPlayer.

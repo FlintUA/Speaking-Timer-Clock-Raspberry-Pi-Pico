@@ -64,11 +64,15 @@ LOCAL is the built-in DFPlayer output; BT is the currently selected external Blu
 
 ## Bluetooth
 
-The list contains Scan devices, saved speakers, then newly found addresses not already saved. One MAC appears once. LCD labels show names; unknown names use Saved speaker or Unknown device. USB diagnostics retain MAC addresses.
+The list contains Scan devices, saved speakers, newly found addresses not already saved, and Disconnect at the end. One MAC appears once. LCD labels show names; unknown names use Saved speaker or Unknown device. USB diagnostics retain MAC addresses.
 
-Press to choose a speaker, then press again to confirm. Backing out or timing out after discovery resumes the preferred target. Connection establishment is asynchronous; only an active stream with the selected MAC makes a new target eligible for autosave.
+Press to choose a speaker, then press again to confirm Connect. Selecting Disconnect or starting Scan devices clears the desired connection target, cancels retries and blocks incoming paging/pairing/streams until a new explicit Connect. Ending/cancelling a scan, backing out, timeout and simply closing Bluetooth never restore a disconnected target. Browsing without starting a scan or selecting Disconnect leaves the existing connection policy unchanged.
 
-USB commands: bt-scan, bt-scan-stop, bt-devices, bt-known, bt-use N|name|MAC, bt-target, bt-status, bt-forget N|MAC, bt-volume and bt-vol 0..30. Bare bt-forget prints usage and devices.
+Known device names and pairing keys are retained. The existing all-FF no-target marker persists OFF through deferred Flash autosave; close settings and wait for autosave=OK before removing power. No Flash format change is required. After reboot OFF remains in effect, including for builds with a legacy default speaker. Application boot connections are held until saved settings load. Explicit Connect re-enables reconnect in RAM; the selected MAC is saved only when its stream becomes ACTIVE. If it never connects, OFF remains saved.
+
+An unplanned link loss with a selected target still retries with the existing backoff. Late timer/signaling/stream callbacks cannot restore OFF or replace the selected peer with an old one. Disconnect does not power down the shared radio or Wi-Fi. BT output preferences and separate volume levels remain intact, using the existing LOCAL fallback. Stop playback before manual disconnect/scan; the existing timer/alarm/audio-busy guard applies. Bluetooth LCD status uses ON for streaming, RETRY for a selected offline target and OFF for no selected target. This policy update awaits device acceptance.
+
+USB commands: bt-disconnect, bt-scan, bt-scan-stop, bt-devices, bt-known, bt-use N|name|MAC, bt-target, bt-status, bt-forget N|MAC, bt-volume and bt-vol 0..30. Bare bt-forget prints usage and devices.
 
 ## Birthdays
 

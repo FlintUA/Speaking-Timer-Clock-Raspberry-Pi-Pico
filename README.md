@@ -24,7 +24,7 @@ The clock uses an I2C LCD1602, DS1302 RTC, DFPlayer Mini, two rotary encoders an
 
 Hardware tests confirm the relocated timer encoder, volume button, SPI SD/FAT32, MP3 reads and Bluetooth playback; see [test evidence](doc/HARDWARE_TEST_EVIDENCE.md). Registry v7 tests cover discovery, saving, Portable reconnection after power loss, deletion with autosave and Portable <-> Nest switching without scanning, followed by speech on both speakers. Switching initially returned status 0x56, then recovered through an automatic retry after five seconds; details are in the evidence summary. GP6 is reserved for external illumination; its PWM driver is not implemented.
 
-The release candidate adds unique device lists, saved-name retention and return to the preferred speaker after leaving discovery. The initial switch retry behavior is deliberately retained. New code validation is recorded separately from those earlier hardware passes.
+The release candidate added unique device lists, saved-name retention and return to the preferred speaker after leaving discovery. Current main supersedes that last behavior: Disconnect or starting a scan persists OFF until an explicit Connect, while retaining saved speakers/pairing. The initial switch retry behavior is deliberately retained. New code validation is recorded separately from those earlier hardware passes.
 
 ## Current wiring
 
@@ -84,7 +84,7 @@ See [network setup and time correction](doc/NETWORK_TIME.md). Use `-NoWifi` with
 4. After restart, the clock connects directly to the saved MAC without scanning. Retry intervals are 5, 10, then 30 seconds.
 5. `bt-known` shows saved names and pairing-key availability. `bt-forget N` removes a device and its key. Bare `bt-forget` prints usage and the device list.
 
-Menu and command numbering lists known devices first, then new scanned addresses. Each MAC appears once. Devices with identical names require selection by number or MAC. When all four slots are occupied, the earliest added entry is replaced. Leaving discovery without selecting another speaker resumes the preferred target.
+Menu and command numbering lists known devices first, then new scanned addresses. Each MAC appears once. Devices with identical names require selection by number or MAC. When all four slots are occupied, the earliest added entry is replaced. Disconnect is the last Bluetooth menu action; it retains devices/pairing and disables reconnect through saved OFF. Starting discovery also disables reconnect. Exiting, cancelling or timing out does not restore the old speaker. Choose and confirm a device to reconnect. Close settings and wait for autosave=OK before power-off. USB bt-disconnect provides the same action; bt-connect MAC is a compatibility alias for explicit selection via bt-use. Unplanned link loss still retries when a target is selected. This policy update awaits hardware acceptance.
 
 The LCD shows the speaker name. If unavailable, it shows Saved speaker or Unknown device. MAC addresses remain in USB logs for diagnostics and are used internally for identification and connection.
 

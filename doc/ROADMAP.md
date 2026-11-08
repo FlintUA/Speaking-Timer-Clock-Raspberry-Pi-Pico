@@ -7,7 +7,7 @@ This is the authoritative roadmap for the C firmware on main. Earlier MicroPytho
 Implemented for the first release candidate:
 - One combined Bluetooth device list per MAC, with known devices first.
 - Preserve saved speaker names when discovery returns an unknown-name fallback.
-- Resume the preferred connection when leaving Bluetooth browsing without choosing a new target.
+- The original release candidate resumed the preferred connection after browsing; current main replaces this with persistent manual OFF/scan behavior until explicit Connect.
 - Asynchronous Wi-Fi join and NTP time reference, hourly resynchronization and offline RTC operation.
 - Europe/Berlin CET/CEST conversion, including the last-Sunday March/October transitions.
 - Flash v8 Wi-Fi provisioning with v1-v7 read compatibility and unchanged sector boundaries.
@@ -20,7 +20,7 @@ Before declaring v1.0.0 stable:
 - Initial NTP synchronization and Bluetooth playback with Wi-Fi enabled are confirmed on build 7964939; extend this to an overnight run and hourly refresh/recovery checks.
 - Verify v7/v8/v9 -> v10 save/reboot with existing alarms, daily defaults, separate volumes, network settings and known speakers intact.
 - Test unavailable access point, unavailable NTP server and later recovery.
-- Verify Bluetooth list deduplication, name retention and return after leaving discovery.
+- Verify Bluetooth list deduplication/name retention and the new manual-disconnect/scan OFF policy, including reboot, late callbacks, speaker-initiated reconnect and explicit Connect restoring normal retries.
 - Verify alarm selection above track 45 using files present on both cards.
 - Verify the new updater build-identity check on Windows.
 - Complete an overnight run covering scheduled speech, timer and alarms.

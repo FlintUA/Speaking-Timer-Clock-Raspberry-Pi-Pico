@@ -1783,13 +1783,36 @@ static bool bt_menu_device(unsigned index, clock_bt_device_t *out) {
     return true;
 }
 static unsigned bt_menu_count(void) {
-    return 1u + bt_catalog_refresh();
+    return 2u + bt_catalog_refresh(); // Scan, devices, Disconnect. Device indices remain 1-based.
 }
 static const char *bt_lcd_name(unsigned index, const clock_bt_device_t *device) {
     // Legacy saved entries and discovery fallbacks can contain a MAC.
     // Keep the original name/address for connection and USB diagnostics.
     if (bt_name_usable(device->name)) return device->name;
     return index <= bt_known_count ? "Saved speaker" : "Unknown device";
+}
+static void bt_persist_disconnected(const char *reason) {
+    bt_pending_target_valid=false;
+    bt_pending_seen_disconnected=false;
+    memset(saved_bt_target_addr,0xff,sizeof(saved_bt_target_addr));
+    settings_mark_changed();
+    printf("[BT-POLICY] auto=OFF reason=%s; saved devices and pairing retained; Flash autosave pending\n",reason);
+}
+static bool bt_user_disconnect(void) {
+    if (!bt_sink_change_allowed()) {
+        puts("[BT] Disconnect refused: timer/alarm/audio busy; stop playback first");
+        return false;
+    }
+    clock_a2dp_disconnect();
+    bt_persist_disconnected("USER_DISCONNECT");
+    return true;
+}
+static bool bt_user_scan(void) {
+    if (!bt_sink_change_allowed()) return false;
+    bool started=clock_a2dp_scan_start();
+    // Scan may fail after the previous target was already disconnected.
+    if (!clock_a2dp_autoconnect_enabled()) bt_persist_disconnected("SCAN");
+    return started;
 }
 static bool bt_sink_select(const char *mac){
     unsigned b[6];
@@ -1848,7 +1871,7 @@ static void bt_scan_list(void){
            clock_a2dp_scan_active() ? "YES" : "NO",
            clock_a2dp_target());
     clock_bt_device_t d;
-    for (unsigned i=bt_known_count;i+1u<bt_menu_count();i++){
+    for (unsigned i=bt_known_count;i+2u<bt_menu_count();i++){
         if (bt_menu_device(i+1u,&d))
             printf("[BT-SCAN] %u address=%s name=%s rssi=%d\n",
                     i+1u,d.address,d.name,(int)d.rssi);
@@ -2186,10 +2209,12 @@ static void menu_commit(uint64_t now) {
             return;
         case MENU_BT_LIST:
 #ifdef CLOCK_ENABLE_A2DP
-            if (menu_bt_index == 0u) {
+            if (menu_bt_index==bt_menu_count()-1u) {
+                if (bt_user_disconnect()) puts("[MENU-BT] Disconnected; select a device to connect again");
+            } else if (menu_bt_index == 0u) {
                 if (!bt_sink_change_allowed()) {
                     puts("[MENU-BT] Scan blocked: timer/alarm/audio busy");
-                } else if (clock_a2dp_scan_start()) {
+                } else if (bt_user_scan()) {
                     menu_state = MENU_BT_SCANNING;
                     puts("[MENU-BT] Scanning; previous sink disconnected");
                 } else {
@@ -2262,7 +2287,7 @@ static void menu_back(uint64_t now) {
         puts("[MENU-BT] Search cancelled");
     } else if (menu_state == MENU_BT_LIST) {
 #ifdef CLOCK_ENABLE_A2DP
-        clock_a2dp_scan_stop(); // Resume the saved target after browsing.
+        clock_a2dp_scan_stop(); // Browsing never changes the explicit connection policy.
 #endif
         menu_state = MENU_LIST;
         puts("[MENU-BT] Back to settings");
@@ -2321,6 +2346,8 @@ static void menu_rotate(int direction, uint64_t now) {
                     printf("[MENU-BT] index=%u/%u name=%s MAC=%s\n",
                            (unsigned)(menu_bt_index + 1u), count,
                            device.name, device.address);
+                else if(menu_bt_index==count-1u)
+                    printf("[MENU-BT] index=%u/%u Disconnect\n",(unsigned)(menu_bt_index+1u),count);
                 else
                     printf("[MENU-BT] index=%u/%u Scan devices\n",
                            (unsigned)(menu_bt_index + 1u), count);
@@ -2468,7 +2495,7 @@ static void load_settings_at_boot(void) {
             target_cleared &= saved_bt_target_addr[k] == 0xffu;
         if (target_cleared) {
             clock_a2dp_clear_target();
-            puts("[BT] No preferred sink (explicitly cleared)");
+            puts("[BT-POLICY] auto=OFF at boot; explicit Connect required");
         } else if (address_saved) {
             char mac[18];
             snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -2510,6 +2537,9 @@ static void load_settings_at_boot(void) {
     // Boot never triggers a write just because records are absent.
     last_persisted_settings = settings_snapshot();
     autosave_pending = false;
+#ifdef CLOCK_ENABLE_A2DP
+    clock_a2dp_boot_hold(false);
+#endif
 }
 
 static void print_rtc_raw(const char *label, const uint8_t raw[7]) {
@@ -3049,14 +3079,16 @@ static void handle_command(char *line) {
         puts("[BOOTSEL] Usage: bootsel arm | bootsel confirm | bootsel cancel");
 #ifdef CLOCK_ENABLE_A2DP
     } else if (strncmp(line, "bt-connect ", 11) == 0) {
-        // Legacy one-shot debug connection (does not change stored preference).
+        // Compatibility alias uses the same explicit/persistent policy as bt-use.
         const char *address = line + 11;
-        if (!clock_a2dp_connect(address))
+        if (!bt_sink_select(address))
             puts("[BT] Direct connect rejected; use bt-use MAC for persistent selection");
+    } else if (strcmp(line,"bt-disconnect")==0) {
+        (void)bt_user_disconnect();
     } else if (strcmp(line, "bt-scan") == 0) {
         if (!bt_sink_change_allowed())
             puts("[BT-SCAN] Refused: timer/alarm/audio busy");
-        else if (!clock_a2dp_scan_start())
+        else if (!bt_user_scan())
             puts("[BT-SCAN] Not ready or scan already active");
         else puts("[BT-SCAN] Started, run bt-devices after ~10s");
     } else if (strcmp(line, "bt-scan-stop") == 0) {
@@ -3085,7 +3117,7 @@ static void handle_command(char *line) {
             // multiple devices advertise the same name.
             clock_bt_device_t device, selected;
             unsigned matches = 0;
-            for (unsigned i = 1u; i < bt_menu_count(); ++i) {
+            for (unsigned i = 1u; i+1u < bt_menu_count(); ++i) {
                 if (bt_menu_device(i, &device) && strcmp(device.name, argument) == 0) {
                     selected = device;
                     ++matches;
@@ -3482,7 +3514,7 @@ static void handle_command(char *line) {
         puts("[TIMER-AUDIO] timer-audio bt|local; timer-audio - timer start/cancel/finish routing");
         puts("[ALARM-AUDIO] alarm-audio bt|local; alarm-audio; alarm-audio-test 1; alarm-stop");
         puts("[AUDIO-SETTINGS] audio-settings shows persisted preferences; change with audio-select, auto-audio, timer-audio, alarm-audio; save");
-        puts("[BT] SETTINGS > Bluetooth: known devices, scan, connect; CLI: bt-scan, bt-devices, bt-use N|name|MAC, bt-forget N|MAC, bt-target");
+        puts("[BT] SETTINGS > Bluetooth: known devices, scan, connect, Disconnect; CLI: bt-disconnect, bt-scan, bt-devices, bt-use N|name|MAC, bt-forget N|MAC, bt-target");
         puts("[BT-VOL] bt-volume shows independent Bluetooth level; bt-vol 0..30 sets it; VOLUME encoder follows audio route");
         puts("[AUDIO-HEALTH] audio-health shows read-only owner, queue and Bluetooth status");
         puts("[ALARM-PENDING] alarm-pending, alarm-pending-test N, alarm-pending-clear (RAM only)");
@@ -4077,6 +4109,7 @@ int main(void) {
     radio_ready=cyw43_arch_init()==PICO_OK;
     puts(radio_ready?"[RADIO] Initialized":"[RADIO] Unavailable; clock continues offline");
 #ifdef CLOCK_ENABLE_A2DP
+    clock_a2dp_boot_hold(true);
     if (radio_ready) printf("[BT] btstack_main=%d\n",btstack_main(0,NULL));
 #endif
 #endif
@@ -4322,7 +4355,7 @@ int main(void) {
 #ifdef CLOCK_ENABLE_A2DP
         if (menu_state == MENU_BT_SCANNING && !clock_a2dp_scan_active()) {
             menu_state = MENU_BT_LIST;
-            menu_bt_index = bt_menu_count() > 1u ? 1u : 0u;
+            menu_bt_index = bt_menu_count() > 2u ? 1u : 0u;
             menu_last_input_ms = now;
             printf("[MENU-BT] scan complete, devices=%u\n",
                    clock_a2dp_scan_count());
@@ -4414,12 +4447,7 @@ int main(void) {
             snprintf(bottom,sizeof(bottom),"%02u:%02u:%02u",
                 (unsigned)timer_editor.hour,(unsigned)timer_editor.minute,
                 (unsigned)timer_editor.second);
-        } else if(menu_state==MENU_BIRTHDAY_LIST) {
-        menu_state=MENU_LIST;
-    } else if(menu_state>=MENU_BIRTHDAY_ENABLED && menu_state<=MENU_BIRTHDAY_MINUTE) {
-        if(menu_state==MENU_BIRTHDAY_ENABLED) menu_state=MENU_BIRTHDAY_LIST;
-        else menu_state=(menu_state_t)(menu_state-1);
-    } else if (menu_state == MENU_ABOUT) {
+        } else if (menu_state == MENU_ABOUT) {
             if (menu_about_version) {
                 snprintf(top, sizeof(top), "v%.15s", CLOCK_DISPLAY_VERSION);
                 snprintf(bottom, sizeof(bottom), "by FlintUA");
@@ -4452,9 +4480,11 @@ int main(void) {
             unsigned count = bt_menu_count();
             snprintf(top, sizeof(top), "BT %u/%u %s",
                      (unsigned)(menu_bt_index + 1u), count,
-                     clock_a2dp_stream_active() ? "ON" : "OFF");
+                     clock_a2dp_stream_active() ? "ON" : clock_a2dp_autoconnect_enabled()?"RETRY":"OFF");
             if (menu_bt_index == 0u)
                 snprintf(bottom, sizeof(bottom), "Scan devices");
+            else if (menu_bt_index==count-1u)
+                snprintf(bottom,sizeof(bottom),"Disconnect");
             else {
                 clock_bt_device_t d;
                 if (bt_menu_device(menu_bt_index, &d))

@@ -165,6 +165,24 @@ int main(void) {
     assert(!strcmp(roundtrip.wifi_password,migrated.wifi_password));
     assert(roundtrip.bt_volume==migrated.bt_volume && roundtrip.volume==migrated.volume);
     assert(!memcmp(roundtrip.bt_known,migrated.bt_known,sizeof(roundtrip.bt_known)));
+    // Disconnect/scan use the existing explicit-no-target marker, retaining bonds and every other setting.
+    clock_settings_t disabled=roundtrip;
+    memset(disabled.bt_target_addr,0xff,sizeof(disabled.bt_target_addr));
+    assert(settings_store_save(&disabled)==SETTINGS_STORE_OK);
+    clock_settings_t off;
+    assert(settings_store_load(&off)==SETTINGS_STORE_OK);
+    for(unsigned i=0;i<6;++i) assert(off.bt_target_addr[i]==0xff);
+    assert(off.bt_known_count==roundtrip.bt_known_count);
+    assert(!memcmp(off.bt_known,roundtrip.bt_known,sizeof(off.bt_known)));
+    assert(off.volume==roundtrip.volume && off.bt_volume==roundtrip.bt_volume);
+    assert(off.audio_manual_jbl==roundtrip.audio_manual_jbl && off.audio_alarm_jbl==roundtrip.audio_alarm_jbl);
+    assert(!strcmp(off.wifi_ssid,roundtrip.wifi_ssid) && !strcmp(off.wifi_password,roundtrip.wifi_password));
+    assert(off.alarms[0].weekdays==roundtrip.alarms[0].weekdays);
+    assert(off.birthdays[0].day==29 && off.birthdays[0].last_year==2024);
+    // Restore the previous fixture layout before the independent corruption test.
+    memset(test_flash,0xff,sizeof(test_flash));
+    memcpy(test_flash+SLOT0_OFFSET,&v9,sizeof(v9));
+    assert(settings_store_save(&roundtrip)==SETTINGS_STORE_OK);
     migrated.birthdays[0].month=4; migrated.birthdays[0].day=31;
     assert(settings_store_save(&migrated)==SETTINGS_STORE_UNSUPPORTED);
     settings_record_v10_t corrupt;
