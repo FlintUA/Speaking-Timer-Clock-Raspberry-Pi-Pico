@@ -92,7 +92,7 @@ birthday-pending-clear
 
 birthday-set uses slot/day/month/hour/minute/on-or-off and rejects invalid dates. birthday-test queues a RAM-only playback test using normal quiet/priority/expiry rules, even for a disabled slot; it does not change the saved date or handled year. It refuses to replace an already waiting occurrence. birthday-pending-clear discards waiting notifications without resetting saved years. BOOTSEL refuses while a birthday notification is waiting. No test command generates a saved date automatically.
 
-Flash v10 adds five dates and their handled years; v1-v9 load with all birthday slots disabled. Physical menu, melody, routing and save/reboot acceptance remain pending.
+Flash v10 adds five dates and their handled years; v1-v9 load with all birthday slots disabled. The user broadly accepted the feature in build 7964939; COM8 confirms configured dates saved as v10. Timed firing, output-specific melody, expiry and repeat-suppression/reboot cases remain focused coverage checks.
 
 ## Alarms
 

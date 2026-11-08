@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Added five annual birthday dates under Birthdays (settings item 9; About becomes 10), with complete draft editing and USB status/configuration/test commands. Existing 07/000.mp3 follows Manual routing and LOCAL fallback. Events wait for idle, non-quiet audio for up to 30 minutes. Flash v10 retains v1-v9 loading and adds persistent dates/handled years, with birthdays disabled on migration. One-time reminders are excluded by user request. Host migration/calendar tests pass; physical acceptance is pending.
+- Added five annual birthday dates under Birthdays (settings item 9; About becomes 10), with complete draft editing and USB status/configuration/test commands. Existing 07/000.mp3 follows Manual routing and LOCAL fallback. Events wait for idle, non-quiet audio for up to 30 minutes. Flash v10 retains v1-v9 loading and adds persistent dates/handled years, with birthdays disabled on migration. One-time reminders are excluded by user request. Host migration/calendar tests pass. The user broadly accepted build 7964939 and COM8 confirmed saved v10 dates with prior settings intact; detailed timed/audio coverage remains in TESTING.md.
 
 - Added idle-clock MINUS short date and hold next-alarm information, plus USB say-date/next-alarm. Date speech uses existing RU/DE recordings; nearest occurrence honors weekday masks, calendar boundaries and RAM snoozes. Manual audio routing/fallback is retained. A nonblocking startup LCD/version splash adds no extra sound. Host tests and repository date-asset checks pass; the user broadly accepted the functionality after build 02b4a51 was installed. Detailed language/output/fallback coverage remains in TESTING.md.
 

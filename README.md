@@ -18,7 +18,7 @@ The clock uses an I2C LCD1602, DS1302 RTC, DFPlayer Mini, two rotary encoders an
 - One volume encoder controls the active output. DFPlayer and Bluetooth volume levels are stored separately.
 - Bluetooth discovery, selection by name/MAC, automatic SSP pairing, up to four known devices and direct connection to the saved MAC.
 - Optional Wi-Fi/NTP correction with Europe/Berlin CET/CEST and offline RTC fallback.
-- Five annual birthday dates with menu/USB editing and the existing melody; device acceptance pending. One-time reminders are excluded.
+- Five annual birthday dates with menu/USB editing and the existing melody; user-accepted configuration/save, with timed/audio coverage tracked in TESTING.md. One-time reminders are excluded.
 - Flash settings v10 reads formats v1-v9, stores birthday dates/handled years, alarm weekday masks and Wi-Fi provisioning, and supports alarm music tracks through 255. BTstack stores pairing keys separately. See [migration and rollback](doc/NETWORK_TIME.md#settings-compatibility-and-rollback).
 - Read-only FAT32 and MP3 access on the SPI microSD card.
 

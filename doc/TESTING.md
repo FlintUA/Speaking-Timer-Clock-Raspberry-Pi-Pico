@@ -60,7 +60,9 @@ Fetch tags before building if the checkout does not have them: git fetch --tags.
 
 ## Device acceptance before stable release
 
-### Annual birthdays (pending hardware acceptance)
+### Annual birthdays (UI/save broadly accepted; timed/audio coverage remains)
+
+Build 7964939 was installed with separate approval. The user broadly accepted the feature, and COM8 confirms configured dates in a v10 record alongside the previous v9 fallback, with prior settings retained. Exact firing/expiry and output-specific melody cases below are still coverage checks.
 
 Before upgrading, retain alarm-status, audio-settings and bt-known snapshots. After the v10-capable firmware starts, birthday-status must show five disabled, valid January 1/09:00 defaults when loaded from v9; loading alone must not write a v10 record. Compare alarms, masks, volumes, outputs, speaker names/pairing and network status. Never print Wi-Fi passwords.
 
