@@ -11,6 +11,7 @@
 #include "ds1302.h"
 #include "lcd1602_i2c.h"
 #include "countdown.h"
+#include "timer_controls.h"
 #include "alarm_engine.h"
 #include "controls.h"
 #include "dfplayer.h"
@@ -56,6 +57,8 @@ static int detect_lcd_address(void) {
 }
 
 static countdown_t timer;
+static timer_editor_t timer_editor;
+static timer_acceleration_t timer_acceleration;
 // Five daily alarms; legacy v1/v2 loads disabled defaults.
 // v3 persists alarm entries alongside existing settings.
 static alarm_entry_t alarms[CLOCK_ALARM_COUNT];
@@ -80,10 +83,12 @@ static uint8_t active_alarm_hour, active_alarm_minute;
 static bool active_alarm_test;
 static uint64_t active_alarm_due_ms;
 static void alarm_stop(const char *reason);
+static void alarm_preview_stop(const char *reason);
 static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
                               uint64_t now, bool test);
 static void alarm_pending_service(uint64_t now);
 static void music_ui_close(const char *reason);
+static void music_ui_stop(const char *reason);
 static char command_line[160];
 static size_t command_length;
 // BOOTSEL is intentionally a two-step, time-limited serial operation.
@@ -172,7 +177,8 @@ typedef enum {
     MENU_BT_LIST,
     MENU_BT_SCANNING,
     MENU_BT_CONFIRM,
-    MENU_ABOUT
+    MENU_ABOUT,
+    MENU_TIMER_EDITOR
 } menu_state_t;
 static menu_state_t menu_state;
 static uint8_t menu_index;
@@ -864,7 +870,7 @@ static void alarm_pending_service(uint64_t now) {
 }
 
 static void timer_start_now(uint64_t now) {
-    if (alarm_ui_state != ALARM_UI_CLOSED || music_ui_open) {
+    if (alarm_ui_state != ALARM_UI_CLOSED || music_ui_open || menu_state==MENU_TIMER_EDITOR) {
         puts("[TIMER] start blocked: close UI/player first");
         return;
     }
@@ -1106,8 +1112,9 @@ static void toggle_sound(void) {
     sound_enabled = !sound_enabled;
     volume_overlay_until_ms = to_ms_since_boot(get_absolute_time()) + VOLUME_OVERLAY_MS;
     if (!sound_enabled) {
+        if (music_ui_open) music_ui_stop("SOUND_OFF");
+        alarm_preview_stop("SOUND_OFF");
         audio_queue_clear(&audio_queue, true);
-        if (music_ui_open) music_ui_playing = false;
     }
     printf("[AUDIO] sound=%s\n", sound_enabled ? "ON" : "OFF");
 }
@@ -1827,6 +1834,17 @@ static void menu_begin_edit(uint64_t now) {
 static void menu_commit(uint64_t now) {
     menu_last_input_ms = now;
     switch (menu_state) {
+        case MENU_TIMER_EDITOR: {
+            uint32_t seconds;
+            if (timer_editor_confirm(&timer_editor,&seconds)) {
+                countdown_set_duration(&timer,seconds);
+                menu_close();
+                timer_acceleration=(timer_acceleration_t){0};
+                timer_start_now(now);
+                puts("[TIMER-EDIT] confirmed; countdown started");
+            }
+            return;
+        }
         case MENU_ABOUT:
             return; // Information only; rotate TIMER to change pages.
         case MENU_EDIT_LANGUAGE:
@@ -1965,6 +1983,8 @@ static void menu_back(uint64_t now) {
     menu_last_input_ms = now;
     if (menu_state == MENU_LIST) {
         menu_close();
+    } else if (menu_state == MENU_TIMER_EDITOR) {
+        if (timer_editor_back(&timer_editor)) menu_close();
     } else if (menu_state == MENU_ABOUT) {
         menu_state = MENU_LIST;
         puts("[MENU-ABOUT] Back to settings");
@@ -1999,6 +2019,9 @@ static void menu_rotate(int direction, uint64_t now) {
     if (menu_state == MENU_CLOSED) return;
     menu_last_input_ms = now;
     switch (menu_state) {
+        case MENU_TIMER_EDITOR:
+            timer_editor_rotate(&timer_editor,direction);
+            break;
         case MENU_LIST:
             menu_index = (uint8_t)((menu_index + SETTINGS_MENU_ITEMS +
                                   (direction > 0 ? 1u : SETTINGS_MENU_ITEMS - 1u)) %
@@ -3173,6 +3196,8 @@ static void handle_command(char *line) {
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[NETWORK] wifi-config SSID|password; wifi-clear; ntp-status; ntp-sync; version");
         puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
+        puts("[INPUT] GP28=timer H/M/S editor; TIMER/SETTINGS=next/start; MINUS=back; GP28=cancel; quick encoder=1/5/10 min");
+        puts("[INPUT] VOLUME push=sound toggle in clock/settings/player/editor; ringing alarm uses ALARM=stop");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
     } else if (strcmp(line, "version") == 0) {
         printf("[VERSION] %s build=%s board=pico2_w\n",
@@ -3525,20 +3550,21 @@ static void on_control_event(const control_event_t *event, void *context) {
             menu_rotate(event->direction, now);
             return;
         }
-        // One minute per encoder event; don't edit a running timer.
-        if (!timer.running) {
-            int32_t duration = (int32_t)timer.duration_seconds + (int32_t)event->direction * 60;
-            if (duration < 1) duration = 1;
-            if (duration > 14400) duration = 14400;
-            countdown_set_duration(&timer, (uint32_t)duration);
+        if (!timer.running && alarm_active_index<0) {
+            unsigned step;
+            uint32_t duration=timer_quick_adjust(&timer_acceleration,
+                timer.duration_seconds,event->direction,now,&step);
+            countdown_set_duration(&timer,duration);
             timer_screen = true;
             finished_screen_until_ms = 0;
-            printf("[TIMER] selected=%lus\n", (unsigned long)timer.duration_seconds);
+            printf("[TIMER] selected=%lus step=%umin\n", (unsigned long)timer.duration_seconds,step);
         }
     } else {
         printf("[INPUT] button %s %s\n",
                controls_button_name(event->button),
                event->type == CONTROL_BUTTON_PRESS ? "PRESS" : "RELEASE");
+        if (event->type==CONTROL_BUTTON_PRESS)
+            timer_acceleration=(timer_acceleration_t){0};
         // Press/release separation prevents a long ALARM hold from
         // briefly opening the short-press alarm editor.
         if (event->button == BUTTON_ALARM) {
@@ -3569,6 +3595,11 @@ static void on_control_event(const control_event_t *event, void *context) {
         }
         // During ringing, only ALARM stop and VOLUME remain interactive.
         if (alarm_active_index >= 0) return;
+        // Sound toggle is available before the player/editor consume buttons.
+        if (event->button==BUTTON_VOLUME && event->type==CONTROL_BUTTON_PRESS) {
+            toggle_sound();
+            return;
+        }
         if (music_ui_open) {
             if (event->type == CONTROL_BUTTON_PRESS) {
                 if (event->button == BUTTON_TIMER ||
@@ -3586,6 +3617,20 @@ static void on_control_event(const control_event_t *event, void *context) {
                 } else if (event->button == BUTTON_TIMER ||
                            event->button == BUTTON_SETTINGS) alarm_ui_next(now);
                 else if (event->button == BUTTON_MINUS) alarm_ui_back(now);
+            }
+            return;
+        }
+        if (event->type==CONTROL_BUTTON_PRESS && event->button==BUTTON_TIMER_MODE) {
+            if (menu_state==MENU_TIMER_EDITOR) {
+                menu_close();
+                puts("[TIMER-EDIT] cancelled; duration unchanged");
+            } else if (menu_state==MENU_CLOSED && !timer.running) {
+                timer_editor_open(&timer_editor,timer.duration_seconds);
+                timer_acceleration=(timer_acceleration_t){0};
+                menu_state=MENU_TIMER_EDITOR;
+                menu_last_input_ms=now;
+                finished_screen_until_ms=0;
+                puts("[TIMER-EDIT] HOURS; TIMER/SETTINGS=next MINUS=back GP28=cancel");
             }
             return;
         }
@@ -3623,9 +3668,7 @@ static void on_control_event(const control_event_t *event, void *context) {
             }
             return;
         }
-        if (event->button == BUTTON_VOLUME && event->type == CONTROL_BUTTON_PRESS) {
-            toggle_sound();
-        } else if (event->button == BUTTON_TIMER && event->type == CONTROL_BUTTON_PRESS) {
+        if (event->button == BUTTON_TIMER && event->type == CONTROL_BUTTON_PRESS) {
             if (timer.running) {
                 timer_cancel_now();
                 puts("[TIMER] CANCELLED by button");
@@ -3904,7 +3947,7 @@ int main(void) {
                      music_ui_bluetooth ? "BT" : "LOCAL");
             snprintf(bottom, sizeof(bottom), "T%02u %s",
                      (unsigned)music_ui_track,
-                     music_ui_playing ? "PLAY" : "STOP");
+                     !sound_enabled ? "MUTED" : music_ui_playing ? "PLAY" : "STOP");
         } else if (alarm_ui_state == ALARM_UI_LIST) {
             const alarm_entry_t *a = &alarms[alarm_ui_index];
             snprintf(top, sizeof(top), "ALARM %u/5 %s",
@@ -3937,6 +3980,13 @@ int main(void) {
             snprintf(top, sizeof(top), "SETTINGS %u/%u",
                      (unsigned)(menu_index + 1u), (unsigned)SETTINGS_MENU_ITEMS);
             snprintf(bottom, sizeof(bottom), "%s", menu_item_name(menu_index));
+        } else if (menu_state == MENU_TIMER_EDITOR) {
+            snprintf(top,sizeof(top),"TIMER SET %s",
+                timer_editor.field==TIMER_FIELD_HOUR?"HOUR":
+                timer_editor.field==TIMER_FIELD_MINUTE?"MIN":"SEC");
+            snprintf(bottom,sizeof(bottom),"%02u:%02u:%02u",
+                (unsigned)timer_editor.hour,(unsigned)timer_editor.minute,
+                (unsigned)timer_editor.second);
         } else if (menu_state == MENU_ABOUT) {
             if (menu_about_version) {
                 snprintf(top, sizeof(top), "v%.15s", CLOCK_DISPLAY_VERSION);

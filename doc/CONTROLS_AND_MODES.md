@@ -8,8 +8,9 @@ This document describes main, starting with 1.0.0-rc.1. The previous MicroPython
 | --- | --- |
 | Volume encoder | Adjust the active audio output; LOCAL and Bluetooth levels are separate |
 | Volume encoder button | Toggle sound on/off |
-| Timer encoder | Adjust an idle countdown in one-minute steps, bounded to 1..14400 seconds |
+| Timer encoder | Adjust an idle countdown in minutes, with accelerated steps of 1/5/10 minutes, bounded to 1..240 minutes |
 | Timer encoder button | Start or cancel the countdown |
+| TIMER_MODE (GP28) | Open the hours/minutes/seconds editor; press again to cancel its draft |
 | SETTINGS | Open settings |
 | ALARM short press | Open/close the alarm editor |
 | ALARM hold, at least 900 ms | Open the music player when idle |
@@ -17,6 +18,8 @@ This document describes main, starting with 1.0.0-rc.1. The previous MicroPython
 | MODE hold, at least 900 ms | Announce current time when idle |
 
 While an alarm rings, ALARM stops it and volume remains adjustable. Timer/alarm/audio ownership can block settings or playback actions. GPIO events for other original front-panel labels may be logged without an assigned new action.
+
+The precise timer editor starts from the selected duration. TIMER or SETTINGS advances HOUR -> MIN -> SEC; confirming SEC commits the duration and starts the countdown. MINUS goes to the previous field, or cancels from HOUR. GP28 and the 20-second idle timeout cancel without changing the selected duration. Values wrap within each field; the limit is exactly 04:00:00 and a zero duration starts as one second. The editor is unavailable during a running countdown, alarm, player or another menu. Quick minute adjustment discards sub-minute precision; use the editor for seconds. Consecutive same-direction detents less than 260 ms apart reach 5-minute steps on the third detent and 10-minute steps on the fifth. A pause or direction reversal resets acceleration.
 
 ## Settings
 
@@ -51,6 +54,8 @@ Snooze and weekday schedules are planned, not part of this release.
 ## Music player
 
 Hold ALARM to enter while idle. The timer encoder chooses a track; TIMER or SETTINGS starts/stops it. MINUS or ALARM exits. The player uses a no-repeat shuffled playlist and advances after a completed track. Volume remains available.
+
+The volume encoder button toggles sound in the player and alarm editor as well as on the main/settings screens. Muting stops active music on either output and shows MUTED in the player. Unmuting does not restart music; press TIMER to start it. Separate LOCAL/Bluetooth levels are retained. During a ringing alarm the existing policy is unchanged: use ALARM to stop it; rotating volume remains available.
 
 The output follows the manual audio preference when entering the player. Bluetooth requires matching folder 08 files on the SPI FAT32 card. A lost Bluetooth link falls back to LOCAL. UI stop is not a position-preserving pause; separate mp3-pause/mp3-resume commands exist for direct playback diagnostics.
 

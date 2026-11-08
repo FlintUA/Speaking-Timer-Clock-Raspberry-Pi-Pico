@@ -28,6 +28,8 @@ Before declaring v1.0.0 stable:
 
 ## Next functional milestones
 
+Control restoration stage 1 is implemented, awaiting hardware acceptance: GP28 HOUR/MIN/SEC timer editor, accelerated minute selection and player/editor sound toggle. Stage 2 restores the richer MicroPython player: normal/shuffle/repeat-one, immediate Next/Previous with history, consistent physical controls and mode/count display. Position-preserving pause needs separate LOCAL/Bluetooth transport work; the old MicroPython pause restarted the track.
+
 1. Alarm snooze and weekday schedules, with explicit editor and storage changes.
 2. Music sleep timer and selectable playback modes; preserve existing no-repeat shuffle and audio priorities.
 3. Spoken date and nearest-alarm information, plus a dedicated startup indication. The two-page LCD About screen is implemented.

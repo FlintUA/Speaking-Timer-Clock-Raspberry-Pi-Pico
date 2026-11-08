@@ -24,6 +24,7 @@ add_executable(speaking_clock_c
     drivers/ds1302.c
     drivers/lcd1602_i2c.c
     app/countdown.c
+    app/timer_controls.c
     app/alarm_engine.c
     app/clock_time.c
     drivers/controls.c
