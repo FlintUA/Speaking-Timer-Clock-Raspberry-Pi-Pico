@@ -1,6 +1,6 @@
 # Confirmed hardware test evidence
 
-This summary covers the assembled Pico 2 W clock on COM8. It reconstructs results from project records and user tests; it is not a new hardware run.
+This summary covers the assembled Pico 2 W clock on COM8. Each section identifies its evidence source: direct COM8 verification, user tests or reconstructed historical project records. Software-only results and remaining physical checks are stated separately.
 
 ## November 8 weekday/snooze firmware smoke test
 
