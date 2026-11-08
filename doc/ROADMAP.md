@@ -17,7 +17,7 @@ Implemented for the first release candidate:
 - Current English controls, network setup, release notes and hardware acceptance instructions.
 
 Before declaring v1.0.0 stable:
-- Test Wi-Fi/NTP alongside A2DP and MP3 on the assembled clock.
+- Initial NTP synchronization and Bluetooth playback with Wi-Fi enabled are confirmed on build 7964939; extend this to an overnight run and hourly refresh/recovery checks.
 - Verify v7/v8/v9 -> v10 save/reboot with existing alarms, daily defaults, separate volumes, network settings and known speakers intact.
 - Test unavailable access point, unavailable NTP server and later recovery.
 - Verify Bluetooth list deduplication, name retention and return after leaving discovery.
@@ -36,7 +36,7 @@ Stage 2 playback/navigation was accepted by the user. Pause and sleep selection 
 2. Music sleep timer and position-preserving pause on LOCAL/Bluetooth are implemented. The user accepted pause, time selection and the explicit OFF field; full expiry and separate LOCAL/BT coverage remain acceptance checks. GP28 cycles OFF/15/30/60/90 minutes; TIMER pauses/resumes. Existing playlist modes and audio priorities are retained. See TESTING.md for checks on both outputs.
 3. Spoken date, nearest scheduled/snoozed alarm and a nonblocking LCD startup/version splash are implemented and broadly user-accepted in build 02b4a51. Idle-clock MINUS short/hold and USB say-date/next-alarm expose date/forecast. Available year recordings cover 2023..2029; German alarm-slot phrases are absent. No new startup sound is queued. The two-page LCD About screen remains available.
 4. Five annual birthday dates are implemented and broadly user-accepted in build 7964939; COM8 confirms configured dates saved in v10 and prior settings retained: menu/USB editing, persistent dates/handled years (Flash v10), existing 07/000.mp3 melody via Manual routing, idle/non-quiet delivery with 30-minute expiry. The user explicitly excluded one-time reminders because suitable spoken recordings are absent. February 29 matches only in leap years.
-5. Offline RTC drift calibration remains conditional on measured need. The assembled board still reports Wi-Fi/NTP unconfigured. First provision the existing network feature locally, verify synchronization/coexistence, then compare a trustworthy reference over several days before choosing a drift rate. A fixed initial clock offset alone is not a rate measurement; the historical MicroPython calibration required at least five days between trusted references. No C drift correction has been added or enabled.
+5. Offline RTC drift calibration remains conditional on measured need. The assembled board now has confirmed NTP synchronization and user-verified Bluetooth playback with Wi-Fi enabled. Next verify sustained operation/recovery, then compare a trustworthy reference over several days before choosing a drift rate. A fixed initial clock offset alone is not a rate measurement; the historical MicroPython calibration required at least five days between trusted references. No C drift correction has been added or enabled.
 6. Complete the electrical schematic for the installed Pico 2 W wiring and power modules.
 
 Each milestone requires focused tests and a hardware acceptance step. The statuses above distinguish implemented follow-up work from remaining plans; the first release candidate predates these follow-up changes.

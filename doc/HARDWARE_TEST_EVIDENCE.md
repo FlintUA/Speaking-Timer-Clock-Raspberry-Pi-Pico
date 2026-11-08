@@ -2,6 +2,12 @@
 
 This summary covers the assembled Pico 2 W clock on COM8. Each section identifies its evidence source: direct COM8 verification, user tests or reconstructed historical project records. Software-only results and remaining physical checks are stated separately.
 
+## November 8 Wi-Fi/NTP and Bluetooth coexistence
+
+After local provisioning with configure-wifi.ps1 on build 7964939, a direct read-only COM8 check reported configured=YES, radio=READY and synced=YES for Europe/Berlin, with offset=3600 and last_sync_age=16s. RTC output continued. Portable remained A2DP ACTIVE at 44100 Hz. Flash guard was OK, both A/B records were valid v10 (sequences 88/87), and autosave was IDLE. Credentials were neither read back nor included in the diagnostic output. COM8 was released afterward.
+
+The user then confirmed Bluetooth playback works with Wi-Fi enabled. This establishes initial NTP synchronization and basic audio coexistence, not an overnight run, hourly resynchronization, network-outage recovery, reboot persistence of provisioning, DST on hardware or a measured offline drift rate. The sanitized local transcript is build/diagnostics/wifi-first-status.log (ignored by Git).
+
 ## User acceptance before the three-minute snooze change
 
 The user confirmed weekday alarm setup/firing and the delayed repeat work on the five-minute version. They then requested a shorter three-minute delay. After build 91d2fc7 was installed with separate approval, the user reported that it works correctly. This is user acceptance rather than a supplied timed measurement or complete serial transcript.
