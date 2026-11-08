@@ -63,10 +63,12 @@ Hold ALARM to enter while idle. Playback now starts automatically when sound is 
 | SETTINGS or clockwise TIMER rotation | Next, immediately requests playback |
 | MINUS or counterclockwise TIMER rotation | Previous selection from history, immediately requests playback |
 | ALARM short press | Cycle SHUF -> REP1 -> NORM -> SHUF without interrupting the current track |
-| ALARM or MODE hold, at least 900 ms | Stop and exit |
+| ALARM, MODE or MINUS hold, at least 900 ms | Stop and exit |
 | Volume rotation / button | Adjust active output / toggle sound |
 
 NORM advances through track numbers and wraps at the end. SHUF plays every track once per uninterrupted forward cycle and delays the last seven selections until the tail of the next cycle (fewer for small libraries). REP1 repeats the current track at EOF; explicit Next can still skip it. Previous walks up to 128 selections, and Next can walk forward through that history. Manual navigation can intentionally replay tracks. Changing mode discards forward history. Without earlier history, Previous in NORM wraps by track number; in other modes it restarts the selected track.
+
+MINUS acts on release: a short press selects Previous, while a hold exits without briefly starting a previous track. Both actions remain available.
 
 The first LCD line shows mode and effective output, for example MUSIC SHUF BT. The second shows selected track/count and PLAY, STOP, WAIT or MUTED. WAIT represents a pending start while transport ownership or the preceding LOCAL pause command settles. Rapid navigation replaces the pending selection with the latest one. Muted navigation selects tracks without starting playback.
 

@@ -240,6 +240,8 @@ static bool half_hour_enabled;
 static uint8_t clock_mode; // 0=VOICE, 1=CHIME.
 static uint64_t mode_pressed_at_ms;
 static bool mode_press_active;
+static uint64_t music_minus_pressed_at_ms;
+static bool music_minus_pressed;
 static uint64_t speech_overlay_until_ms;
 static char speech_overlay_time[17];
 static uint64_t volume_overlay_until_ms;
@@ -1229,6 +1231,7 @@ static void music_ui_close(const char *reason) {
     music_ui_stop(reason);
     music_ui_open = false;
     mode_press_active=false;
+    music_minus_pressed=false;
     timer_screen = false;
     printf("[MUSIC-UI] closed=%s\n", reason);
 }
@@ -1324,7 +1327,7 @@ static void music_ui_enter(void) {
     timer_screen = false;
     printf("[MUSIC-UI] output=%s, BT music requires /08/NNN.mp3 on SPI FAT32\n",
            music_ui_bluetooth ? "BT" : "LOCAL");
-    printf("[MUSIC-UI] opened tracks=%u track=%u mode=SHUF; TIMER=PLAY/STOP SETTINGS=NEXT MINUS=PREV ALARM=MODE; hold ALARM/MODE=EXIT\n",
+    printf("[MUSIC-UI] opened tracks=%u track=%u mode=SHUF; TIMER=PLAY/STOP SETTINGS=NEXT MINUS=PREV ALARM=MODE; hold ALARM/MODE/MINUS=EXIT\n",
            (unsigned)music_track_count,(unsigned)music_ui_track);
     music_ui_start();
 }
@@ -3141,7 +3144,7 @@ static void handle_command(char *line) {
         puts("[ALARM-PENDING] alarm-pending, alarm-pending-test N, alarm-pending-clear (RAM only)");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[NETWORK] wifi-config SSID|password; wifi-clear; ntp-status; ntp-sync; version");
-        puts("[INPUT] ALARM short=alarm editor; ALARM hold >=900ms=music; MUSIC TIMER=play/stop, encoder/SETTINGS/MINUS=next/previous, ALARM=mode; hold ALARM/MODE=exit");
+        puts("[INPUT] ALARM short=alarm editor; ALARM hold >=900ms=music; MUSIC TIMER=play/stop, encoder/SETTINGS/MINUS=next/previous, ALARM=mode; hold ALARM/MODE/MINUS=exit");
         puts("[INPUT] GP28=timer H/M/S editor; TIMER/SETTINGS=next/start; MINUS=back; GP28=cancel; quick encoder=1/5/10 min");
         puts("[INPUT] VOLUME push=sound toggle in clock/settings/player/editor; ringing alarm uses ALARM=stop");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
@@ -3552,11 +3555,19 @@ static void on_control_event(const control_event_t *event, void *context) {
             if (event->type == CONTROL_BUTTON_PRESS) {
                 if (event->button==BUTTON_TIMER) music_ui_toggle();
                 else if(event->button==BUTTON_SETTINGS) music_ui_rotate(1);
-                else if(event->button==BUTTON_MINUS) music_ui_rotate(-1);
+                else if(event->button==BUTTON_MINUS) {
+                    music_minus_pressed=true;
+                    music_minus_pressed_at_ms=now;
+                }
                 else if(event->button==BUTTON_MODE) {
                     mode_press_active=true;
                     mode_pressed_at_ms=now;
                 }
+            } else if(event->type==CONTROL_BUTTON_RELEASE &&
+                      event->button==BUTTON_MINUS && music_minus_pressed) {
+                music_minus_pressed=false;
+                if(now-music_minus_pressed_at_ms>=900u) music_ui_close("MINUS_HOLD");
+                else music_ui_rotate(-1);
             } else if(event->type==CONTROL_BUTTON_RELEASE &&
                       event->button==BUTTON_MODE && mode_press_active) {
                 mode_press_active=false;

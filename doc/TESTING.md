@@ -57,6 +57,12 @@ Restored timer controls require device checks: GP28 editor entry/cancel, HOUR/MI
 
 For the extended player, check LOCAL and BT with Portable/Nest: automatic play on entry, mode cycling without restarting the current song, NORM advancement, REP1 at EOF, explicit Next in REP1, Previous/forward history, rapid encoder changes, PLAY/STOP, mute and both hold-to-exit paths. Check automatic EOF advancement and Bluetooth loss: current track restarts on LOCAL without a playlist skip. Verify all output menus/statuses say BT and both bt/jbl CLI spellings work. These new control/transport paths still need hardware acceptance; host playlist tests do not replace it.
 
+The user subsequently confirmed the extended player works. The additional MINUS hold exit still needs a device check: short release selects Previous; release after at least 900 ms exits without starting another track.
+
+## Long USB Bluetooth capture
+
+Close other COM monitors, then run tools/capture-pico-log.ps1 -Port COM8 -Minutes 30 -LogPath build/diagnostics/bluetooth.log. The capture records all received lines with PC UTC timestamps. It sends only version, bt-status, audio-settings and ntp-status once at startup; it does not scan, pair, play or flash. An optional -StopFile path ends capture when that file appears, releasing the port. Record the audible event time to distinguish A2DP suspend/start, signaling reconnection and speaker-local sounds. Logs under build are ignored by Git.
+
 Follow [network acceptance](NETWORK_TIME.md#hardware-acceptance) and [firmware verification](../firmware/pico2w_c/README.md#on-device-verification). In addition:
 - Start discovery, select no new device and exit; the preferred connection must resume.
 - Find a saved speaker again; it must appear once and keep its useful name even if discovery reports Unknown.
