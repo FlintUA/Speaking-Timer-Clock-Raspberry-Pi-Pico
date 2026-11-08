@@ -2,6 +2,29 @@
 #include "clock_time.h"
 #include <string.h>
 
+int alarm_next_occurrence(const alarm_entry_t alarms[CLOCK_ALARM_COUNT],
+                          const ds1302_datetime_t *now, ds1302_datetime_t *next) {
+    uint64_t wall, best=UINT64_MAX;
+    if (!alarms || !next || !clock_datetime_to_utc(now,&wall)) return -1;
+    int slot=-1;
+    uint64_t midnight=wall-wall%86400u;
+    for (unsigned day=0;day<=7;++day) {
+        ds1302_datetime_t date;
+        if (!clock_utc_to_datetime(midnight+(uint64_t)day*86400u,&date)) continue;
+        for (unsigned i=0;i<CLOCK_ALARM_COUNT;++i) {
+            const alarm_entry_t *a=&alarms[i];
+            if (!a->enabled || !alarm_entry_valid(a) ||
+                !alarm_day_matches(a,date.year,date.month,date.day)) continue;
+            uint64_t due=midnight+(uint64_t)day*86400u+(uint64_t)a->hour*3600u+(uint64_t)a->minute*60u;
+            if (due<=wall || due>=best) continue;
+            best=due;
+            slot=(int)i;
+        }
+    }
+    if (slot>=0 && !clock_utc_to_datetime(best,next)) return -1;
+    return slot;
+}
+
 void alarm_defaults(alarm_entry_t alarms[CLOCK_ALARM_COUNT]) {
     if (!alarms) return;
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {

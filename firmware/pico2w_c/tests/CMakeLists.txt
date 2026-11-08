@@ -19,12 +19,15 @@ add_executable(timer_controls_test timer_controls_test.c "${APP}/timer_controls.
 add_executable(music_playlist_test music_playlist_test.c "${APP}/music_playlist.c")
 add_executable(music_sleep_test music_sleep_test.c "${APP}/music_sleep.c")
 add_executable(audio_queue_test audio_queue_test.c "${CMAKE_CURRENT_LIST_DIR}/../audio/queue.c")
+add_executable(speech_plan_test speech_plan_test.c "${CMAKE_CURRENT_LIST_DIR}/../audio/speech.c"
+    "${CMAKE_CURRENT_LIST_DIR}/../audio/queue.c" "${APP}/clock_time.c")
+target_include_directories(speech_plan_test PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../audio" "${CMAKE_CURRENT_LIST_DIR}/../drivers")
 target_include_directories(audio_queue_test PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../audio" "${CMAKE_CURRENT_LIST_DIR}/../drivers")
 add_executable(settings_store_test settings_store_test.c "${APP}/alarm_engine.c" "${APP}/clock_time.c")
 add_executable(lcd_cursor_test lcd_cursor_test.c "${CMAKE_CURRENT_LIST_DIR}/../drivers/lcd1602_i2c.c")
 target_include_directories(lcd_cursor_test PRIVATE mocks "${CMAKE_CURRENT_LIST_DIR}/../drivers")
 target_include_directories(settings_store_test PRIVATE mocks)
-foreach(test alarm_engine clock_time bt_catalog settings_store timer_controls music_playlist music_sleep audio_queue lcd_cursor)
+foreach(test alarm_engine clock_time bt_catalog settings_store timer_controls music_playlist music_sleep audio_queue speech_plan lcd_cursor)
     add_test(NAME ${test} COMMAND ${test}_test)
 endforeach()
 add_test(NAME git_version COMMAND "${CMAKE_COMMAND}"

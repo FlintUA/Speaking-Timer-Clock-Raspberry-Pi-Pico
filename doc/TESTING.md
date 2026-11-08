@@ -14,7 +14,7 @@ GitHub CI runs this suite on Windows and Linux.
 
 If a local Windows/MSVC build misses a changed header (for example due to localized include diagnostics), use a fresh build directory or cmake --build build/host-tests --clean-first before rerunning CTest. The three-minute snooze change was verified with a fresh local build after an incremental cache retained an old object. GitHub CI uses fresh checkouts.
 
-The ten suites cover:
+The eleven suites cover:
 - Alarm validity, weekday filtering, leap/calendar boundaries, simultaneous slots, duplicate suppression and independent monotonic snooze deadlines/cancellation.
 - Calendar conversion, leap days, Europe/Berlin transitions, NTP era rollover, invalid headers and mismatched request nonces.
 - MAC parsing, unique combined catalogs and preservation of useful saved names.
@@ -23,6 +23,7 @@ The ten suites cover:
 - Precise timer draft/confirmation/cancellation, field wrapping and four-hour limit, accelerated minute selection and monotonic one-shot countdown completion.
 - Music modes, repeat-one versus explicit Next, backward/forward history, bounded history retention, single-track libraries and shuffle cycle/boundary protection for 2, 7, 8, 78 and 255 tracks.
 - LOCAL queue pause/resume using a mock DFPlayer: delayed UART readiness, pause-before-start, rapid pause/resume/pause, volume changes during pause, no EOF advancement during a long pause, delayed BUSY after resume, natural EOF and clearing pending resume for exit/priority interruption. These tests do not validate a physical DFPlayer clone.
+- Date speech RU/DE folder ordering, calendar-derived weekday, supported/unsupported year ranges, leap-day validation, ring wrap and all-or-nothing queue capacity. Nearest alarm covers disabled/invalid slots, weekday masks, ties, strict future selection, next-week, leap-day and year boundaries.
 - Music sleep presets, deadline replacement/cancellation, rounded remaining minutes, exact expiry and a deadline crossing 32-bit milliseconds.
 - LCD cursor commands decoded from mocked PCF8574 writes: correct row/column and underline/blink/off controls, no repeated I2C traffic for unchanged focus, restoration after text repaint, bounds and failure handling. These do not validate the appearance of a physical LCD.
 
@@ -57,6 +58,13 @@ About reserves the second line for by FlintUA; version text is bounded to the LC
 Fetch tags before building if the checkout does not have them: git fetch --tags. A shallow checkout must include a reachable release tag, or fetch full history using git fetch --unshallow --tags. Tag creation alone does not alter firmware already installed on a board; rebuild and flash it.
 
 ## Device acceptance before stable release
+
+### Date/next-alarm/startup update (pending hardware acceptance)
+
+Power-cycle and check the short version splash, responsive controls and subsequent normal clock. Confirm no new startup sound beyond existing Bluetooth behavior. On an idle clock, MINUS short should show/announce the date; hold at least 900 ms should show/announce the next eligible alarm. Check both languages and Manual=LOCAL/BT, required date folders on both cards, full date versus supported spoken year, and LOCAL fallback if a Bluetooth date segment is unavailable. USB say-date and next-alarm offer repeatable requests without changing schedules.
+
+Using existing schedules, compare the forecast with alarm-status and today's weekday. Confirm the earliest enabled match and the date on LCD. For changes to schedules, retain the original values and restore them afterward. Check an active snooze as the nearer occurrence, no-enabled-alarm display, mute (LCD without speech), no interruption of a timer/alarm/player, MINUS back/Previous/hold-to-exit behavior on the existing screens, and intact MODE time announcement. Host tests cover recurrence/calendar logic, but RAM-snooze forecast and actual speech/routing require device acceptance. This stage has not been flashed yet.
+
 
 ### Player pause and sleep update (partial user acceptance)
 

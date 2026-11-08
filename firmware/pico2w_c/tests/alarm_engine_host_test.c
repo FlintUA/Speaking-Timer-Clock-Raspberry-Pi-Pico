@@ -114,6 +114,37 @@ int main(void) {
     alarm_snooze_schedule(&snoozes[0],363000,23,59,false);
     snoozes[0].pending=false; // Explicit cancellation / restart.
     assert(!alarm_snooze_take(&snoozes[0],1000000,&due));
+    // Nearest occurrence uses real weekdays and crosses calendar boundaries.
+    alarm_entry_t next_alarms[CLOCK_ALARM_COUNT];
+    alarm_defaults(next_alarms);
+    ds1302_datetime_t current={.year=2026,.month=11,.day=8,.hour=15,.minute=0};
+    ds1302_datetime_t next={0};
+    assert(alarm_next_occurrence(next_alarms,&current,&next)==-1);
+    next_alarms[0].enabled=true;
+    next_alarms[0].hour=15; next_alarms[0].minute=1;
+    assert(alarm_next_occurrence(next_alarms,&current,&next)==0 && next.day==8 && next.minute==1);
+    next_alarms[1]=next_alarms[0]; // Equal dates/times prefer lower slot.
+    assert(alarm_next_occurrence(next_alarms,&current,&next)==0);
+    next_alarms[0].weekdays=CLOCK_ALARM_DAYS_WEEKDAYS;
+    assert(alarm_next_occurrence(next_alarms,&current,&next)==1);
+    next_alarms[1].enabled=false;
+    assert(alarm_next_occurrence(next_alarms,&current,&next)==0 && next.day==9 && next.weekday==1);
+    next_alarms[0].weekdays=0x40; // Sunday only; current minute has already begun.
+    next_alarms[0].minute=0;
+    assert(alarm_next_occurrence(next_alarms,&current,&next)==0 && next.day==15);
+    current=(ds1302_datetime_t){.year=2026,.month=12,.day=31,.hour=23,.minute=59,.second=59};
+    next_alarms[0].weekdays=CLOCK_ALARM_DAYS_ALL;
+    next_alarms[0].hour=0;
+    assert(alarm_next_occurrence(next_alarms,&current,&next)==0 && next.year==2027 && next.month==1 && next.day==1);
+    current=(ds1302_datetime_t){.year=2024,.month=2,.day=28,.hour=23,.minute=59};
+    assert(alarm_next_occurrence(next_alarms,&current,&next)==0 && next.month==2 && next.day==29);
+    current.day=29;
+    assert(alarm_next_occurrence(next_alarms,&current,&next)==0 && next.month==3 && next.day==1);
+    next_alarms[0].weekdays=0;
+    assert(alarm_next_occurrence(next_alarms,&current,&next)==-1);
+    assert(alarm_next_occurrence(0,&current,&next)==-1);
+    assert(alarm_next_occurrence(next_alarms,0,&next)==-1);
+    assert(alarm_next_occurrence(next_alarms,&current,0)==-1);
     puts("alarm_engine_host_test: PASS");
     return 0;
 }

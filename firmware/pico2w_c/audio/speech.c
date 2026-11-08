@@ -1,4 +1,21 @@
 #include "speech.h"
+#include "clock_time.h"
+
+bool speech_enqueue_date(audio_queue_t *queue, speech_language_t language,
+                         const ds1302_datetime_t *date) {
+    uint64_t wall;
+    ds1302_datetime_t normalized;
+    if (!queue || !clock_datetime_to_utc(date,&wall) ||
+        !clock_utc_to_datetime(wall,&normalized)) return false;
+    unsigned count=date->year>=2023 && date->year<=2029 ? 4u : 3u;
+    if (queue->size+count>AUDIO_QUEUE_CAPACITY) return false;
+    uint8_t offset=language==SPEECH_DE?10u:0u;
+    audio_queue_enqueue(queue,(uint8_t)(6u+offset),normalized.weekday);
+    audio_queue_enqueue(queue,(uint8_t)(3u+offset),date->day);
+    audio_queue_enqueue(queue,(uint8_t)(4u+offset),date->month);
+    if (count==4u) audio_queue_enqueue(queue,(uint8_t)(5u+offset),(uint8_t)(date->year%10));
+    return true;
+}
 
 // Confirmed language mappings from source/v3/audio.py:
 // RU hours 01, minutes 02, service phrases 07

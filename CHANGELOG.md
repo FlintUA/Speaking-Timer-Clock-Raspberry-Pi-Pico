@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Show an explicit OFF in the player sleep field instead of a blank. Compact PLAY/PAUS/STOP/WAIT/MUTE labels keep OFF and remaining minutes in the same position within 16 columns. Playback and deadline behavior are unchanged; physical acceptance of this display follow-up is pending.
+- Added idle-clock MINUS short date and hold next-alarm information, plus USB say-date/next-alarm. Date speech uses existing RU/DE recordings; nearest occurrence honors weekday masks, calendar boundaries and RAM snoozes. Manual audio routing/fallback is retained. A nonblocking startup LCD/version splash adds no extra sound. Host tests and repository date-asset checks pass; physical speech/routing and splash acceptance are pending.
+
+- Show an explicit OFF in the player sleep field instead of a blank. Compact PLAY/PAUS/STOP/WAIT/MUTE labels keep OFF and remaining minutes in the same position within 16 columns. Playback and deadline behavior are unchanged; the user accepted this display follow-up in build fa38eaf.
 
 - Added position-preserving player pause/resume on TIMER for LOCAL (paced DFPlayer pause/resume with queue state retained) and Bluetooth (existing decoder/PCM pause). Added GP28 sleep presets OFF/15/30/60/90 minutes, remaining-minute display and silent stop/exit at a monotonic deadline, including during pause. Both features are RAM-only; playlist modes, audio priorities and Flash format are retained. Host tests pass; physical LOCAL/BT acceptance is pending.
 

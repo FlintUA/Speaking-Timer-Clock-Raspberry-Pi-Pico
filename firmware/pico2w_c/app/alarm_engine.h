@@ -1,6 +1,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include "clock_datetime.h"
 
 // Mirrors source/v3/config.py: five daily alarms, default OFF at 07..11:00.
 // Music tracks are 1..255, from folder 08; the editor uses detected count.
@@ -49,6 +50,10 @@ typedef struct {
 
 void alarm_defaults(alarm_entry_t alarms[CLOCK_ALARM_COUNT]);
 bool alarm_entry_valid(const alarm_entry_t *alarm);
+// Next strictly future scheduled occurrence in local wall time, not a UTC instant.
+// Equal times choose the lowest slot. Snoozes/deferred playback are caller-owned.
+int alarm_next_occurrence(const alarm_entry_t alarms[CLOCK_ALARM_COUNT],
+                          const ds1302_datetime_t *now, ds1302_datetime_t *next);
 void alarm_scheduler_init(alarm_scheduler_t *state);
 
 // Returns first due index (0..4), or -1. Each alarm is emitted at most once

@@ -110,7 +110,7 @@ static bool routed_test_pending;
 static uint8_t routed_test_folder, routed_test_track;
 // Manual speech routing is intentionally separate from the production queue.
 // Normal automatic alarms, timer messages and hourly speech remain LOCAL.
-static audio_track_t bt_speech_tracks[2];
+static audio_track_t bt_speech_tracks[AUDIO_QUEUE_CAPACITY];
 static uint8_t bt_speech_count, bt_speech_index;
 static bool bt_speech_running, bt_speech_track_started;
 // Timer sounds have an independent nonblocking Bluetooth playback owner.
@@ -247,6 +247,9 @@ static bool half_hour_enabled;
 static uint8_t clock_mode; // 0=VOICE, 1=CHIME.
 static uint64_t mode_pressed_at_ms;
 static bool mode_press_active;
+static bool info_press_active;
+static uint64_t info_pressed_at_ms, info_overlay_until_ms;
+static char info_overlay_top[17], info_overlay_bottom[17];
 static uint64_t music_minus_pressed_at_ms;
 static bool music_minus_pressed;
 static uint64_t speech_overlay_until_ms;
@@ -699,6 +702,21 @@ static void bt_speech_fallback(const char *reason) {
     bt_speech_track_started = false;
     printf("[BT-SPEECH] LOCAL fallback reason=%s queued=%u\n", reason, queued);
 }
+static bool bt_speech_plan_start(const audio_queue_t *plan) {
+    if (!plan || !plan->size || plan->size>AUDIO_QUEUE_CAPACITY ||
+        bt_speech_running || bt_timer_running || bt_alarm_running ||
+        routed_test_pending || mp3_play_active() || mp3_probe_active() ||
+        sd_fat32_stream_active() || !audio_queue_idle(&audio_queue) ||
+        dfplayer_busy() || timer.running || alarm_active_index>=0 || music_ui_open) return false;
+    for (unsigned i=0;i<plan->size;++i)
+        bt_speech_tracks[i]=plan->items[(plan->head+i)%AUDIO_QUEUE_CAPACITY];
+    bt_speech_count=plan->size;
+    bt_speech_index=0;
+    bt_speech_track_started=false;
+    bt_speech_running=true;
+    printf("[BT-SPEECH] INFO START segments=%u\n",(unsigned)bt_speech_count);
+    return true;
+}
 static bool bt_speech_start(uint8_t hour, uint8_t minute, bool automatic) {
     if (bt_speech_running || routed_test_pending || mp3_play_active() ||
         mp3_probe_active() || sd_fat32_stream_active() ||
@@ -802,6 +820,80 @@ static void announce_rtc_time(void) {
         return;
     }
     announce_time(dt.hour, dt.minute);
+}
+
+static void announce_info_plan(const audio_queue_t *plan) {
+    if (!sound_enabled || !audio_queue_idle(&audio_queue) || dfplayer_busy() ||
+        timer.running || alarm_active_index>=0 || music_ui_open ||
+        menu_state!=MENU_CLOSED || alarm_ui_state!=ALARM_UI_CLOSED ||
+        mp3_play_active() || mp3_probe_active() || sd_fat32_stream_active()) {
+        puts("[INFO] Speech skipped: mute or audio/UI busy; LCD information retained");
+        return;
+    }
+#ifdef CLOCK_ENABLE_A2DP
+    if (bt_speech_running || bt_timer_running || bt_alarm_running || routed_test_pending) return;
+    if (audio_router.requested==AUDIO_OUTPUT_BT_JBL && clock_a2dp_stream_active() &&
+        clock_a2dp_current_rate()==44100u) {
+        (void)bt_speech_plan_start(plan);
+        return;
+    }
+#endif
+    for (unsigned i=0;i<plan->size;++i) {
+        audio_track_t t=plan->items[(plan->head+i)%AUDIO_QUEUE_CAPACITY];
+        audio_queue_enqueue(&audio_queue,t.folder,t.track);
+    }
+}
+
+static void announce_clock_info(bool nearest_alarm) {
+    ds1302_datetime_t now_dt, date;
+    uint64_t wall;
+    if (!ds1302_read_datetime(&now_dt) || !clock_datetime_to_utc(&now_dt,&wall)) {
+        puts("[INFO] RTC unavailable");
+        return;
+    }
+    date=now_dt;
+    uint64_t now_ms=to_ms_since_boot(get_absolute_time());
+    audio_queue_t plan={0};
+    int slot=-1;
+    bool snooze=false;
+    if (nearest_alarm) {
+        slot=alarm_next_occurrence(alarms,&now_dt,&date);
+        uint64_t best=UINT64_MAX;
+        if (slot>=0) (void)clock_datetime_to_utc(&date,&best);
+        for (unsigned i=0;i<CLOCK_ALARM_COUNT;++i) {
+            if (!alarm_snoozes[i].pending) continue;
+            uint64_t left=alarm_snoozes[i].deadline_ms>now_ms ?
+                (alarm_snoozes[i].deadline_ms-now_ms+999u)/1000u : 0u;
+            uint64_t due=wall+left;
+            ds1302_datetime_t due_date;
+            if (due<best && clock_utc_to_datetime(due,&due_date)) {
+                best=due;
+                date=due_date;
+                slot=(int)i;
+                snooze=true;
+            }
+        }
+        if (slot<0) {
+            snprintf(info_overlay_top,sizeof(info_overlay_top),"NEXT ALARM");
+            snprintf(info_overlay_bottom,sizeof(info_overlay_bottom),"None enabled");
+            info_overlay_until_ms=now_ms+4000u;
+            puts("[INFO] NEXT ALARM: none enabled");
+            return;
+        }
+        snprintf(info_overlay_top,sizeof(info_overlay_top),"%s A%u %02u:%02u",
+            snooze?"SNOOZE":"NEXT",(unsigned)slot+1u,(unsigned)date.hour,(unsigned)date.minute);
+        if (language==SPEECH_RU) audio_queue_enqueue(&plan,7u,(uint8_t)(slot+1));
+    } else snprintf(info_overlay_top,sizeof(info_overlay_top),"DATE %s",speech_language_name(language));
+    snprintf(info_overlay_bottom,sizeof(info_overlay_bottom),"%02u.%02u.%04u",
+        (unsigned)date.day,(unsigned)date.month,(unsigned)date.year);
+    info_overlay_until_ms=now_ms+4000u;
+    if (!speech_enqueue_date(&plan,language,&date)) return;
+    if (nearest_alarm && !speech_enqueue_time(&plan,language,date.hour,date.minute,exact_hour_phrase)) return;
+    printf("[INFO] %s slot=%d date=%04u-%02u-%02u time=%02u:%02u%s\n",
+        nearest_alarm?"NEXT_ALARM":"DATE",slot+1,(unsigned)date.year,(unsigned)date.month,
+        (unsigned)date.day,(unsigned)date.hour,(unsigned)date.minute,snooze?" snooze":"");
+    if (date.year<2023 || date.year>2029) puts("[INFO] No year recording; spoken year omitted, LCD keeps full year");
+    announce_info_plan(&plan);
 }
 
 static void alarm_pending_add(unsigned index, uint8_t hour,
@@ -3275,7 +3367,12 @@ static void handle_command(char *line) {
         puts("[INPUT] ALARM short=alarm editor; ALARM hold >=900ms=music; MUSIC TIMER=play/stop, encoder/SETTINGS/MINUS=next/previous, ALARM=mode; hold ALARM/MODE/MINUS=exit");
         puts("[INPUT] GP28=timer H/M/S editor; TIMER/SETTINGS=next/start; MINUS=back; GP28=cancel; quick encoder=1/5/10 min");
         puts("[INPUT] VOLUME push=sound toggle in clock/settings/player/editor; ringing alarm uses ALARM=stop");
+        puts("[INFO] MINUS short=date, hold >=900ms=next alarm on idle clock; say-date / next-alarm via USB");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
+    } else if (strcmp(line, "say-date") == 0) {
+        announce_clock_info(false);
+    } else if (strcmp(line, "next-alarm") == 0) {
+        announce_clock_info(true);
     } else if (strcmp(line, "version") == 0) {
         printf("[VERSION] %s build=%s board=pico2_w\n",
                CLOCK_FIRMWARE_VERSION,CLOCK_BUILD_ID);
@@ -3768,6 +3865,16 @@ static void on_control_event(const control_event_t *event, void *context) {
             else menu_commit(now);
             return;
         }
+        if (event->button==BUTTON_MINUS && menu_state==MENU_CLOSED) {
+            if (event->type==CONTROL_BUTTON_PRESS) {
+                info_press_active=true;
+                info_pressed_at_ms=now;
+            } else if (event->type==CONTROL_BUTTON_RELEASE && info_press_active) {
+                info_press_active=false;
+                if (!timer.running) announce_clock_info(now-info_pressed_at_ms>=900u);
+            }
+            return;
+        }
         if (event->button == BUTTON_MODE) {
             // MicroPython: short ST/MO switches voice/chime; long speaks time.
             if (event->type == CONTROL_BUTTON_PRESS) {
@@ -3855,6 +3962,8 @@ int main(void) {
     char rtc_bottom[17] = "Check GP2/5/4";
     uint64_t next_rtc_ms = 0;
     uint32_t previous_remaining = UINT32_MAX;
+    uint64_t startup_until_ms=to_ms_since_boot(get_absolute_time())+1600u;
+    puts("[STARTUP] Nonblocking LCD version splash; no startup audio queued");
     while (true) {
 #ifdef CLOCK_ENABLE_A2DP
         // Persist a newly selected sink only after it has REALLY established
@@ -4235,6 +4344,12 @@ int main(void) {
         } else if (alarm_active_index >= 0) {
             snprintf(top, sizeof(top), "ALARM %d RINGING", alarm_active_index + 1);
             snprintf(bottom, sizeof(bottom), "A=STOP TM=SNOOZE");
+        } else if (info_overlay_until_ms && now < info_overlay_until_ms && !timer.running) {
+            snprintf(top,sizeof(top),"%s",info_overlay_top);
+            snprintf(bottom,sizeof(bottom),"%s",info_overlay_bottom);
+        } else if (startup_until_ms && now<startup_until_ms && !timer.running && !timer_screen) {
+            snprintf(top,sizeof(top),"Speaking Clock");
+            snprintf(bottom,sizeof(bottom),"v%.15s",CLOCK_DISPLAY_VERSION);
         } else if (mode_overlay_until_ms && now < mode_overlay_until_ms) {
             snprintf(top, sizeof(top), "CLOCK MODE");
             snprintf(bottom, sizeof(bottom), "%s", clock_mode ? "CHIME" : "VOICE");

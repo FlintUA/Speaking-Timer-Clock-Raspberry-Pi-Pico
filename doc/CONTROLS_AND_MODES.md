@@ -12,6 +12,8 @@ This document describes main, starting with 1.0.0-rc.1. The previous MicroPython
 | Timer encoder button | Start or cancel the countdown |
 | TIMER_MODE (GP28) | Open the hours/minutes/seconds editor; press again to cancel its draft |
 | SETTINGS | Open settings |
+| MINUS short press on release | Show and announce the date while the clock is idle |
+| MINUS hold, at least 900 ms, on release | Show and announce the next scheduled/snoozed alarm while the clock is idle |
 | ALARM short press | Open/close the alarm editor |
 | ALARM hold, at least 900 ms | Open the music player when idle |
 | MODE short press | Switch VOICE/CHIME |
@@ -20,6 +22,16 @@ This document describes main, starting with 1.0.0-rc.1. The previous MicroPython
 While an alarm rings, ALARM stops it, TIMER_MODE/GP28 snoozes it for three minutes and volume remains adjustable. Timer/alarm/audio ownership can block settings or playback actions.
 
 The precise timer editor starts from the selected duration. TIMER or SETTINGS advances HOUR -> MIN -> SEC; confirming SEC commits the duration and starts the countdown. MINUS goes to the previous field, or cancels from HOUR. GP28 and the 20-second idle timeout cancel without changing the selected duration. Values wrap within each field; the limit is exactly 04:00:00 and a zero duration starts as one second. The editor is unavailable during a running countdown, alarm, player or another menu. Quick minute adjustment discards sub-minute precision; use the editor for seconds. Consecutive same-direction detents less than 260 ms apart reach 5-minute steps on the third detent and 10-minute steps on the fifth. A pause or direction reversal resets acceleration.
+
+## Date, next alarm and startup
+
+MINUS short press on the idle clock shows the full date for four seconds and requests speech in the selected language. MINUS hold (at least 900 ms) shows the nearest strictly future enabled alarm occurrence, honoring weekday masks and calendar boundaries; equal scheduled times choose the lowest slot. Pending RAM snoozes are compared against the weekly schedule and can win. Already-due deferred alarm playback is separate from this forecast. With no eligible occurrence, LCD shows NEXT ALARM / None enabled and does not request a nonexistent spoken phrase. USB say-date and next-alarm request the same information.
+
+Date speech uses weekday, day, month and an available year recording. Weekday is computed from the date rather than trusting the RTC weekday field. RU uses folders 06/03/04/05; DE uses 16/13/14/15. Year recordings cover 2023..2029 (tracks 003..009). Other years are fully shown on LCD but the spoken year is omitted, with a USB explanation. Next-alarm speech adds the Russian alarm-slot phrase 07/001..005, date and time. German has no confirmed slot-number recordings, so it speaks date/time and leaves the slot number on LCD. SPI and DFPlayer cards must both contain the numbered date folders for equivalent routing/fallback.
+
+Information speech follows the Manual output preference and the existing Bluetooth sequence/LOCAL fallback. Mute, playback, timer/alarm and other audio owners suppress speech rather than interrupting them. LCD information remains available; physical MINUS actions retain their existing meanings in menus, music and alarm editors. No alarm or settings values are changed by these requests. A USB request while another screen owns the LCD may remain hidden until the four-second overlay expires.
+
+Startup shows Speaking Clock and the compact tag-derived firmware version for about 1.6 seconds after initialization. This is a nonblocking LCD indication: RTC, Bluetooth, controls and schedulers continue, and active UI/timer/alarm screens have priority. It queues no additional startup audio. About and USB version retain their existing version details. Date/next-alarm speech and the startup splash still require hardware acceptance.
 
 ## Settings
 
