@@ -10,7 +10,7 @@ The clock uses an I2C LCD1602, DS1302 RTC, DFPlayer Mini, two rotary encoders an
 
 ## Features and validation
 
-- Countdown timer, five alarms with selectable weekdays and five-minute snooze, Russian and German speech, and quiet hours.
+- Countdown timer, five alarms with selectable weekdays and three-minute snooze, Russian and German speech, and quiet hours.
 - Menus for time, date, language, volume and audio outputs; USB diagnostics.
 - Local DFPlayer and Bluetooth playback for speech, timer, alarms and music, with local fallback.
 - Music player with normal/shuffle/repeat-one modes, Next/Previous history and LOCAL/BT status. Extended controls require hardware acceptance; see [controls](doc/CONTROLS_AND_MODES.md#music-player).

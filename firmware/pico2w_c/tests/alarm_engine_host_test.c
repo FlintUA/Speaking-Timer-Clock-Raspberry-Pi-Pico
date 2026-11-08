@@ -102,16 +102,16 @@ int main(void) {
     alarm_snooze_t snoozes[CLOCK_ALARM_COUNT]={0}, due;
     alarm_snooze_schedule(&snoozes[0],1000,23,59,false);
     alarm_snooze_schedule(&snoozes[1],2000,8,30,true);
-    assert(!alarm_snooze_take(&snoozes[0],300999,&due));
-    assert(alarm_snooze_take(&snoozes[0],301000,&due));
+    assert(!alarm_snooze_take(&snoozes[0],180999,&due));
+    assert(alarm_snooze_take(&snoozes[0],181000,&due));
     assert(due.hour==23 && due.minute==59 && !due.test);
-    assert(!alarm_snooze_take(&snoozes[0],301001,&due));
-    assert(!alarm_snooze_take(&snoozes[1],301999,&due));
-    assert(alarm_snooze_take(&snoozes[1],302000,&due) && due.test);
-    alarm_snooze_schedule(&snoozes[0],302000,23,59,false); // Repeated snooze.
-    assert(!alarm_snooze_take(&snoozes[0],601999,&due));
-    assert(alarm_snooze_take(&snoozes[0],602000,&due));
-    alarm_snooze_schedule(&snoozes[0],603000,23,59,false);
+    assert(!alarm_snooze_take(&snoozes[0],181001,&due));
+    assert(!alarm_snooze_take(&snoozes[1],181999,&due));
+    assert(alarm_snooze_take(&snoozes[1],182000,&due) && due.test);
+    alarm_snooze_schedule(&snoozes[0],182000,23,59,false); // Repeated snooze.
+    assert(!alarm_snooze_take(&snoozes[0],361999,&due));
+    assert(alarm_snooze_take(&snoozes[0],362000,&due));
+    alarm_snooze_schedule(&snoozes[0],363000,23,59,false);
     snoozes[0].pending=false; // Explicit cancellation / restart.
     assert(!alarm_snooze_take(&snoozes[0],1000000,&due));
     puts("alarm_engine_host_test: PASS");

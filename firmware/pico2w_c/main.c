@@ -848,8 +848,9 @@ static void alarm_snooze_start(uint64_t now) {
     unsigned slot=(unsigned)alarm_active_index;
     alarm_snooze_schedule(&alarm_snoozes[slot],now,active_alarm_hour,
                            active_alarm_minute,active_alarm_test);
-    alarm_stop("SNOOZE_5_MIN");
-    printf("[SNOOZE] slot=%u delay=300s (monotonic, RAM only)\n",slot+1);
+    alarm_stop("SNOOZE");
+    printf("[SNOOZE] slot=%u delay=%lus (monotonic, RAM only)\n",slot+1,
+           (unsigned long)(CLOCK_ALARM_SNOOZE_MS/1000u));
 }
 static void alarm_snooze_status(uint64_t now) {
     unsigned count=0;
@@ -862,7 +863,8 @@ static void alarm_snooze_status(uint64_t now) {
             (unsigned long long)remaining,waiting?"WAITING_AUDIO":"SLEEPING");
         ++count;
     }
-    printf("[SNOOZE] count=%u delay=300s; ALARM cancels on clock screen\n",count);
+    printf("[SNOOZE] count=%u delay=%lus; ALARM cancels on clock screen\n",count,
+           (unsigned long)(CLOCK_ALARM_SNOOZE_MS/1000u));
 }
 static void alarm_snooze_service(uint64_t now) {
     for(unsigned i=0;i<CLOCK_ALARM_COUNT;++i) {
@@ -3251,7 +3253,8 @@ static void handle_command(char *line) {
         puts("[AUDIO-HEALTH] audio-health shows read-only owner, queue and Bluetooth status");
         puts("[ALARM-PENDING] alarm-pending, alarm-pending-test N, alarm-pending-clear (RAM only)");
         puts("[ALARM] alarm-days N daily|weekdays|weekends|135; alarm-snooze; alarm-snooze-status; alarm-snooze-cancel");
-        puts("[SNOOZE] ringing: GP28 snoozes 5 min; ALARM stops. On clock screen ALARM cancels snoozes");
+        printf("[SNOOZE] ringing: GP28 snoozes %u min; ALARM stops. On clock screen ALARM cancels snoozes\n",
+               CLOCK_ALARM_SNOOZE_MINUTES);
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[NETWORK] wifi-config SSID|password; wifi-clear; ntp-status; ntp-sync; version");
         puts("[INPUT] ALARM short=alarm editor; ALARM hold >=900ms=music; MUSIC TIMER=play/stop, encoder/SETTINGS/MINUS=next/previous, ALARM=mode; hold ALARM/MODE/MINUS=exit");

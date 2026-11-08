@@ -17,7 +17,7 @@ This document describes main, starting with 1.0.0-rc.1. The previous MicroPython
 | MODE short press | Switch VOICE/CHIME |
 | MODE hold, at least 900 ms | Announce current time when idle |
 
-While an alarm rings, ALARM stops it, TIMER_MODE/GP28 snoozes it for five minutes and volume remains adjustable. Timer/alarm/audio ownership can block settings or playback actions.
+While an alarm rings, ALARM stops it, TIMER_MODE/GP28 snoozes it for three minutes and volume remains adjustable. Timer/alarm/audio ownership can block settings or playback actions.
 
 The precise timer editor starts from the selected duration. TIMER or SETTINGS advances HOUR -> MIN -> SEC; confirming SEC commits the duration and starts the countdown. MINUS goes to the previous field, or cancels from HOUR. GP28 and the 20-second idle timeout cancel without changing the selected duration. Values wrap within each field; the limit is exactly 04:00:00 and a zero duration starts as one second. The editor is unavailable during a running countdown, alarm, player or another menu. Quick minute adjustment discards sub-minute precision; use the editor for seconds. Consecutive same-direction detents less than 260 ms apart reach 5-minute steps on the third detent and 10-minute steps on the fifth. A pause or direction reversal resets acceleration.
 
@@ -49,7 +49,7 @@ There are five alarm slots. The timer encoder selects a slot and changes editor 
 
 Days offers Daily, Mon-Fri, Sat-Sun and Custom. In Custom, TIMER steps Monday through Sunday and turning the encoder toggles the displayed day. MINUS goes to the previous day, or back to the Days selector from Monday. At least one day must be selected. In the other alarm fields MINUS returns to the alarm list and discards the draft. The list shows the selected day preset; alarm-status includes the exact mask (bit 0=Monday, bit 6=Sunday).
 
-During ringing, GP28 stops the current sound and schedules one repeat five minutes later. Repeated snooze is supported. The deadline uses monotonic uptime, so RTC/NTP corrections and midnight do not move it. At the deadline, the alarm enters the existing deferred-audio queue: a running countdown, mute or open editor may postpone it further, with the usual 30-minute expiry measured from that deadline. Ready snoozes preempt music through the normal alarm priority path. The repeat uses the original alarm time and current sound/output preferences.
+During ringing, GP28 stops the current sound and schedules one repeat three minutes later. Repeated snooze is supported. The deadline uses monotonic uptime, so RTC/NTP corrections and midnight do not move it. At the deadline, the alarm enters the existing deferred-audio queue: a running countdown, mute or open editor may postpone it further, with the usual 30-minute expiry measured from that deadline. Ready snoozes preempt music through the normal alarm priority path. The repeat uses the original alarm time and current sound/output preferences.
 
 The clock screen shows the next snoozed alarm and remaining time. ALARM cancels all snoozes when the main screen is active; ALARM during ringing still stops only the ringing alarm. Disabling or editing a slot cancels its pending/snoozed occurrence. Snoozes live only in RAM and disappear on restart; weekday schedules are saved in Flash.
 

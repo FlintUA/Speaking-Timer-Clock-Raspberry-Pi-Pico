@@ -2,6 +2,10 @@
 
 This summary covers the assembled Pico 2 W clock on COM8. Each section identifies its evidence source: direct COM8 verification, user tests or reconstructed historical project records. Software-only results and remaining physical checks are stated separately.
 
+## User acceptance before the three-minute snooze change
+
+The user confirmed weekday alarm setup/firing and the delayed repeat work on the five-minute version. They then requested a shorter three-minute delay. This confirms the earlier behavior; the new 180-second duration still needs a separately authorized firmware update and a device timing check.
+
 ## November 8 weekday/snooze firmware smoke test
 
 Build 7119b5e (1.0.0-rc.1+7.g7119b5e, BT/MP3/Wi-Fi) was installed through the guarded updater. The exact build ID, Flash guard and alarm status were verified on COM8. All five pre-update enabled/time/sound/track fields were compared with the post-update snapshot and matched. Every old alarm loaded as Daily, mask 0x7f. LOCAL volume 16, BT volume 15, all four BT output preferences and both paired speakers remained present; Portable reconnected with A2DP ACTIVE at 44100 Hz.

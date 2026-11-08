@@ -32,7 +32,7 @@ Control restoration stage 1 is implemented. Hardware logs confirm accelerated se
 
 Stage 2 is implemented, awaiting hardware acceptance: brand-neutral BT labels, normal/shuffle/repeat-one, immediate Next/Previous with bounded history, consistent physical controls and mode/count display. Position-preserving pause needs separate LOCAL/Bluetooth transport work; the old MicroPython pause restarted the track.
 
-1. Alarm snooze and weekday schedules are implemented, awaiting device acceptance: Daily/Mon-Fri/Sat-Sun/custom days, GP28 five-minute snooze, explicit cancellation and Flash v9 migration. See TESTING.md.
+1. Alarm snooze and weekday schedules are implemented, awaiting device acceptance: Daily/Mon-Fri/Sat-Sun/custom days, GP28 three-minute snooze, explicit cancellation and Flash v9 migration. See TESTING.md.
 2. Music sleep timer and position-preserving pause on LOCAL/Bluetooth; preserve existing playback modes, no-repeat shuffle and audio priorities.
 3. Spoken date and nearest-alarm information, plus a dedicated startup indication. The two-page LCD About screen is implemented.
 4. Birthday/reminder events after checking available recordings.

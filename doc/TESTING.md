@@ -12,6 +12,8 @@ ctest --test-dir build/host-tests -C Debug --output-on-failure
 
 GitHub CI runs this suite on Windows and Linux.
 
+If a local Windows/MSVC build misses a changed header (for example due to localized include diagnostics), use a fresh build directory or cmake --build build/host-tests --clean-first before rerunning CTest. The three-minute snooze change was verified with a fresh local build after an incremental cache retained an old object. GitHub CI uses fresh checkouts.
+
 The seven suites cover:
 - Alarm validity, weekday filtering, leap/calendar boundaries, simultaneous slots, duplicate suppression and independent monotonic snooze deadlines/cancellation.
 - Calendar conversion, leap days, Europe/Berlin transitions, NTP era rollover, invalid headers and mismatched request nonces.
@@ -53,7 +55,9 @@ Fetch tags before building if the checkout does not have them: git fetch --tags.
 
 ## Device acceptance before stable release
 
-Weekday/snooze stage: the COM8 smoke test confirmed v8 loading with Daily on all slots, unchanged alarm fields/output settings, Portable reconnection, and USB snooze schedule/cancel without a Flash write. Remaining checks: configure Daily, Mon-Fri, Sat-Sun and a custom mask using LCD/USB; test draft cancellation and rejecting an empty custom selection; save/reboot and check masks, alarm times/enabled/sounds, volumes, known speakers and network settings. Use alarm-audio-test N to ring a slot without changing its schedule; physical GP28 should stop it and ring once after five minutes. Verify repeated snooze, ALARM cancellation on the main screen, disabling/editing a snoozed slot, restart cancellation, timer/mute deferral and music preemption. Check both LOCAL and BT. These remaining paths need device acceptance; weekday/migration/snooze host tests have passed.
+The user confirmed weekday setup/firing and the full delayed repeat on the earlier five-minute build. The requested three-minute timing still needs device acceptance after an authorized update.
+
+Weekday/snooze stage: the COM8 smoke test confirmed v8 loading with Daily on all slots, unchanged alarm fields/output settings, Portable reconnection, and USB snooze schedule/cancel without a Flash write. Remaining checks: configure Daily, Mon-Fri, Sat-Sun and a custom mask using LCD/USB; test draft cancellation and rejecting an empty custom selection; save/reboot and check masks, alarm times/enabled/sounds, volumes, known speakers and network settings. Use alarm-audio-test N to ring a slot without changing its schedule; physical GP28 should stop it and ring once after three minutes. Verify repeated snooze, ALARM cancellation on the main screen, disabling/editing a snoozed slot, restart cancellation, timer/mute deferral and music preemption. Check both LOCAL and BT. These remaining paths need device acceptance; weekday/migration/snooze host tests have passed.
 
 Restored timer controls require device checks: GP28 editor entry/cancel, HOUR/MIN/SEC confirmation using TIMER/SETTINGS, MINUS/back, timeout cancellation, one-second completion and four-hour limit. Check fast rotation and direction reversal in quick selection. In the music player test mute/unmute on LOCAL and Bluetooth: music stops, levels remain intact and unmute requires explicit playback. These paths have not yet been accepted on the device.
 
