@@ -2,6 +2,14 @@
 
 This summary covers the assembled Pico 2 W clock on COM8. It reconstructs results from project records and user tests; it is not a new hardware run.
 
+## November 8 weekday/snooze firmware smoke test
+
+Build 7119b5e (1.0.0-rc.1+7.g7119b5e, BT/MP3/Wi-Fi) was installed through the guarded updater. The exact build ID, Flash guard and alarm status were verified on COM8. All five pre-update enabled/time/sound/track fields were compared with the post-update snapshot and matched. Every old alarm loaded as Daily, mask 0x7f. LOCAL volume 16, BT volume 15, all four BT output preferences and both paired speakers remained present; Portable reconnected with A2DP ACTIVE at 44100 Hz.
+
+A RAM-only test submitted alarm-audio-test 1 followed immediately by alarm-snooze. The log recorded BT alarm TEST start, STOP reason=SNOOZE_5_MIN, one sleeping snooze with remaining=300s, then successful alarm-snooze-cancel with count=0. Final audio-health showed no active timer, alarm, playback or pending occurrence. Saved schedules were unchanged. Flash A/B records remained v8 sequences 68/69, demonstrating that boot and snooze alone did not migrate/write settings.
+
+This validates installation, v8 loading with daily defaults and USB snooze scheduling/cancellation. It does not validate physical GP28 operation, waiting the full five minutes, LCD custom-day editing, weekday firing on real dates, or v9 save/reboot on the board. Those acceptance steps remain in TESTING.md. Local transcripts: build/diagnostics/before-weekday-update.log, weekday-update.log and weekday-snooze-smoke.log (ignored by Git).
+
 ## November 8 passive COM8 Bluetooth capture
 
 A direct, read-only 1800-second capture ran from 10:52:37 to 11:22:37 UTC (11:52:37-12:22:37 Europe/Berlin). The installed firmware reported 1.0.0-rc.1+4.g6d8beba.dirty, with Portable selected and A2DP ACTIVE at 44100 Hz. Manual/hourly/timer/alarm outputs all preferred BT; Wi-Fi was unconfigured. The speaker was connected to power, as confirmed by the user.
