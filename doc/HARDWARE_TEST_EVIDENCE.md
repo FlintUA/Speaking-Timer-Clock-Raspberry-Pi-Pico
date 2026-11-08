@@ -2,6 +2,16 @@
 
 This summary covers the assembled Pico 2 W clock on COM8. It reconstructs results from project records and user tests; it is not a new hardware run.
 
+## November 8 passive COM8 Bluetooth capture
+
+A direct, read-only 1800-second capture ran from 10:52:37 to 11:22:37 UTC (11:52:37-12:22:37 Europe/Berlin). The installed firmware reported 1.0.0-rc.1+4.g6d8beba.dirty, with Portable selected and A2DP ACTIVE at 44100 Hz. Manual/hourly/timer/alarm outputs all preferred BT; Wi-Fi was unconfigured. The speaker was connected to power, as confirmed by the user.
+
+No stream pause/start/release, signaling release, reconnect, AVRCP disconnect or TONE event was recorded during this window. The 12:00 RTC hourly announcement ran at 11:01:19 UTC, completed with underruns=0, and returned to silence without restarting A2DP. A read-only status query after capture still showed A2DP ACTIVE/SILENCE, no music/timer/alarm and no pending save.
+
+The user asked specifically about a possible double sound around 12:15. Neither the PC 12:14-12:16 CET interval nor the RTC 12:14-12:16 interval contains a non-RTC event. This is a text capture, not an acoustic recording: it cannot confirm whether the sound occurred or identify its source. Absence of logged profile transitions does not exclude speaker-local sounds or lower-level audio/controller issues. The cause remains unresolved.
+
+The raw local capture is stored under build/diagnostics/bt-before-minus.log and is ignored by Git. This capture predates the additional MINUS-hold exit firmware; it does not validate that physical gesture.
+
 ## November 8 timer controls and output routing
 
 The user log covering 11:23:45-11:26:50 confirms accelerated TIMER selection with 1/5/10-minute steps, reset to one-minute steps on reversal, a 60-second LOCAL countdown with start/finish audio, cancellation audio, GP28 editor entry and MINUS exit from its first field. It does not confirm the complete HOUR/MIN/SEC path or muting during music.

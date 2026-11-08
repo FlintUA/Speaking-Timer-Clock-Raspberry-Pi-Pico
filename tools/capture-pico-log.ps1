@@ -8,6 +8,7 @@ param(
 )
 $ErrorActionPreference='Stop'
 $LogPath=[IO.Path]::GetFullPath($LogPath)
+if(Test-Path -LiteralPath $LogPath) { throw 'Log already exists; choose a new LogPath to preserve the previous capture.' }
 [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($LogPath))
 $serial=[IO.Ports.SerialPort]::new($Port,115200)
 $serial.DtrEnable=$true
@@ -22,7 +23,7 @@ function Record-Line([string]$Line) {
     $stamp=[DateTime]::UtcNow.ToString('o')
     $writer.WriteLine("[$stamp] $Line")
     $script:lines++
-    if($Line -match '\[TONE\]|\[BT\]|Stream started|Stream suspended|Stream released|Signaling released|A2DP Source: Connected|\[VERSION\]|\[NTP\]|\[AUDIO-SETTINGS\]') {
+    if($Line -match '\[TONE\]|\[BT\]|Stream started|Stream paused|Stream suspended|Stream released|Signaling released|A2DP Source: Connected|AVRCP.*Disconnected|\[INFO\]|\[VERSION\]|\[NTP\]|\[AUDIO-SETTINGS\]') {
         $script:events++
         Write-Output "[$stamp] $Line"
     }
