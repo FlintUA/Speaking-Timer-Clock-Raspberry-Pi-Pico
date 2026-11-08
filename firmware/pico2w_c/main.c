@@ -3939,7 +3939,7 @@ int main(void) {
             snprintf(bottom, sizeof(bottom), "%s", menu_item_name(menu_index));
         } else if (menu_state == MENU_ABOUT) {
             if (menu_about_version) {
-                snprintf(top, sizeof(top), "v%s", CLOCK_FIRMWARE_VERSION);
+                snprintf(top, sizeof(top), "v%.15s", CLOCK_DISPLAY_VERSION);
                 snprintf(bottom, sizeof(bottom), "by FlintUA");
             } else {
                 snprintf(top, sizeof(top), "Speaking Clock");

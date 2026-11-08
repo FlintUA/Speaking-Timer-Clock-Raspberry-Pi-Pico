@@ -20,3 +20,6 @@ target_include_directories(settings_store_test PRIVATE mocks)
 foreach(test alarm_engine clock_time bt_catalog settings_store)
     add_test(NAME ${test} COMMAND ${test}_test)
 endforeach()
+add_test(NAME git_version COMMAND "${CMAKE_COMMAND}"
+    "-DSOURCE_DIR=${CMAKE_CURRENT_LIST_DIR}/.."
+    -P "${CMAKE_CURRENT_LIST_DIR}/git_version_test.cmake")

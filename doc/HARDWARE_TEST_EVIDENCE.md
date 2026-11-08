@@ -2,6 +2,10 @@
 
 This summary covers the assembled Pico 2 W clock on COM8. It reconstructs results from project records and user tests; it is not a new hardware run.
 
+## About screen
+
+The user confirmed the two-page About menu works after commit d8f2c57: Speaking Clock / Pico 2 W and firmware version / by FlintUA. This confirms the existing screen and controls; the later Git-tag version generator still requires a rebuilt-firmware check on the device.
+
 ## Encoders and buttons
 
 The [November 6 audit](C_MIGRATION_AUDIT_2026-11-06.md#fat32-directory--file-read-diagnostics-implemented-2026-11-06) explicitly records user confirmation that the timer encoder works after relocation to GP12/GP13. Volume button GP20 was verified through sound ON/OFF in serial logs and on the LCD; no firmware change was required for that button.

@@ -4,6 +4,8 @@ The main project is C / Pico SDK firmware for **Pico 2 W (RP2350)**. MicroPython
 
 Current release candidate: **1.0.0-rc.1**. See [release notes](CHANGELOG.md), the [current roadmap](doc/ROADMAP.md) and [verification instructions](doc/TESTING.md). New Wi-Fi/NTP and Flash v8 changes require on-device acceptance before the stable release.
 
+Firmware versions are derived automatically from local Git release tags. About shows the tag version with + for later changes; USB version includes the commit metadata. See [version rules](doc/TESTING.md#automatic-firmware-version), including tag fetching and archive fallback.
+
 The clock uses an I2C LCD1602, DS1302 RTC, DFPlayer Mini, two rotary encoders and five additional buttons. For Bluetooth playback, Pico reads MP3 files from a separate SPI1 microSD card, decodes them with Helix and sends SBC audio to a Bluetooth Classic A2DP speaker.
 
 ## Features and validation

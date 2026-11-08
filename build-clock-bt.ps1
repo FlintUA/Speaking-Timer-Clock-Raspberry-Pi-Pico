@@ -18,13 +18,6 @@ $examples = Join-Path $homeSdk 'pico-examples'
 $cmake = Join-Path $homeSdk 'cmake\v4.3.4\bin\cmake.exe'
 $source = Join-Path $root 'firmware\pico2w_c'
 $build = if ($BuildDirectory) { [IO.Path]::GetFullPath($BuildDirectory) } else { Join-Path $source 'build-bt' }
-$buildId = git -C $root rev-parse --short=12 HEAD
-if ($LASTEXITCODE -ne 0) { throw 'Cannot identify the source revision.' }
-$dirty = git -C $root status --porcelain --untracked-files=no
-if ($dirty) { $buildId += '-dirty' }
-$buildId += '-bt'
-if ($Mp3) { $buildId += '-mp3' }
-if (-not $NoWifi) { $buildId += '-wifi' }
 function Find-PicoTool([string]$relativeRoot, [string]$fileName) {
     $directory = Join-Path $homeSdk $relativeRoot
     if (-not (Test-Path $directory)) { throw "Pico SDK tool directory missing: $directory" }
@@ -54,7 +47,6 @@ $options = @(
     "-DPICO_SDK_PATH=$sdk","-DPICO_EXAMPLES_PATH=$examples",
     '-DCLOCK_ENABLE_A2DP=ON',
     ("-DCLOCK_ENABLE_WIFI=" + $(if ($NoWifi) { 'OFF' } else { 'ON' })),
-    "-DCLOCK_BUILD_ID=$buildId",
     ("-DCLOCK_ENABLE_MP3=" + $(if ($Mp3) { 'ON' } else { 'OFF' })),
     ("-DCLOCK_HELIX_PATH=" + $(if ($Mp3) { $HelixPath } else { '' })),
     "-DCLOCK_A2DP_TARGET_ADDR=$JblAddress",
@@ -77,4 +69,5 @@ if ($LASTEXITCODE -ne 0) { throw "Bluetooth configure failed: $LASTEXITCODE" }
 if ($LASTEXITCODE -ne 0) { throw "Bluetooth build failed: $LASTEXITCODE" }
 $uf2 = Join-Path $build 'speaking_clock_c.uf2'
 if (-not (Test-Path $uf2)) { throw "UF2 missing: $uf2" }
+$buildId = (Get-Content (Join-Path $build 'speaking_clock_c.build-id.txt') -Raw).Trim()
 Write-Host "[BT-BUILD] Firmware: $uf2 (build=$buildId)" -ForegroundColor Green

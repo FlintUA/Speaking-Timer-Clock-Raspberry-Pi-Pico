@@ -11,11 +11,8 @@ endif()
 include("${PICO_SDK_PATH}/external/pico_sdk_import.cmake")
 
 project(speaking_clock_c C CXX ASM)
-set(CLOCK_FIRMWARE_VERSION "1.0.0-rc.1" CACHE STRING "Firmware release version")
-set(CLOCK_BUILD_ID "unknown" CACHE STRING "Source revision used for this build")
-configure_file(firmware_version.h.in firmware_version.h @ONLY)
-file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/speaking_clock_c.build-id.txt"
-     CONTENT "${CLOCK_BUILD_ID}\n")
+unset(CLOCK_FIRMWARE_VERSION CACHE) # Remove the former manually maintained value.
+unset(CLOCK_BUILD_ID CACHE)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -141,3 +138,30 @@ if(CLOCK_ENABLE_MP3)
     target_compile_definitions(speaking_clock_c PRIVATE CLOCK_ENABLE_MP3=1)
     message(STATUS "SPI SD MP3 playback enabled")
 endif()
+
+# Resolve identity after all profile options, and refresh before every build.
+get_filename_component(CLOCK_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
+set(CLOCK_VERSION_TEMPLATE "${CMAKE_CURRENT_LIST_DIR}/firmware_version.h.in")
+set(CLOCK_VERSION_HEADER "${CMAKE_CURRENT_BINARY_DIR}/firmware_version.h")
+set(CLOCK_VERSION_ID_FILE "${CMAKE_CURRENT_BINARY_DIR}/speaking_clock_c.build-id.txt")
+set(CLOCK_BUILD_PROFILE "")
+if(CLOCK_ENABLE_A2DP)
+    string(APPEND CLOCK_BUILD_PROFILE "-bt")
+endif()
+if(CLOCK_ENABLE_MP3)
+    string(APPEND CLOCK_BUILD_PROFILE "-mp3")
+endif()
+if(CLOCK_ENABLE_WIFI)
+    string(APPEND CLOCK_BUILD_PROFILE "-wifi")
+endif()
+include(cmake/git_version.cmake)
+add_custom_target(clock_version
+    COMMAND "${CMAKE_COMMAND}" "-DCLOCK_SOURCE_ROOT=${CLOCK_SOURCE_ROOT}"
+        "-DCLOCK_VERSION_TEMPLATE=${CLOCK_VERSION_TEMPLATE}"
+        "-DCLOCK_VERSION_HEADER=${CLOCK_VERSION_HEADER}"
+        "-DCLOCK_VERSION_ID_FILE=${CLOCK_VERSION_ID_FILE}"
+        "-DCLOCK_BUILD_PROFILE=${CLOCK_BUILD_PROFILE}"
+        -P "${CMAKE_CURRENT_LIST_DIR}/cmake/git_version.cmake"
+    BYPRODUCTS "${CLOCK_VERSION_HEADER}" "${CLOCK_VERSION_ID_FILE}"
+    VERBATIM)
+add_dependencies(speaking_clock_c clock_version)
