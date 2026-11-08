@@ -13,6 +13,7 @@
 #include "countdown.h"
 #include "timer_controls.h"
 #include "music_playlist.h"
+#include "music_sleep.h"
 #include "alarm_engine.h"
 #include "controls.h"
 #include "dfplayer.h"
@@ -225,6 +226,8 @@ static uint64_t alarm_button_pressed_at_ms;
 // Standalone music player is RAM-only; no flash schema changes.
 static bool music_ui_open;
 static bool music_ui_playing;
+static bool music_ui_paused;
+static music_sleep_t music_sleep;
 // Output follows current manual LOCAL / BT sink preference. BT can only
 // read music files present on the separate SPI1 FAT32 card.
 static bool music_ui_bluetooth;
@@ -1277,6 +1280,7 @@ static void alarm_ui_close(const char *reason) {
 
 static void music_ui_stop(const char *reason) {
     music_ui_pending=false;
+    music_ui_paused=false;
     if (!music_ui_playing) return;
 #ifdef CLOCK_ENABLE_A2DP
     if (music_ui_bluetooth && mp3_play_active()) mp3_play_stop();
@@ -1291,6 +1295,7 @@ static void music_ui_close(const char *reason) {
     if (!music_ui_open) return;
     music_ui_stop(reason);
     music_ui_open = false;
+    music_sleep=(music_sleep_t){0};
     mode_press_active=false;
     music_minus_pressed=false;
     timer_screen = false;
@@ -1340,8 +1345,30 @@ static void music_ui_start(void) {
 
 static void music_ui_toggle(void) {
     if (!music_ui_open) return;
-    if (music_ui_playing || music_ui_pending) music_ui_stop("BUTTON");
-    else music_ui_start();
+    if (music_ui_pending) { music_ui_stop("BUTTON_BEFORE_START"); return; }
+    if (music_ui_paused) {
+        bool resumed=false;
+#ifdef CLOCK_ENABLE_A2DP
+        if (music_ui_bluetooth) resumed=mp3_play_resume();
+        else
+#endif
+            resumed=audio_queue_resume(&audio_queue);
+        music_ui_paused=false;
+        if (!resumed) {
+            music_ui_stop("RESUME_UNAVAILABLE");
+            music_ui_start();
+        }
+        printf("[MUSIC-UI] resume=%s\n",resumed?"POSITION":"RESTART");
+    } else if (music_ui_playing) {
+        bool paused=false;
+#ifdef CLOCK_ENABLE_A2DP
+        if (music_ui_bluetooth) paused=mp3_play_pause();
+        else
+#endif
+            paused=audio_queue_pause(&audio_queue);
+        music_ui_paused=paused;
+        printf("[MUSIC-UI] pause=%s\n",paused?"POSITION":"AT_EOF");
+    } else music_ui_start();
 }
 
 static void music_ui_rotate(int direction) {
@@ -1378,6 +1405,8 @@ static void music_ui_enter(void) {
     music_ui_pending=false;
     music_ui_open = true;
     music_ui_playing = false;
+    music_ui_paused = false;
+    music_sleep=(music_sleep_t){0};
     music_ui_bt_started = false;
 #ifdef CLOCK_ENABLE_A2DP
     music_ui_bluetooth = audio_router.requested == AUDIO_OUTPUT_BT_JBL &&
@@ -1388,13 +1417,17 @@ static void music_ui_enter(void) {
     timer_screen = false;
     printf("[MUSIC-UI] output=%s, BT music requires /08/NNN.mp3 on SPI FAT32\n",
            music_ui_bluetooth ? "BT" : "LOCAL");
-    printf("[MUSIC-UI] opened tracks=%u track=%u mode=SHUF; TIMER=PLAY/STOP SETTINGS=NEXT MINUS=PREV ALARM=MODE; hold ALARM/MODE/MINUS=EXIT\n",
+    printf("[MUSIC-UI] opened tracks=%u track=%u mode=SHUF; TIMER=PLAY/PAUSE SETTINGS=NEXT MINUS=PREV ALARM=MODE GP28=SLEEP; hold ALARM/MODE/MINUS=EXIT\n",
            (unsigned)music_track_count,(unsigned)music_ui_track);
     music_ui_start();
 }
 
 static void music_ui_service(void) {
     if (!music_ui_open) return;
+    if (music_sleep_expired(&music_sleep,to_ms_since_boot(get_absolute_time()))) {
+        music_ui_close("SLEEP_EXPIRED");
+        return;
+    }
     if (music_ui_pending) {
         if (!sound_enabled || timer.running || alarm_active_index>=0) {
             music_ui_pending=false;
@@ -1414,17 +1447,21 @@ static void music_ui_service(void) {
 #ifdef CLOCK_ENABLE_A2DP
     if (music_ui_bluetooth) {
         if (!clock_a2dp_stream_active()) {
+            bool was_paused=music_ui_paused;
             music_ui_stop("BT_LINK_LOST");
             music_ui_bluetooth=false;
-            puts("[MUSIC-UI] BT link lost; restarting current track on LOCAL");
-            music_ui_start();
+            puts(was_paused ? "[MUSIC-UI] BT link lost while paused; TIMER restarts current track on LOCAL" :
+                              "[MUSIC-UI] BT link lost; restarting current track on LOCAL");
+            if (was_paused) music_ui_paused=true;
+            else music_ui_start();
             return;
         }
-        if (mp3_play_active() || !music_ui_bt_started) return;
+        if (music_ui_paused || mp3_play_active() || !music_ui_bt_started) return;
         music_ui_bt_started=false;
     } else
 #endif
     {
+        if (music_ui_paused) return;
         if (!audio_queue_idle(&audio_queue) || dfplayer_busy()) return;
     }
     music_ui_playing=false;
@@ -3663,6 +3700,10 @@ static void on_control_event(const control_event_t *event, void *context) {
         if (music_ui_open) {
             if (event->type == CONTROL_BUTTON_PRESS) {
                 if (event->button==BUTTON_TIMER) music_ui_toggle();
+                else if(event->button==BUTTON_TIMER_MODE) {
+                    unsigned minutes=music_sleep_cycle(&music_sleep,now);
+                    printf("[MUSIC-UI] sleep=%umin (0=OFF; wall duration includes pause)\n",minutes);
+                }
                 else if(event->button==BUTTON_SETTINGS) music_ui_rotate(1);
                 else if(event->button==BUTTON_MINUS) {
                     music_minus_pressed=true;
@@ -4025,7 +4066,13 @@ int main(void) {
                 music_playlist_mode_name(music_playlist.mode),music_ui_bluetooth?"BT":"LOCAL");
             snprintf(bottom,sizeof(bottom),"%03u/%03u %s",
                 (unsigned)music_ui_track,(unsigned)music_track_count,
-                !sound_enabled?"MUTED":music_ui_pending?"WAIT":music_ui_playing?"PLAY":"STOP");
+                !sound_enabled?"MUTED":music_ui_pending?"WAIT":music_ui_paused?"PAUSE":music_ui_playing?"PLAY":"STOP");
+            if (music_sleep.deadline_ms) {
+                snprintf(bottom,sizeof(bottom),"%03u/%03u %s %02um",
+                    (unsigned)music_ui_track,(unsigned)music_track_count,
+                    !sound_enabled?"MUTE":music_ui_pending?"WAIT":music_ui_paused?"PAUS":music_ui_playing?"PLAY":"STOP",
+                    music_sleep_minutes(&music_sleep,now));
+            }
         } else if (alarm_ui_state == ALARM_UI_LIST) {
             const alarm_entry_t *a = &alarms[alarm_ui_index];
             snprintf(top, sizeof(top), "A%u/5 %s %s",

@@ -54,6 +54,10 @@ void dfplayer_pause(uint64_t now_ms) {
     send_command(0x0e, 0, 0, now_ms);
 }
 
+void dfplayer_resume(uint64_t now_ms) {
+    send_command(0x0d, 0, 0, now_ms);
+}
+
 // DFPlayer Mini feedback (0x4E): number of playable files in a folder.
 // The RX line must be connected. Some clones don't implement this query.
 // Time-limited polling is intentionally confined to opening the music UI.

@@ -30,16 +30,16 @@ Before declaring v1.0.0 stable:
 
 Control restoration stage 1 is implemented. Hardware logs confirm accelerated selection, LOCAL timer start/finish/cancel and GP28 entry/back; remaining precise-field and player-mute checks are in TESTING.md. The user also confirmed timer routing to the selected Bluetooth speaker after changing its independent output preference.
 
-Stage 2 is implemented, awaiting hardware acceptance: brand-neutral BT labels, normal/shuffle/repeat-one, immediate Next/Previous with bounded history, consistent physical controls and mode/count display. Position-preserving pause needs separate LOCAL/Bluetooth transport work; the old MicroPython pause restarted the track.
+Stage 2 playback/navigation was accepted by the user; subsequent pause/sleep work still needs device acceptance. Implemented controls include brand-neutral BT labels, normal/shuffle/repeat-one, immediate Next/Previous with bounded history, consistent physical controls and mode/count display. Position-preserving pause is now implemented for LOCAL/Bluetooth; the old MicroPython pause restarted the track.
 
-1. Alarm snooze and weekday schedules are implemented, awaiting device acceptance: Daily/Mon-Fri/Sat-Sun/custom days, GP28 three-minute snooze, explicit cancellation and Flash v9 migration. See TESTING.md.
-2. Music sleep timer and position-preserving pause on LOCAL/Bluetooth; preserve existing playback modes, no-repeat shuffle and audio priorities.
+1. Alarm snooze and weekday schedules are implemented and user-tested: Daily/Mon-Fri/Sat-Sun/custom days, GP28 three-minute snooze, explicit cancellation and Flash v9 migration. See TESTING.md.
+2. Music sleep timer and position-preserving pause on LOCAL/Bluetooth are implemented, pending device acceptance. GP28 cycles OFF/15/30/60/90 minutes; TIMER pauses/resumes. Existing playlist modes and audio priorities are retained. See TESTING.md for checks on both outputs.
 3. Spoken date and nearest-alarm information, plus a dedicated startup indication. The two-page LCD About screen is implemented.
 4. Birthday/reminder events after checking available recordings.
 5. Offline RTC drift calibration if hourly NTP correction is insufficient for extended offline use.
 6. Complete the electrical schematic for the installed Pico 2 W wiring and power modules.
 
-Each milestone requires focused tests and a hardware acceptance step. These items are planned, not implemented by the first release candidate.
+Each milestone requires focused tests and a hardware acceptance step. The statuses above distinguish implemented follow-up work from remaining plans; the first release candidate predates these follow-up changes.
 
 ## Deferred tail, in approved order
 

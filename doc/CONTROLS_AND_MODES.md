@@ -79,7 +79,8 @@ Hold ALARM to enter while idle. Playback now starts automatically when sound is 
 
 | Control in the player | Action |
 | --- | --- |
-| TIMER button | PLAY/STOP; PLAY restarts the selected track |
+| TIMER button | Pause/resume the current track; start the selected track when stopped |
+| TIMER_MODE (GP28) | Cycle sleep OFF -> 15 -> 30 -> 60 -> 90 minutes -> OFF |
 | SETTINGS or clockwise TIMER rotation | Next, immediately requests playback |
 | MINUS or counterclockwise TIMER rotation | Previous selection from history, immediately requests playback |
 | ALARM short press | Cycle SHUF -> REP1 -> NORM -> SHUF without interrupting the current track |
@@ -90,11 +91,13 @@ NORM advances through track numbers and wraps at the end. SHUF plays every track
 
 MINUS acts on release: a short press selects Previous, while a hold exits without briefly starting a previous track. Both actions remain available.
 
-The first LCD line shows mode and effective output, for example MUSIC SHUF BT. The second shows selected track/count and PLAY, STOP, WAIT or MUTED. WAIT represents a pending start while transport ownership or the preceding LOCAL pause command settles. Rapid navigation replaces the pending selection with the latest one. Muted navigation selects tracks without starting playback.
+The first LCD line shows mode and effective output, for example MUSIC SHUF BT. The second shows selected track/count and PLAY, PAUSE, STOP, WAIT or MUTED. With sleep enabled it uses compact PAUS/MUTE labels and shows rounded-up remaining minutes, for example 001/045 PAUS 15m. WAIT represents a pending start while transport ownership or the preceding LOCAL pause command settles. Rapid navigation replaces the pending selection with the latest one. Muted navigation selects tracks without starting playback.
 
 The volume encoder button toggles sound in the player and alarm editor as well as on the main/settings screens. Muting stops active music on either output and shows MUTED in the player. Unmuting does not restart music; press TIMER to start it. Separate LOCAL/Bluetooth levels are retained. During a ringing alarm use ALARM to stop or GP28 to snooze; rotating volume remains available.
 
-The output follows the manual audio preference when entering the player. Bluetooth requires matching folder 08 files on the SPI FAT32 card. A lost Bluetooth link falls back to LOCAL and restarts the selected track when the local transport is idle. This does not advance the playlist. UI stop is not a position-preserving pause; separate mp3-pause/mp3-resume commands exist for direct playback diagnostics.
+The output follows the manual audio preference when entering the player. Bluetooth requires matching folder 08 files on the SPI FAT32 card. A lost Bluetooth link falls back to LOCAL and restarts the selected track when the local transport is idle. This does not advance the playlist. TIMER pause preserves the decoder and buffered PCM on Bluetooth, or sends the DFPlayer pause/resume commands without selecting the file again on LOCAL. UART commands remain paced; a rapid resume waits for its pause to be sent. This assumes the installed DFPlayer supports standard resume behavior and still requires hardware acceptance. Next/Previous, exit, mute and higher-priority interruption discard the saved position. If Bluetooth is lost while paused, playback remains paused; the next TIMER press restarts that track on LOCAL because positions cannot be transferred between the two cards.
+
+The sleep timer counts elapsed time even while paused or muted. Selecting a preset starts a fresh deadline; OFF cancels it. It survives track/mode changes within the current player session, but closing the player or rebooting clears it. Expiry stops playback and returns to the clock without an announcement, without disconnecting Bluetooth and without changing alarm, countdown, output or volume settings. Pause and sleep are RAM-only and do not alter the Flash format. Direct mp3-pause/mp3-resume commands remain diagnostic controls, separate from player button state.
 
 ## Persistence, diagnostics and version
 

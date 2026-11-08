@@ -2,14 +2,16 @@
 
 ## Unreleased
 
-- Removed the redundant Volume settings editor. The nine-item menu now ends with Audio Output (7), Bluetooth (8) and About (9). The left encoder, mute button, separate LOCAL/BT levels, autosave and explicit USB volume commands are unchanged; no settings-format migration is required. Device acceptance of the menu removal is pending.
+- Added position-preserving player pause/resume on TIMER for LOCAL (paced DFPlayer pause/resume with queue state retained) and Bluetooth (existing decoder/PCM pause). Added GP28 sleep presets OFF/15/30/60/90 minutes, remaining-minute display and silent stop/exit at a monotonic deadline, including during pause. Both features are RAM-only; playlist modes, audio priorities and Flash format are retained. Host tests pass; physical LOCAL/BT acceptance is pending.
+
+- Removed the redundant Volume settings editor. The nine-item menu now ends with Audio Output (7), Bluetooth (8) and About (9). The left encoder, mute button, separate LOCAL/BT levels, autosave and explicit USB volume commands are unchanged; no settings-format migration is required. The user accepted the new menu after build 4bad974 was installed.
 
 - Added cursor focus for editable LCD values, including precise timer, alarm/day and settings fields. After user acceptance of steady underline focus, switched to the requested hardware blinking character cursor for better visibility. Cursor state is restored after repaint and cached to avoid repeated I2C commands; blinking needs no periodic host updates. Driver tests cover command sequencing and failures; the user accepted hardware blinking in build 755f55b.
 - Reduced snooze from five to three minutes at the user's request. Deadline, status and USB help use one duration constant; no settings-format change is needed. The new duration awaits hardware acceptance.
 - Added weekday schedules (Daily/Mon-Fri/Sat-Sun/custom) and five-minute GP28/USB snooze with monotonic deadlines, cancellation and existing audio priorities. Flash v9 reads v1-v8 and retains daily behavior for old alarms. Current-format rollback needs a v9-capable build. Device acceptance is pending.
 - Added MINUS hold (at least 900 ms) to exit music while retaining short-press Previous. Added timestamped, read-only COM capture for intermittent Bluetooth diagnosis.
 - Replaced brand-specific JBL output labels with BT. Added bt CLI spellings while retaining jbl aliases and the existing Flash layout.
-- Restored NORM/SHUF/REP1 music modes, immediate Next/Previous with bounded history, automatic play on entry, hold-to-exit and mode/count/output display. Track changes wait for transport readiness instead of discarding the request. PLAY/STOP still restarts the track; position-preserving pause is deferred. Device validation is pending.
+- Restored NORM/SHUF/REP1 music modes, immediate Next/Previous with bounded history, automatic play on entry, hold-to-exit and mode/count/output display. Track changes wait for transport readiness instead of discarding the request. Position-preserving pause is supplied by the later player update described above. Device validation is pending.
 - Restored GP28 precise timer editing, accelerated 1/5/10-minute selection and sound toggle in the music player/alarm editor. Muting stops LOCAL or Bluetooth music without changing stored output levels. Device acceptance is pending.
 - Firmware versions now follow reachable Git release tags automatically at configure/build time. USB includes post-tag/dirty metadata; About uses a compact + marker. Builds without Git metadata are explicitly unidentified.
 - Added About at the end of settings: Speaking Clock / Pico 2 W and firmware version / by FlintUA. TIMER rotation switches pages; MINUS returns. Device validation is pending.

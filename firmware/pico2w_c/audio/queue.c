@@ -22,6 +22,23 @@ void audio_queue_clear(audio_queue_t *q, bool pause) {
     q->track_started = false;
     q->seen_busy = false;
     q->pause_pending = pause;
+    q->paused = false;
+    q->resume_pending = false;
+}
+
+bool audio_queue_pause(audio_queue_t *q) {
+    if ((!q->track_started && !q->size) || (q->paused && !q->resume_pending)) return false;
+    q->paused = true;
+    q->resume_pending = false;
+    q->pause_pending = q->track_started;
+    return true;
+}
+
+bool audio_queue_resume(audio_queue_t *q) {
+    if (!q->paused || q->resume_pending) return false;
+    if (q->track_started) q->resume_pending = true;
+    else q->paused = false; // No UART start was sent yet.
+    return true;
 }
 
 void audio_queue_set_volume(audio_queue_t *q, uint8_t volume) {
@@ -30,7 +47,8 @@ void audio_queue_set_volume(audio_queue_t *q, uint8_t volume) {
 }
 
 bool audio_queue_idle(const audio_queue_t *q) {
-    return q->size == 0 && !q->track_started && !q->pause_pending;
+    return q->size == 0 && !q->track_started && !q->pause_pending &&
+           !q->paused && !q->resume_pending;
 }
 
 void audio_queue_service(audio_queue_t *q, uint64_t now_ms) {
@@ -46,6 +64,17 @@ void audio_queue_service(audio_queue_t *q, uint64_t now_ms) {
         q->volume_pending = false;
         return;
     }
+    if (q->resume_pending) {
+        if (dfplayer_command_ready(now_ms)) {
+            dfplayer_resume(now_ms);
+            q->resume_pending = false;
+            q->paused = false;
+            q->seen_busy = false;
+            q->started_at_ms = now_ms;
+        }
+        return;
+    }
+    if (q->paused) return;
     if (q->track_started) {
         if (dfplayer_busy()) {
             q->seen_busy = true;
