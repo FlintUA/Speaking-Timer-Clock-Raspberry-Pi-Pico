@@ -91,7 +91,7 @@ NORM advances through track numbers and wraps at the end. SHUF plays every track
 
 MINUS acts on release: a short press selects Previous, while a hold exits without briefly starting a previous track. Both actions remain available.
 
-The first LCD line shows mode and effective output, for example MUSIC SHUF BT. The second shows selected track/count and PLAY, PAUSE, STOP, WAIT or MUTED. With sleep enabled it uses compact PAUS/MUTE labels and shows rounded-up remaining minutes, for example 001/045 PAUS 15m. WAIT represents a pending start while transport ownership or the preceding LOCAL pause command settles. Rapid navigation replaces the pending selection with the latest one. Muted navigation selects tracks without starting playback.
+The first LCD line shows mode and effective output, for example MUSIC SHUF BT. The second shows selected track/count, a compact PLAY/PAUS/STOP/WAIT/MUTE state and a fixed three-character sleep field. OFF explicitly means sleep is disabled, for example 001/045 PLAY OFF. When enabled, this field shows rounded-up remaining minutes, for example 001/045 PAUS 15m. WAIT represents a pending start while transport ownership or the preceding LOCAL pause command settles. Rapid navigation replaces the pending selection with the latest one. Muted navigation selects tracks without starting playback.
 
 The volume encoder button toggles sound in the player and alarm editor as well as on the main/settings screens. Muting stops active music on either output and shows MUTED in the player. Unmuting does not restart music; press TIMER to start it. Separate LOCAL/Bluetooth levels are retained. During a ringing alarm use ALARM to stop or GP28 to snooze; rotating volume remains available.
 

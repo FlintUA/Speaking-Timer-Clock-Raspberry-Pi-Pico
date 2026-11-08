@@ -4064,9 +4064,9 @@ int main(void) {
         if (music_ui_open) {
             snprintf(top,sizeof(top),"MUSIC %s %s",
                 music_playlist_mode_name(music_playlist.mode),music_ui_bluetooth?"BT":"LOCAL");
-            snprintf(bottom,sizeof(bottom),"%03u/%03u %s",
+            snprintf(bottom,sizeof(bottom),"%03u/%03u %s OFF",
                 (unsigned)music_ui_track,(unsigned)music_track_count,
-                !sound_enabled?"MUTED":music_ui_pending?"WAIT":music_ui_paused?"PAUSE":music_ui_playing?"PLAY":"STOP");
+                !sound_enabled?"MUTE":music_ui_pending?"WAIT":music_ui_paused?"PAUS":music_ui_playing?"PLAY":"STOP");
             if (music_sleep.deadline_ms) {
                 snprintf(bottom,sizeof(bottom),"%03u/%03u %s %02um",
                     (unsigned)music_ui_track,(unsigned)music_track_count,

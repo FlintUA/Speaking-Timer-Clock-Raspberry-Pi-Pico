@@ -58,11 +58,13 @@ Fetch tags before building if the checkout does not have them: git fetch --tags.
 
 ## Device acceptance before stable release
 
-### Player pause and sleep update (pending hardware acceptance)
+### Player pause and sleep update (partial user acceptance)
 
-On both Manual=LOCAL and Manual=BT, start a recognizable long track, pause after several seconds with TIMER, wait, and resume. Expect PAUSE on LCD and continuation from the same passage rather than the beginning. Check rapid double presses, pause immediately after opening/Next, volume adjustment during pause, EOF after resume, and Next/Previous from pause. Confirm SHUF/NORM/REP1 continue to behave as before.
+The user reported pause and sleep-time selection working in build 38182d4, but did not provide output-specific coverage or confirm a full expiry. Explicit OFF display is a follow-up change pending installation.
 
-Press GP28 to select 15, 30, 60, 90 minutes and OFF. Verify the remaining minutes fit beside PLAY/PAUS/MUTE/WAIT/STOP, and track/mode changes keep the deadline. Check a full 15-minute expiry while playing and while paused: silent stop/exit, clock visible, no effect on saved volume/output/alarm settings, Bluetooth stays connected. Confirm OFF cancels, reselection resets the deadline, and exit/reopen resets sleep to OFF. Host tests cover exact expiry without a real-time wait.
+On both Manual=LOCAL and Manual=BT, start a recognizable long track, pause after several seconds with TIMER, wait, and resume. Expect PAUS on LCD and continuation from the same passage rather than the beginning. Check rapid double presses, pause immediately after opening/Next, volume adjustment during pause, EOF after resume, and Next/Previous from pause. Confirm SHUF/NORM/REP1 continue to behave as before.
+
+Press GP28 to select 15, 30, 60, 90 minutes and OFF. Verify OFF is visible on entry and after cycling back to disabled, always in the same three-character position as the remaining minutes beside PLAY/PAUS/MUTE/WAIT/STOP, and track/mode changes keep the deadline. Check a full 15-minute expiry while playing and while paused: silent stop/exit, clock visible, no effect on saved volume/output/alarm settings, Bluetooth stays connected. Confirm OFF cancels, reselection resets the deadline, and exit/reopen resets sleep to OFF. Host tests cover exact expiry without a real-time wait.
 
 While paused, exit with a supported hold or mute and restart; these intentionally discard position. Test an alarm interrupting paused music (alarm must take priority), then reopen the player. Disconnect BT while paused: no automatic LOCAL playback, next TIMER starts the same track from the beginning on LOCAL. Settings/Flash formats and pairing keys must remain unchanged. No pause position or sleep deadline is restored after reboot.
 

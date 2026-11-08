@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Show an explicit OFF in the player sleep field instead of a blank. Compact PLAY/PAUS/STOP/WAIT/MUTE labels keep OFF and remaining minutes in the same position within 16 columns. Playback and deadline behavior are unchanged; physical acceptance of this display follow-up is pending.
+
 - Added position-preserving player pause/resume on TIMER for LOCAL (paced DFPlayer pause/resume with queue state retained) and Bluetooth (existing decoder/PCM pause). Added GP28 sleep presets OFF/15/30/60/90 minutes, remaining-minute display and silent stop/exit at a monotonic deadline, including during pause. Both features are RAM-only; playlist modes, audio priorities and Flash format are retained. Host tests pass; physical LOCAL/BT acceptance is pending.
 
 - Removed the redundant Volume settings editor. The nine-item menu now ends with Audio Output (7), Bluetooth (8) and About (9). The left encoder, mute button, separate LOCAL/BT levels, autosave and explicit USB volume commands are unchanged; no settings-format migration is required. The user accepted the new menu after build 4bad974 was installed.
