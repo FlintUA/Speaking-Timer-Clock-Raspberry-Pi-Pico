@@ -61,7 +61,9 @@ Fetch tags before building if the checkout does not have them: git fetch --tags.
 
 ## Device acceptance before stable release
 
-### Bluetooth explicit disconnect/scan policy (pending hardware acceptance)
+### Bluetooth explicit disconnect/scan policy (basic manual actions accepted)
+
+The user confirmed connection/disconnection on installed build 7378aa1. The following detailed scenarios remain regression/coverage checks, not individually confirmed results.
 
 With Portable connected and audio idle, choose SETTINGS -> Bluetooth -> Disconnect (last entry, one CCW step from Scan devices) or send bt-disconnect. Expect auto=OFF, LOCAL fallback and both saved names/keys retained. Close settings, wait for autosave=OK, then confirm no reconnect after at least the longest existing retry interval (30 seconds). Power-cycle only after saving and verify OFF persists. Incoming reconnect attempts from Portable must not establish A2DP or start the tone.
 
