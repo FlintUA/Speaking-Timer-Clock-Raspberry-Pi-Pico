@@ -14,7 +14,7 @@ GitHub CI runs this suite on Windows and Linux.
 
 If a local Windows/MSVC build misses a changed header (for example due to localized include diagnostics), use a fresh build directory or cmake --build build/host-tests --clean-first before rerunning CTest. The three-minute snooze change was verified with a fresh local build after an incremental cache retained an old object. GitHub CI uses fresh checkouts.
 
-The seven suites cover:
+The eight suites cover:
 - Alarm validity, weekday filtering, leap/calendar boundaries, simultaneous slots, duplicate suppression and independent monotonic snooze deadlines/cancellation.
 - Calendar conversion, leap days, Europe/Berlin transitions, NTP era rollover, invalid headers and mismatched request nonces.
 - MAC parsing, unique combined catalogs and preservation of useful saved names.
@@ -22,6 +22,7 @@ The seven suites cover:
 - Git-derived versions: no tags, exact lightweight and annotated tags, commits after a tag, tracked changes, unrelated tags and source archives.
 - Precise timer draft/confirmation/cancellation, field wrapping and four-hour limit, accelerated minute selection and monotonic one-shot countdown completion.
 - Music modes, repeat-one versus explicit Next, backward/forward history, bounded history retention, single-track libraries and shuffle cycle/boundary protection for 2, 7, 8, 78 and 255 tracks.
+- LCD cursor commands decoded from mocked PCF8574 writes: correct row/column and underline/blink/off controls, no repeated I2C traffic for unchanged focus, restoration after text repaint, bounds and failure handling. These do not validate the appearance of a physical LCD.
 
 ## Firmware builds
 
@@ -55,7 +56,9 @@ Fetch tags before building if the checkout does not have them: git fetch --tags.
 
 ## Device acceptance before stable release
 
-The user confirmed weekday setup/firing and the full delayed repeat on the earlier five-minute build. The requested three-minute timing still needs device acceptance after an authorized update.
+The user confirmed weekday setup/firing and the full delayed repeat on the earlier five-minute build, then reported the three-minute version works after its separately authorized installation.
+
+Cursor acceptance: check time/date H/M/S and D/M/Y positions, precise timer fields, alarm hour/minute, track/sound/day preset and custom-day ON/OFF, language, volume, quiet hours, half-hour and exact-hour toggles. Confirm focus follows a field even when its text does not otherwise change, remains under the value after rotation/redraw, and disappears on save/cancel/timeout and all non-editing screens. Check ordinary Bluetooth playback and button responsiveness alongside LCD interaction. This change has not been installed or checked on the physical display yet.
 
 Weekday/snooze stage: the COM8 smoke test confirmed v8 loading with Daily on all slots, unchanged alarm fields/output settings, Portable reconnection, and USB snooze schedule/cancel without a Flash write. Remaining checks: configure Daily, Mon-Fri, Sat-Sun and a custom mask using LCD/USB; test draft cancellation and rejecting an empty custom selection; save/reboot and check masks, alarm times/enabled/sounds, volumes, known speakers and network settings. Use alarm-audio-test N to ring a slot without changing its schedule; physical GP28 should stop it and ring once after three minutes. Verify repeated snooze, ALARM cancellation on the main screen, disabling/editing a snoozed slot, restart cancellation, timer/mute deferral and music preemption. Check both LOCAL and BT. These remaining paths need device acceptance; weekday/migration/snooze host tests have passed.
 

@@ -4041,6 +4041,7 @@ int main(void) {
 #endif
 
         char top[17], bottom[17];
+        int cursor_column=-1; // Visible only on the editor branch actually rendered.
         if (music_ui_open) {
             snprintf(top,sizeof(top),"MUSIC %s %s",
                 music_playlist_mode_name(music_playlist.mode),music_ui_bluetooth?"BT":"LOCAL");
@@ -4056,16 +4057,19 @@ int main(void) {
                      (unsigned)a->hour, (unsigned)a->minute,
                      a->sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL");
         } else if(alarm_ui_state==ALARM_UI_DAYS) {
+            cursor_column=0;
             snprintf(top,sizeof(top),"ALARM %u DAYS",(unsigned)alarm_ui_index+1);
             snprintf(bottom,sizeof(bottom),"%s T=%s",alarm_ui_days_choice==3?"Custom":alarm_days_name(alarm_ui_draft.weekdays),
                 alarm_ui_days_choice==3?"EDIT":"NEXT");
         } else if(alarm_ui_state==ALARM_UI_DAY) {
+            cursor_column=4; // ON/OFF follows the three-letter day name.
             static const char *days[]={"Mon","Tue","Wed","Thu","Fri","Sat","Sun"};
             if(alarm_ui_days_invalid) snprintf(top,sizeof(top),"SELECT >=1 DAY");
             else snprintf(top,sizeof(top),"ALARM %u DAYS",(unsigned)alarm_ui_index+1);
             snprintf(bottom,sizeof(bottom),"%s %s T=NEXT",days[alarm_ui_day_index],
                 alarm_ui_draft.weekdays&(1u<<alarm_ui_day_index)?"ON":"OFF");
         } else if (alarm_ui_state != ALARM_UI_CLOSED) {
+            cursor_column=alarm_ui_state==ALARM_UI_MINUTE?3:0;
             const char *field = alarm_ui_state == ALARM_UI_ENABLED ? "ON/OFF" :
                                 alarm_ui_state == ALARM_UI_HOUR ? "HOUR" :
                                 alarm_ui_state == ALARM_UI_MINUTE ? "MINUTE" :
@@ -4091,6 +4095,7 @@ int main(void) {
                      (unsigned)(menu_index + 1u), (unsigned)SETTINGS_MENU_ITEMS);
             snprintf(bottom, sizeof(bottom), "%s", menu_item_name(menu_index));
         } else if (menu_state == MENU_TIMER_EDITOR) {
+            cursor_column=(int)timer_editor.field*3;
             snprintf(top,sizeof(top),"TIMER SET %s",
                 timer_editor.field==TIMER_FIELD_HOUR?"HOUR":
                 timer_editor.field==TIMER_FIELD_MINUTE?"MIN":"SEC");
@@ -4151,15 +4156,18 @@ int main(void) {
             snprintf(bottom, sizeof(bottom), "%s",
                      menu_audio_name(menu_audio_index));
         } else if (menu_state == MENU_EDIT_AUDIO_OUTPUT) {
+            cursor_column=0;
             snprintf(top, sizeof(top), "OUT %s",
                      menu_audio_name(menu_audio_index));
             snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
                      menu_audio_jbl_choice ? "BT" : "LOCAL");
         } else if (menu_state == MENU_EDIT_LANGUAGE) {
+            cursor_column=0;
             snprintf(top, sizeof(top), "LANGUAGE SETTING");
             snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
                      menu_language_choice == SPEECH_RU ? "RU" : "DE");
         } else if (menu_is_time_edit()) {
+            cursor_column=menu_state==MENU_EDIT_TIME_H?0:menu_state==MENU_EDIT_TIME_M?3:6;
             snprintf(top, sizeof(top), "TIME SET %s",
                      menu_state == MENU_EDIT_TIME_H ? "HOUR" :
                      menu_state == MENU_EDIT_TIME_M ? "MIN" : "SEC");
@@ -4167,6 +4175,7 @@ int main(void) {
                      (unsigned)menu_rtc_choice.hour, (unsigned)menu_rtc_choice.minute,
                      (unsigned)menu_rtc_choice.second);
         } else if (menu_is_date_edit()) {
+            cursor_column=menu_state==MENU_EDIT_DATE_D?0:menu_state==MENU_EDIT_DATE_M?3:6;
             snprintf(top, sizeof(top), "DATE SET %s",
                      menu_state == MENU_EDIT_DATE_D ? "DAY" :
                      menu_state == MENU_EDIT_DATE_M ? "MONTH" : "YEAR");
@@ -4174,27 +4183,33 @@ int main(void) {
                      (unsigned)menu_rtc_choice.day, (unsigned)menu_rtc_choice.month,
                      (unsigned)menu_rtc_choice.year);
         } else if (menu_state == MENU_EDIT_VOLUME) {
+            cursor_column=0;
             snprintf(top, sizeof(top), "VOLUME %s",
                      menu_volume_bluetooth ? "BT" : "LOCAL");
             snprintf(bottom, sizeof(bottom), "%u / 30 PRESS=OK",
                      (unsigned)menu_volume_choice);
         } else if (menu_state == MENU_EDIT_QUIET_ENABLED) {
+            cursor_column=0;
             snprintf(top, sizeof(top), "QUIET MODE");
             snprintf(bottom, sizeof(bottom), "%s PRESS=NEXT",
                      menu_quiet_enabled_choice ? "ON" : "OFF");
         } else if (menu_state == MENU_EDIT_QUIET_START) {
+            cursor_column=0;
             snprintf(top, sizeof(top), "QUIET START");
             snprintf(bottom, sizeof(bottom), "%02u:00 PRESS=NEXT",
                      (unsigned)menu_quiet_start_choice);
         } else if (menu_state == MENU_EDIT_QUIET_END) {
+            cursor_column=0;
             snprintf(top, sizeof(top), "QUIET END");
             snprintf(bottom, sizeof(bottom), "%02u:00 PRESS=SAVE",
                      (unsigned)menu_quiet_end_choice);
         } else if (menu_state == MENU_EDIT_HALF_HOUR) {
+            cursor_column=0;
             snprintf(top, sizeof(top), "HALF-HOUR BEEP");
             snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
                      menu_half_hour_choice ? "ON" : "OFF");
         } else if (menu_state == MENU_EDIT_EXACT) {
+            cursor_column=0;
             snprintf(top, sizeof(top), "EXACT HOUR WORD");
             snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
                      menu_exact_choice ? "ON" : "OFF");
@@ -4236,13 +4251,23 @@ int main(void) {
             snprintf(bottom, sizeof(bottom), "%s", rtc_bottom);
         }
 
-        if (lcd_ok && strcmp(top, last_top) != 0) {
-            lcd1602_write_line(0, top);
-            snprintf(last_top, sizeof(last_top), "%s", top);
-        }
-        if (lcd_ok && strcmp(bottom, last_bottom) != 0) {
-            lcd1602_write_line(1, bottom);
-            snprintf(last_bottom, sizeof(last_bottom), "%s", bottom);
+        if (lcd_ok) {
+            bool top_changed=strcmp(top,last_top)!=0;
+            bool bottom_changed=strcmp(bottom,last_bottom)!=0;
+            // Hide during repaint, then restore focus because writing text moves DDRAM.
+            if (top_changed || bottom_changed)
+                lcd1602_set_cursor(0,0,LCD1602_CURSOR_OFF);
+            if (top_changed) {
+                lcd1602_write_line(0,top);
+                snprintf(last_top,sizeof(last_top),"%s",top);
+            }
+            if (bottom_changed) {
+                lcd1602_write_line(1,bottom);
+                snprintf(last_bottom,sizeof(last_bottom),"%s",bottom);
+            }
+            if (alarm_active_index>=0) cursor_column=-1;
+            lcd1602_set_cursor(1,cursor_column<0?0u:(unsigned)cursor_column,
+                cursor_column<0?LCD1602_CURSOR_OFF:LCD1602_CURSOR_UNDERLINE);
         }
         sleep_ms(1);
     }
