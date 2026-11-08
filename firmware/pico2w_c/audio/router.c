@@ -33,8 +33,8 @@ void audio_router_bluetooth_state(audio_router_t *router, bool connected) {
 const char *audio_router_name(audio_output_t output) {
     switch (output) {
         case AUDIO_OUTPUT_LOCAL: return "LOCAL";
-        case AUDIO_OUTPUT_BT_NEST: return "BT_NEST";
-        case AUDIO_OUTPUT_BT_JBL: return "BT_JBL";
+        case AUDIO_OUTPUT_BT_NEST: return "BT";
+        case AUDIO_OUTPUT_BT_JBL: return "BT";
         default: return "UNKNOWN";
     }
 }

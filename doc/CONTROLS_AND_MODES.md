@@ -33,6 +33,8 @@ Time/date writes occur only after confirming the final field. When network time 
 
 Audio Output contains independent preferences for manual speech, hourly voice, timer and alarm. LOCAL fallback is retained when Bluetooth is unavailable.
 
+LOCAL is the built-in DFPlayer output; BT is the currently selected external Bluetooth speaker, regardless of brand. Selecting Portable or Nest under Bluetooth changes the speaker, not these independent output preferences. Music follows Manual. USB commands audio-select bt, auto-audio bt, timer-audio bt and alarm-audio bt use the same preferences; the earlier jbl spelling remains a compatible alias. These are preferred outputs; a missing stream or file can trigger LOCAL fallback.
+
 ## Bluetooth
 
 The list contains Scan devices, saved speakers, then newly found addresses not already saved. One MAC appears once. LCD labels show names; unknown names use Saved speaker or Unknown device. USB diagnostics retain MAC addresses.
@@ -53,11 +55,24 @@ Snooze and weekday schedules are planned, not part of this release.
 
 ## Music player
 
-Hold ALARM to enter while idle. The timer encoder chooses a track; TIMER or SETTINGS starts/stops it. MINUS or ALARM exits. The player uses a no-repeat shuffled playlist and advances after a completed track. Volume remains available.
+Hold ALARM to enter while idle. Playback now starts automatically when sound is enabled, matching the earlier MicroPython player. Each opening starts in SHUF mode. Mode and navigation history live in RAM and are reset on opening; no settings-format change is required.
+
+| Control in the player | Action |
+| --- | --- |
+| TIMER button | PLAY/STOP; PLAY restarts the selected track |
+| SETTINGS or clockwise TIMER rotation | Next, immediately requests playback |
+| MINUS or counterclockwise TIMER rotation | Previous selection from history, immediately requests playback |
+| ALARM short press | Cycle SHUF -> REP1 -> NORM -> SHUF without interrupting the current track |
+| ALARM or MODE hold, at least 900 ms | Stop and exit |
+| Volume rotation / button | Adjust active output / toggle sound |
+
+NORM advances through track numbers and wraps at the end. SHUF plays every track once per uninterrupted forward cycle and delays the last seven selections until the tail of the next cycle (fewer for small libraries). REP1 repeats the current track at EOF; explicit Next can still skip it. Previous walks up to 128 selections, and Next can walk forward through that history. Manual navigation can intentionally replay tracks. Changing mode discards forward history. Without earlier history, Previous in NORM wraps by track number; in other modes it restarts the selected track.
+
+The first LCD line shows mode and effective output, for example MUSIC SHUF BT. The second shows selected track/count and PLAY, STOP, WAIT or MUTED. WAIT represents a pending start while transport ownership or the preceding LOCAL pause command settles. Rapid navigation replaces the pending selection with the latest one. Muted navigation selects tracks without starting playback.
 
 The volume encoder button toggles sound in the player and alarm editor as well as on the main/settings screens. Muting stops active music on either output and shows MUTED in the player. Unmuting does not restart music; press TIMER to start it. Separate LOCAL/Bluetooth levels are retained. During a ringing alarm the existing policy is unchanged: use ALARM to stop it; rotating volume remains available.
 
-The output follows the manual audio preference when entering the player. Bluetooth requires matching folder 08 files on the SPI FAT32 card. A lost Bluetooth link falls back to LOCAL. UI stop is not a position-preserving pause; separate mp3-pause/mp3-resume commands exist for direct playback diagnostics.
+The output follows the manual audio preference when entering the player. Bluetooth requires matching folder 08 files on the SPI FAT32 card. A lost Bluetooth link falls back to LOCAL and restarts the selected track when the local transport is idle. This does not advance the playlist. UI stop is not a position-preserving pause; separate mp3-pause/mp3-resume commands exist for direct playback diagnostics.
 
 ## Persistence, diagnostics and version
 

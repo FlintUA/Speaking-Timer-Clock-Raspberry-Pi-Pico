@@ -2,6 +2,12 @@
 
 This summary covers the assembled Pico 2 W clock on COM8. It reconstructs results from project records and user tests; it is not a new hardware run.
 
+## November 8 timer controls and output routing
+
+The user log covering 11:23:45-11:26:50 confirms accelerated TIMER selection with 1/5/10-minute steps, reset to one-minute steps on reversal, a 60-second LOCAL countdown with start/finish audio, cancellation audio, GP28 editor entry and MINUS exit from its first field. It does not confirm the complete HOUR/MIN/SEC path or muting during music.
+
+Portable connected and played folder 08 track 012 with underruns=0. Timer audio remained LOCAL because its output preference is independent. The user subsequently changed the timer output and confirmed it works on the external speaker. The new extended player and BT labels were implemented after this log and are not hardware-validated by it.
+
 ## About screen
 
 The user confirmed the two-page About menu works after commit d8f2c57: Speaking Clock / Pico 2 W and firmware version / by FlintUA. This confirms the existing screen and controls; the later Git-tag version generator still requires a rebuilt-firmware check on the device.

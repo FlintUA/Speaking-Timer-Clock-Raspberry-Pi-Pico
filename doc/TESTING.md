@@ -12,13 +12,14 @@ ctest --test-dir build/host-tests -C Debug --output-on-failure
 
 GitHub CI runs this suite on Windows and Linux.
 
-The six suites cover:
+The seven suites cover:
 - Alarm validity, scheduling, simultaneous slots and duplicate suppression.
 - Calendar conversion, leap days, Europe/Berlin transitions, NTP era rollover, invalid headers and mismatched request nonces.
 - MAC parsing, unique combined catalogs and preservation of useful saved names.
 - Settings v1-v7 decoding and migration to v8, Wi-Fi fields, extended alarm tracks, A/B fallback after corruption, failed writes and refusal to erase unknown sectors. Flash is simulated, so this is not a physical Flash endurance test.
 - Git-derived versions: no tags, exact lightweight and annotated tags, commits after a tag, tracked changes, unrelated tags and source archives.
 - Precise timer draft/confirmation/cancellation, field wrapping and four-hour limit, accelerated minute selection and monotonic one-shot countdown completion.
+- Music modes, repeat-one versus explicit Next, backward/forward history, bounded history retention, single-track libraries and shuffle cycle/boundary protection for 2, 7, 8, 78 and 255 tracks.
 
 ## Firmware builds
 
@@ -53,6 +54,8 @@ Fetch tags before building if the checkout does not have them: git fetch --tags.
 ## Device acceptance before stable release
 
 Restored timer controls require device checks: GP28 editor entry/cancel, HOUR/MIN/SEC confirmation using TIMER/SETTINGS, MINUS/back, timeout cancellation, one-second completion and four-hour limit. Check fast rotation and direction reversal in quick selection. In the music player test mute/unmute on LOCAL and Bluetooth: music stops, levels remain intact and unmute requires explicit playback. These paths have not yet been accepted on the device.
+
+For the extended player, check LOCAL and BT with Portable/Nest: automatic play on entry, mode cycling without restarting the current song, NORM advancement, REP1 at EOF, explicit Next in REP1, Previous/forward history, rapid encoder changes, PLAY/STOP, mute and both hold-to-exit paths. Check automatic EOF advancement and Bluetooth loss: current track restarts on LOCAL without a playlist skip. Verify all output menus/statuses say BT and both bt/jbl CLI spellings work. These new control/transport paths still need hardware acceptance; host playlist tests do not replace it.
 
 Follow [network acceptance](NETWORK_TIME.md#hardware-acceptance) and [firmware verification](../firmware/pico2w_c/README.md#on-device-verification). In addition:
 - Start discovery, select no new device and exit; the preferred connection must resume.

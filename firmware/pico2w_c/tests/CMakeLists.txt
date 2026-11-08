@@ -16,9 +16,10 @@ add_executable(alarm_engine_test alarm_engine_host_test.c "${APP}/alarm_engine.c
 add_executable(clock_time_test clock_time_test.c "${APP}/clock_time.c")
 add_executable(bt_catalog_test bt_catalog_test.c "${SERVICES}/bt_catalog.c")
 add_executable(timer_controls_test timer_controls_test.c "${APP}/timer_controls.c" "${APP}/countdown.c")
+add_executable(music_playlist_test music_playlist_test.c "${APP}/music_playlist.c")
 add_executable(settings_store_test settings_store_test.c "${APP}/alarm_engine.c")
 target_include_directories(settings_store_test PRIVATE mocks)
-foreach(test alarm_engine clock_time bt_catalog settings_store timer_controls)
+foreach(test alarm_engine clock_time bt_catalog settings_store timer_controls music_playlist)
     add_test(NAME ${test} COMMAND ${test}_test)
 endforeach()
 add_test(NAME git_version COMMAND "${CMAKE_COMMAND}"

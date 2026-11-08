@@ -12,6 +12,7 @@
 #include "lcd1602_i2c.h"
 #include "countdown.h"
 #include "timer_controls.h"
+#include "music_playlist.h"
 #include "alarm_engine.h"
 #include "controls.h"
 #include "dfplayer.h"
@@ -227,12 +228,8 @@ static bool music_ui_bt_started;
 static uint8_t music_ui_track = 1u;
 static uint8_t music_track_count = 45u; // Used only if DFPlayer folder count query fails.
 static uint8_t alarm_track_count = 45u;
-static uint8_t music_shuffle[255];
-static unsigned music_shuffle_size;
-static unsigned music_shuffle_next;
-static uint8_t music_recent[7];
-static unsigned music_recent_size;
-static bool music_random_seeded;
+static music_playlist_t music_playlist;
+static bool music_ui_pending;
 // Preview starts only by SETTINGS in TRACK field (not on each encoder tick).
 // This keeps rapid track selection silent and never changes saved config.
 static bool exact_hour_phrase;
@@ -361,7 +358,7 @@ static void auto_status(void) {
            clock_mode ? "CHIME" : "VOICE");
 #ifdef CLOCK_ENABLE_A2DP
     printf("[AUTO] voice_output=%s (Flash v4; chime/half stay LOCAL)\n",
-           auto_voice_jbl_enabled ? "JBL_PREFERRED" : "LOCAL");
+           auto_voice_jbl_enabled ? "BT_PREFERRED" : "LOCAL");
 #endif
 }
 
@@ -473,13 +470,13 @@ static void auto_service_rtc(const ds1302_datetime_t *dt) {
             clock_a2dp_current_rate() == 44100u) {
             queued = bt_speech_start(dt->hour, 0u, true);
             if (queued)
-                puts("[AUTO-AUDIO] HOURLY_VOICE routed=JBL");
+                puts("[AUTO-AUDIO] HOURLY_VOICE routed=BT");
             else
-                puts("[AUTO-AUDIO] JBL start failed; attempting LOCAL");
+                puts("[AUTO-AUDIO] BT start failed; attempting LOCAL");
         } else {
             queued = false;
             if (auto_voice_jbl_enabled)
-                puts("[AUTO-AUDIO] JBL unavailable; hourly voice LOCAL");
+                puts("[AUTO-AUDIO] BT unavailable; hourly voice LOCAL");
         }
         if (!queued)
 #endif
@@ -610,7 +607,7 @@ static bool bt_timer_prepare(const audio_queue_t *plan, const char *event) {
     bt_timer_index = 0u;
     bt_timer_started = false;
     bt_timer_running = true;
-    printf("[BT-TIMER] %s output=JBL segments=%u gain=53.3%%\n",
+    printf("[BT-TIMER] %s output=BT segments=%u gain=53.3%%\n",
            event, (unsigned)bt_timer_count);
     return true;
 }
@@ -767,7 +764,7 @@ static void announce_time(uint8_t hour, uint8_t minute) {
         if (audio_router.effective == AUDIO_OUTPUT_BT_JBL) {
             if (!bt_speech_start(hour, minute, false)) return;
         } else {
-            puts("[BT-SPEECH] JBL not ready; announcing via LOCAL");
+            puts("[BT-SPEECH] BT not ready; announcing via LOCAL");
             audio_queue_clear(&audio_queue, true);
             if (!speech_enqueue_time(&audio_queue, language, hour, minute,
                                      exact_hour_phrase)) return;
@@ -1215,52 +1212,8 @@ static void alarm_ui_close(const char *reason) {
     printf("[ALARM-UI] closed=%s\n", reason);
 }
 
-// Fisher-Yates; a shuffle bag avoids repeats until every track is played.
-// The last seven songs of the previous cycle are postponed on the next cycle.
-static void music_shuffle_mix(unsigned first, unsigned end) {
-    if (end <= first + 1u) return;
-    for (unsigned i = end - 1u; i > first; --i) {
-        unsigned j = first + (unsigned)(rand() % (int)(i - first + 1u));
-        uint8_t t = music_shuffle[i];
-        music_shuffle[i] = music_shuffle[j];
-        music_shuffle[j] = t;
-    }
-}
-
-static bool music_was_recent(uint8_t track) {
-    for (unsigned i = 0; i < music_recent_size; ++i)
-        if (music_recent[i] == track) return true;
-    return false;
-}
-
-static void music_shuffle_refill(void) {
-    // Generate an entire shuffled playlist, navigable before playback.
-    unsigned safe = 0u, delayed = 0u;
-    for (unsigned i = 1; i <= music_track_count; ++i) {
-        if (!music_was_recent((uint8_t)i))
-            music_shuffle[safe++] = (uint8_t)i;
-    }
-    // Shuffle safe tracks first, then recent tracks to prevent repeats at cycle edge.
-    music_shuffle_mix(0u, safe);
-    unsigned delayed_start = safe;
-    for (unsigned i = 1; i <= music_track_count; ++i) {
-        if (music_was_recent((uint8_t)i))
-            music_shuffle[safe + delayed++] = (uint8_t)i;
-    }
-    music_shuffle_mix(delayed_start, safe + delayed);
-    music_shuffle_size = safe + delayed;
-    music_shuffle_next = 0u;
-}
-
-static void music_remember(uint8_t track) {
-    if (music_recent_size >= sizeof(music_recent)) {
-        memmove(&music_recent[0], &music_recent[1], sizeof(music_recent) - 1u);
-        music_recent_size = sizeof(music_recent) - 1u;
-    }
-    music_recent[music_recent_size++] = track;
-}
-
 static void music_ui_stop(const char *reason) {
+    music_ui_pending=false;
     if (!music_ui_playing) return;
 #ifdef CLOCK_ENABLE_A2DP
     if (music_ui_bluetooth && mp3_play_active()) mp3_play_stop();
@@ -1275,6 +1228,7 @@ static void music_ui_close(const char *reason) {
     if (!music_ui_open) return;
     music_ui_stop(reason);
     music_ui_open = false;
+    mode_press_active=false;
     timer_screen = false;
     printf("[MUSIC-UI] closed=%s\n", reason);
 }
@@ -1290,7 +1244,6 @@ static bool music_play_track(uint8_t track) {
             music_ui_bt_started = true;
             music_ui_track = track;
             music_ui_playing = true;
-            music_remember(track);
             printf("[MUSIC-UI] playing BT folder=08 track=%03u\n",
                    (unsigned)track);
             return true;
@@ -1309,48 +1262,40 @@ static bool music_play_track(uint8_t track) {
     }
     music_ui_track = track;
     music_ui_playing = true;
-    music_remember(track);
     printf("[MUSIC-UI] playing LOCAL folder=08 track=%03u\n",
            (unsigned)track);
     return true;
 }
 
 static void music_ui_start(void) {
-    if (!music_ui_open) return;
-    if (!sound_enabled || alarm_active_index >= 0 || timer.running ||
-        !audio_queue_idle(&audio_queue) || dfplayer_busy()
-#ifdef CLOCK_ENABLE_A2DP
-        || bt_speech_running || bt_timer_running || bt_alarm_running ||
-        mp3_play_active() || routed_test_pending || mp3_probe_active() ||
-        sd_fat32_stream_active()
-#endif
-       ) {
-        puts("[MUSIC-UI] playback blocked: sound off or audio busy");
-        return;
-    }
-    // Play the selected entry in the already shuffled playlist.
-    if (music_shuffle_next >= music_shuffle_size) return;
-    (void)music_play_track(music_shuffle[music_shuffle_next]);
+    if (!music_ui_open || !sound_enabled || timer.running || alarm_active_index>=0) return;
+    // A track change may still have a queued UART pause. Start on the next
+    // safe service tick instead of discarding the user's request.
+    music_ui_pending=true;
 }
 
 static void music_ui_toggle(void) {
     if (!music_ui_open) return;
-    if (music_ui_playing) music_ui_stop("BUTTON");
+    if (music_ui_playing || music_ui_pending) music_ui_stop("BUTTON");
     else music_ui_start();
 }
 
 static void music_ui_rotate(int direction) {
-    if (!music_ui_open) return;
+    if (!music_ui_open || !direction) return;
     music_ui_stop("TRACK_CHANGED");
-    if (!music_shuffle_size) return;
-    if (direction > 0)
-        music_shuffle_next = (music_shuffle_next + 1u) % music_shuffle_size;
-    else if (direction < 0)
-        music_shuffle_next = (music_shuffle_next + music_shuffle_size - 1u) % music_shuffle_size;
-    music_ui_track = music_shuffle[music_shuffle_next];
-    printf("[MUSIC-UI] selected position=%u/%u track=%u\n",
-           (unsigned)(music_shuffle_next + 1u), (unsigned)music_shuffle_size,
-           (unsigned)music_ui_track);
+    music_ui_track=direction>0 ? music_playlist_next(&music_playlist,false) :
+                               music_playlist_previous(&music_playlist);
+    printf("[MUSIC-UI] selected track=%u/%u mode=%s history=%u/%u\n",
+        (unsigned)music_ui_track,(unsigned)music_track_count,
+        music_playlist_mode_name(music_playlist.mode),
+        music_playlist.history_position+1,music_playlist.history_size);
+    music_ui_start();
+}
+
+static void music_ui_cycle_mode(void) {
+    music_playlist_cycle_mode(&music_playlist);
+    printf("[MUSIC-UI] mode=%s (current track continues)\n",
+           music_playlist_mode_name(music_playlist.mode));
 }
 
 static void music_ui_enter(void) {
@@ -1360,17 +1305,13 @@ static void music_ui_enter(void) {
         puts("[MUSIC-UI] open blocked: timer/alarm/menu/audio busy");
         return;
     }
-    if (!music_random_seeded) {
-        srand((unsigned)time_us_64());
-        music_random_seeded = true;
-    }
     uint8_t detected = dfplayer_folder_count(8u, to_ms_since_boot(get_absolute_time()));
     music_track_count = detected ? detected : 45u;
     printf("[MUSIC-UI] folder=08 files=%u source=%s\n",
            (unsigned)music_track_count, detected ? "DFPLAYER" : "FALLBACK");
-    music_recent_size = 0u;
-    music_shuffle_refill();
-    music_ui_track = music_shuffle[0];
+    music_playlist_init(&music_playlist,music_track_count,(uint32_t)time_us_64());
+    music_ui_track=music_playlist.current;
+    music_ui_pending=false;
     music_ui_open = true;
     music_ui_playing = false;
     music_ui_bt_started = false;
@@ -1383,43 +1324,48 @@ static void music_ui_enter(void) {
     timer_screen = false;
     printf("[MUSIC-UI] output=%s, BT music requires /08/NNN.mp3 on SPI FAT32\n",
            music_ui_bluetooth ? "BT" : "LOCAL");
-    printf("[MUSIC-UI] playlist ready tracks=%u; position=1/%u track=%u\n",
-           (unsigned)music_track_count, (unsigned)music_shuffle_size,
-           (unsigned)music_ui_track);
-    printf("[MUSIC-UI] opened track=%u TIMER=PLAY/STOP MINUS=EXIT\n",
-           (unsigned)music_ui_track);
+    printf("[MUSIC-UI] opened tracks=%u track=%u mode=SHUF; TIMER=PLAY/STOP SETTINGS=NEXT MINUS=PREV ALARM=MODE; hold ALARM/MODE=EXIT\n",
+           (unsigned)music_track_count,(unsigned)music_ui_track);
+    music_ui_start();
 }
 
 static void music_ui_service(void) {
-    if (!music_ui_open || !music_ui_playing) return;
+    if (!music_ui_open) return;
+    if (music_ui_pending) {
+        if (!sound_enabled || timer.running || alarm_active_index>=0) {
+            music_ui_pending=false;
+            return;
+        }
+        if (!audio_queue_idle(&audio_queue) || dfplayer_busy() ||
+            mp3_play_active() || mp3_probe_active() || sd_fat32_stream_active()
+#ifdef CLOCK_ENABLE_A2DP
+            || bt_speech_running || bt_timer_running || bt_alarm_running || routed_test_pending
+#endif
+           ) return;
+        music_ui_pending=false;
+        (void)music_play_track(music_ui_track);
+        return;
+    }
+    if (!music_ui_playing) return;
 #ifdef CLOCK_ENABLE_A2DP
     if (music_ui_bluetooth) {
         if (!clock_a2dp_stream_active()) {
-            puts("[MUSIC-UI] BT link lost; switching to LOCAL");
-            if (mp3_play_active()) mp3_play_stop();
-            music_ui_bluetooth = false;
-            music_ui_bt_started = false;
-            if (audio_queue_idle(&audio_queue) && !dfplayer_busy())
-                (void)music_play_track(music_ui_track);
+            music_ui_stop("BT_LINK_LOST");
+            music_ui_bluetooth=false;
+            puts("[MUSIC-UI] BT link lost; restarting current track on LOCAL");
+            music_ui_start();
             return;
         }
-        // MP3 decoding is serviced later in the main loop.
-        if (mp3_play_active()) return;
-        if (!music_ui_bt_started) return;
-        music_ui_bt_started = false;
+        if (mp3_play_active() || !music_ui_bt_started) return;
+        music_ui_bt_started=false;
     } else
 #endif
     {
         if (!audio_queue_idle(&audio_queue) || dfplayer_busy()) return;
     }
-    // Advance through the existing playlist; reshuffle only at cycle end.
-    ++music_shuffle_next;
-    if (music_shuffle_next >= music_shuffle_size) {
-        music_shuffle_refill();
-        puts("[MUSIC-UI] next shuffled cycle");
-    }
-    if (music_shuffle_next < music_shuffle_size)
-        (void)music_play_track(music_shuffle[music_shuffle_next]);
+    music_ui_playing=false;
+    music_ui_track=music_playlist_next(&music_playlist,true);
+    music_ui_start();
 }
 
 static void alarm_ui_open(uint64_t now) {
@@ -1742,7 +1688,7 @@ static void menu_audio_apply(unsigned index, bool jbl) {
 #else
     (void)index;
     (void)jbl;
-    puts("[MENU-AUDIO] JBL unavailable in this firmware; LOCAL only");
+    puts("[MENU-AUDIO] BT unavailable in this firmware; LOCAL only");
 #endif
 }
 
@@ -1808,7 +1754,7 @@ static void menu_begin_edit(uint64_t now) {
             menu_state = MENU_AUDIO_LIST;
             printf("[MENU-AUDIO] Open: %s preferred=%s\n",
                    menu_audio_name(menu_audio_index),
-                   menu_audio_selected_jbl(menu_audio_index) ? "JBL" : "LOCAL");
+                   menu_audio_selected_jbl(menu_audio_index) ? "BT" : "LOCAL");
             return;
         case 8:
             menu_bt_index = 0;
@@ -1923,13 +1869,13 @@ static void menu_commit(uint64_t now) {
             menu_state = MENU_EDIT_AUDIO_OUTPUT;
             printf("[MENU-AUDIO] Edit %s current=%s\n",
                    menu_audio_name(menu_audio_index),
-                   menu_audio_jbl_choice ? "JBL" : "LOCAL");
+                   menu_audio_jbl_choice ? "BT" : "LOCAL");
             return;
         case MENU_EDIT_AUDIO_OUTPUT:
             menu_audio_apply(menu_audio_index, menu_audio_jbl_choice);
             printf("[MENU-AUDIO] Saved %s=%s (Flash autosave)\n",
                    menu_audio_name(menu_audio_index),
-                   menu_audio_selected_jbl(menu_audio_index) ? "JBL" : "LOCAL");
+                   menu_audio_selected_jbl(menu_audio_index) ? "BT" : "LOCAL");
             menu_state = MENU_AUDIO_LIST;
             return;
         case MENU_BT_LIST:
@@ -2062,7 +2008,7 @@ static void menu_rotate(int direction, uint64_t now) {
                                 SETTINGS_AUDIO_ITEMS);
             printf("[MENU-AUDIO] Item=%s preferred=%s\n",
                    menu_audio_name(menu_audio_index),
-                   menu_audio_selected_jbl(menu_audio_index) ? "JBL" : "LOCAL");
+                   menu_audio_selected_jbl(menu_audio_index) ? "BT" : "LOCAL");
             break;
         case MENU_EDIT_AUDIO_OUTPUT:
 #ifdef CLOCK_ENABLE_A2DP
@@ -2072,7 +2018,7 @@ static void menu_rotate(int direction, uint64_t now) {
 #endif
             printf("[MENU-AUDIO] %s candidate=%s\n",
                    menu_audio_name(menu_audio_index),
-                   menu_audio_jbl_choice ? "JBL" : "LOCAL");
+                   menu_audio_jbl_choice ? "BT" : "LOCAL");
             break;
         case MENU_EDIT_TIME_H:
             menu_rtc_choice.hour = wrap_u8(menu_rtc_choice.hour, 0, 23, direction);
@@ -2319,7 +2265,7 @@ static bool bt_alarm_prepare(const audio_queue_t *plan) {
         !clock_a2dp_stream_active() || clock_a2dp_current_rate() != 44100u ||
         mp3_play_active() || mp3_probe_active() || sd_fat32_stream_active()) {
         if (alarm_audio_jbl_enabled)
-            puts("[BT-ALARM] JBL unavailable/busy; choosing LOCAL");
+            puts("[BT-ALARM] BT unavailable/busy; choosing LOCAL");
         return false;
     }
     for (unsigned i = 0; i < plan->size; ++i)
@@ -2414,7 +2360,7 @@ static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
     alarm_audio_armed = true;
 #ifdef CLOCK_ENABLE_A2DP
     if (bt_alarm_prepare(&plan)) {
-        printf("[ALARM-AUDIO] output=JBL%s\n", test ? " TEST" : "");
+        printf("[ALARM-AUDIO] output=BT%s\n", test ? " TEST" : "");
     } else
 #endif
     {
@@ -2985,29 +2931,29 @@ static void handle_command(char *line) {
 #endif
     } else if (strcmp(line, "audio-settings") == 0) {
         printf("[AUDIO-SETTINGS] manual=%s hourly=%s timer=%s alarm=%s\n",
-               audio_router.requested == AUDIO_OUTPUT_BT_JBL ? "JBL" : "LOCAL",
+               audio_router.requested == AUDIO_OUTPUT_BT_JBL ? "BT" : "LOCAL",
 #ifdef CLOCK_ENABLE_A2DP
-               auto_voice_jbl_enabled ? "JBL" : "LOCAL",
-               timer_audio_jbl_enabled ? "JBL" : "LOCAL",
-               alarm_audio_jbl_enabled ? "JBL" : "LOCAL"
+               auto_voice_jbl_enabled ? "BT" : "LOCAL",
+               timer_audio_jbl_enabled ? "BT" : "LOCAL",
+               alarm_audio_jbl_enabled ? "BT" : "LOCAL"
 #else
                "LOCAL", "LOCAL", "LOCAL"
 #endif
         );
         printf("[AUDIO-SETTINGS] volume LOCAL=%u/30 BT=%u/30\n",
                (unsigned)volume, (unsigned)bt_volume);
-        printf("[AUDIO-SETTINGS] output=preferred, effective JBL requires A2DP; autosave=%s\n",
+        printf("[AUDIO-SETTINGS] output=preferred, effective BT requires A2DP; autosave=%s\n",
                autosave_pending ? "PENDING" : "IDLE");
 #ifdef CLOCK_ENABLE_A2DP
         printf("[AUDIO-SETTINGS] Bluetooth stream=%s rate=%luHz; LOCAL fallback enabled\n",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE",
                (unsigned long)clock_a2dp_current_rate());
 #endif
-    } else if (strcmp(line, "timer-audio jbl") == 0) {
+    } else if ((strcmp(line, "timer-audio bt") == 0 || strcmp(line, "timer-audio jbl") == 0)) {
 #ifdef CLOCK_ENABLE_A2DP
         timer_audio_jbl_enabled = true;
         settings_mark_changed();
-        printf("[TIMER-AUDIO] output=JBL_PREFERRED BT=%s LOCAL fallback (Flash autosave)\n",
+        printf("[TIMER-AUDIO] output=BT_PREFERRED BT=%s LOCAL fallback (Flash autosave)\n",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
 #else
         puts("[TIMER-AUDIO] Bluetooth support disabled; LOCAL only");
@@ -3022,7 +2968,7 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "timer-audio") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
         printf("[TIMER-AUDIO] preferred=%s active=%s BT=%s (Flash autosave)\n",
-               timer_audio_jbl_enabled ? "JBL" : "LOCAL",
+               timer_audio_jbl_enabled ? "BT" : "LOCAL",
                bt_timer_running ? "YES" : "NO",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
 #else
@@ -3050,7 +2996,7 @@ static void handle_command(char *line) {
                 started_on_bt = bt_speech_start((uint8_t)hour, 0u, true);
 #endif
             if (started_on_bt) {
-                printf("[AUTO-AUDIO] TEST %02u:00 via JBL (scheduler unchanged)\n",
+                printf("[AUTO-AUDIO] TEST %02u:00 via BT (scheduler unchanged)\n",
                        hour);
             } else if (speech_enqueue_time(&audio_queue, language, (uint8_t)hour,
                                            0u, exact_hour_phrase)) {
@@ -3068,14 +3014,14 @@ static void handle_command(char *line) {
 #else
         puts("[AUTO-AUDIO] Bluetooth disabled; hourly announcements always LOCAL");
 #endif
-    } else if (strcmp(line, "auto-audio jbl") == 0) {
+    } else if ((strcmp(line, "auto-audio bt") == 0 || strcmp(line, "auto-audio jbl") == 0)) {
 #ifdef CLOCK_ENABLE_A2DP
         auto_voice_jbl_enabled = true;
         settings_mark_changed();
-        printf("[AUTO-AUDIO] Hourly VOICE output=JBL_PREFERRED, stream=%s; "
+        printf("[AUTO-AUDIO] Hourly VOICE output=BT_PREFERRED, stream=%s; "
                "LOCAL fallback (Flash autosave)\n",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
-        puts("[AUTO-AUDIO] Chime/half-hour/music stay LOCAL; timer/alarm have independent opt-in");
+        puts("[AUTO-AUDIO] Chime/half-hour stay LOCAL; music follows Manual; timer/alarm have independent outputs");
 #else
         puts("[AUTO-AUDIO] Requires Bluetooth A2DP");
 #endif
@@ -3083,7 +3029,7 @@ static void handle_command(char *line) {
 #ifdef CLOCK_ENABLE_A2DP
         printf("[AUTO-AUDIO] hourly_voice=%s stream=%s "
                "(Flash autosave; other automatic events LOCAL)\n",
-               auto_voice_jbl_enabled ? "JBL_PREFERRED" : "LOCAL",
+               auto_voice_jbl_enabled ? "BT_PREFERRED" : "LOCAL",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE");
 #else
         puts("[AUTO-AUDIO] Hourly voice LOCAL (Bluetooth unavailable)");
@@ -3102,11 +3048,11 @@ static void handle_command(char *line) {
         settings_mark_changed();
         puts("[AUDIO-ROUTE] Requested LOCAL (audio-route-test uses DFPlayer; normal clock output unchanged)");
 #ifdef CLOCK_ENABLE_A2DP
-    } else if (strcmp(line, "audio-select jbl") == 0) {
+    } else if ((strcmp(line, "audio-select bt") == 0 || strcmp(line, "audio-select jbl") == 0)) {
         audio_router_select(&audio_router, AUDIO_OUTPUT_BT_JBL);
         audio_router_bluetooth_state(&audio_router, clock_a2dp_stream_active());
         settings_mark_changed();
-        puts("[AUDIO-ROUTE] Requested BT_JBL for manual say and route-test only (alarm-audio separate)");
+        puts("[AUDIO-ROUTE] Requested BT for manual say and route-test only (alarm-audio separate)");
 #endif
     } else if (strncmp(line, "audio-route-test ", 17) == 0) {
         // Explicit test of one queued track through the selected audio output.
@@ -3138,7 +3084,7 @@ static void handle_command(char *line) {
                     routed_test_pending = true;
                     routed_test_folder = (uint8_t)folder;
                     routed_test_track = (uint8_t)track;
-                    printf("[AUDIO-ROUTE] TEST BT_JBL %s (automatic events still LOCAL)\n",
+                    printf("[AUDIO-ROUTE] TEST BT %s (automatic events still LOCAL)\n",
                            mp3_path);
                 } else {
                     puts("[AUDIO-ROUTE] Bluetooth source failed; replaying test track on LOCAL");
@@ -3162,12 +3108,12 @@ static void handle_command(char *line) {
         puts("[AUDIO-ROUTE] NOTE: manual say + route-test use this preference; auto/timer/alarm have independent settings");
 #ifdef CLOCK_ENABLE_A2DP
         printf("[BT-ALARM] preferred=%s running=%s segment=%u/%u\n",
-               alarm_audio_jbl_enabled ? "JBL" : "LOCAL",
+               alarm_audio_jbl_enabled ? "BT" : "LOCAL",
                bt_alarm_running ? "YES" : "NO",
                (unsigned)(bt_alarm_running ? bt_alarm_index + 1u : 0u),
                (unsigned)(bt_alarm_running ? bt_alarm_count : 0u));
         printf("[BT-TIMER] preferred=%s running=%s segment=%u/%u\n",
-               timer_audio_jbl_enabled ? "JBL" : "LOCAL",
+               timer_audio_jbl_enabled ? "BT" : "LOCAL",
                bt_timer_running ? "YES" : "NO",
                (unsigned)(bt_timer_running ? bt_timer_index + 1u : 0u),
                (unsigned)(bt_timer_running ? bt_timer_count : 0u));
@@ -3180,14 +3126,14 @@ static void handle_command(char *line) {
         puts("[SD] sd-test - initialize/read SD card read-only; sd-info - last detection result");
         puts("[SD] sd-list [folder] - show FAT32 8.3 names; sd-file 07/001.mp3 - read first bytes");
         puts("[SD] sd-stream 07/001.mp3 - nonblocking complete file CRC32; sd-stop - cancel");
-        puts("[MP3] mp3-test 07/001.mp3 - experimental decode to RAM (no JBL output)");
-        puts("[MP3] mp3-play 07/001.mp3 - full file on JBL; mp3-pause; mp3-resume; mp3-stop; mp3-status");
+        puts("[MP3] mp3-test 07/001.mp3 - experimental decode to RAM (no BT output)");
+        puts("[MP3] mp3-play 07/001.mp3 - full file on BT; mp3-pause; mp3-resume; mp3-stop; mp3-status");
         puts("[MP3] mp3-pause-test 07/001.mp3 - auto pause at 300ms, auto resume after 1s");
-        puts("[AUDIO-ROUTE] audio-select local|jbl; audio-route; audio-route-test 7 1; say 08 25");
-        puts("[AUTO-AUDIO] auto-audio jbl|local; auto-audio (only automatic hourly VOICE)");
+        puts("[AUDIO-ROUTE] audio-select local|bt; audio-route; audio-route-test 7 1; say 08 25");
+        puts("[AUTO-AUDIO] auto-audio bt|local; auto-audio (only automatic hourly VOICE)");
         puts("[AUTO-AUDIO] auto-audio-test 8 - play simulated 08:00 hourly voice, no RTC change");
-        puts("[TIMER-AUDIO] timer-audio jbl|local; timer-audio - timer start/cancel/finish routing");
-        puts("[ALARM-AUDIO] alarm-audio jbl|local; alarm-audio; alarm-audio-test 1; alarm-stop");
+        puts("[TIMER-AUDIO] timer-audio bt|local; timer-audio - timer start/cancel/finish routing");
+        puts("[ALARM-AUDIO] alarm-audio bt|local; alarm-audio; alarm-audio-test 1; alarm-stop");
         puts("[AUDIO-SETTINGS] audio-settings shows persisted preferences; change with audio-select, auto-audio, timer-audio, alarm-audio; save");
         puts("[BT] SETTINGS > Bluetooth: known devices, scan, connect; CLI: bt-scan, bt-devices, bt-use N|name|MAC, bt-forget N|MAC, bt-target");
         puts("[BT-VOL] bt-volume shows independent Bluetooth level; bt-vol 0..30 sets it; VOLUME encoder follows audio route");
@@ -3195,7 +3141,7 @@ static void handle_command(char *line) {
         puts("[ALARM-PENDING] alarm-pending, alarm-pending-test N, alarm-pending-clear (RAM only)");
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[NETWORK] wifi-config SSID|password; wifi-clear; ntp-status; ntp-sync; version");
-        puts("[INPUT] ALARM short=alarm editor; ALARM long >=900ms=music player; MUSIC TIMER=play/stop, encoder=track, MINUS=exit");
+        puts("[INPUT] ALARM short=alarm editor; ALARM hold >=900ms=music; MUSIC TIMER=play/stop, encoder/SETTINGS/MINUS=next/previous, ALARM=mode; hold ALARM/MODE=exit");
         puts("[INPUT] GP28=timer H/M/S editor; TIMER/SETTINGS=next/start; MINUS=back; GP28=cancel; quick encoder=1/5/10 min");
         puts("[INPUT] VOLUME push=sound toggle in clock/settings/player/editor; ringing alarm uses ALARM=stop");
         puts("[BOOTSEL] bootsel arm -> bootsel confirm within 15s (USB required; refuses during busy/autosave)");
@@ -3304,17 +3250,17 @@ static void handle_command(char *line) {
     } else if (strcmp(line, "alarm-audio") == 0) {
 #ifdef CLOCK_ENABLE_A2DP
         printf("[ALARM-AUDIO] preferred=%s BT=%s running=%s (Flash autosave)\n",
-               alarm_audio_jbl_enabled ? "JBL" : "LOCAL",
+               alarm_audio_jbl_enabled ? "BT" : "LOCAL",
                clock_a2dp_stream_active() ? "ACTIVE" : "INACTIVE",
                bt_alarm_running ? "YES" : "NO");
 #else
         puts("[ALARM-AUDIO] LOCAL (Bluetooth disabled)");
 #endif
-    } else if (strcmp(line, "alarm-audio jbl") == 0) {
+    } else if ((strcmp(line, "alarm-audio bt") == 0 || strcmp(line, "alarm-audio jbl") == 0)) {
 #ifdef CLOCK_ENABLE_A2DP
         alarm_audio_jbl_enabled = true;
         settings_mark_changed();
-        puts("[ALARM-AUDIO] preferred=JBL, LOCAL fallback; RAM-only");
+        puts("[ALARM-AUDIO] preferred=BT, LOCAL fallback; RAM-only");
 #else
         puts("[ALARM-AUDIO] Bluetooth unavailable");
 #endif
@@ -3578,7 +3524,9 @@ static void on_control_event(const control_event_t *event, void *context) {
                 alarm_button_pressed = false;
                 if (!alarm_button_consumed && alarm_active_index < 0) {
                     if (music_ui_open) {
-                        music_ui_close("ALARM_BUTTON");
+                        if(now-alarm_button_pressed_at_ms>=ALARM_LONG_PRESS_MS)
+                            music_ui_close("ALARM_HOLD");
+                        else music_ui_cycle_mode();
                     } else if (now - alarm_button_pressed_at_ms >=
                                ALARM_LONG_PRESS_MS) {
                         if (alarm_ui_state == ALARM_UI_CLOSED) music_ui_enter();
@@ -3602,9 +3550,17 @@ static void on_control_event(const control_event_t *event, void *context) {
         }
         if (music_ui_open) {
             if (event->type == CONTROL_BUTTON_PRESS) {
-                if (event->button == BUTTON_TIMER ||
-                    event->button == BUTTON_SETTINGS) music_ui_toggle();
-                else if (event->button == BUTTON_MINUS) music_ui_close("MINUS");
+                if (event->button==BUTTON_TIMER) music_ui_toggle();
+                else if(event->button==BUTTON_SETTINGS) music_ui_rotate(1);
+                else if(event->button==BUTTON_MINUS) music_ui_rotate(-1);
+                else if(event->button==BUTTON_MODE) {
+                    mode_press_active=true;
+                    mode_pressed_at_ms=now;
+                }
+            } else if(event->type==CONTROL_BUTTON_RELEASE &&
+                      event->button==BUTTON_MODE && mode_press_active) {
+                mode_press_active=false;
+                if(now-mode_pressed_at_ms>=900u) music_ui_close("MODE_HOLD");
             }
             return;
         }
@@ -3943,11 +3899,11 @@ int main(void) {
 
         char top[17], bottom[17];
         if (music_ui_open) {
-            snprintf(top, sizeof(top), "MUSIC %s",
-                     music_ui_bluetooth ? "BT" : "LOCAL");
-            snprintf(bottom, sizeof(bottom), "T%02u %s",
-                     (unsigned)music_ui_track,
-                     !sound_enabled ? "MUTED" : music_ui_playing ? "PLAY" : "STOP");
+            snprintf(top,sizeof(top),"MUSIC %s %s",
+                music_playlist_mode_name(music_playlist.mode),music_ui_bluetooth?"BT":"LOCAL");
+            snprintf(bottom,sizeof(bottom),"%03u/%03u %s",
+                (unsigned)music_ui_track,(unsigned)music_track_count,
+                !sound_enabled?"MUTED":music_ui_pending?"WAIT":music_ui_playing?"PLAY":"STOP");
         } else if (alarm_ui_state == ALARM_UI_LIST) {
             const alarm_entry_t *a = &alarms[alarm_ui_index];
             snprintf(top, sizeof(top), "ALARM %u/5 %s",
@@ -4037,14 +3993,14 @@ int main(void) {
             snprintf(top, sizeof(top), "AUDIO %u/%u %s",
                      (unsigned)(menu_audio_index + 1u),
                      (unsigned)SETTINGS_AUDIO_ITEMS,
-                     menu_audio_selected_jbl(menu_audio_index) ? "JBL" : "LOCAL");
+                     menu_audio_selected_jbl(menu_audio_index) ? "BT" : "LOCAL");
             snprintf(bottom, sizeof(bottom), "%s",
                      menu_audio_name(menu_audio_index));
         } else if (menu_state == MENU_EDIT_AUDIO_OUTPUT) {
             snprintf(top, sizeof(top), "OUT %s",
                      menu_audio_name(menu_audio_index));
             snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",
-                     menu_audio_jbl_choice ? "JBL" : "LOCAL");
+                     menu_audio_jbl_choice ? "BT" : "LOCAL");
         } else if (menu_state == MENU_EDIT_LANGUAGE) {
             snprintf(top, sizeof(top), "LANGUAGE SETTING");
             snprintf(bottom, sizeof(bottom), "%s PRESS=SAVE",

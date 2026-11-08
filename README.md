@@ -13,6 +13,7 @@ The clock uses an I2C LCD1602, DS1302 RTC, DFPlayer Mini, two rotary encoders an
 - Countdown timer, five daily alarms, Russian and German speech, and quiet hours.
 - Menus for time, date, language, volume and audio outputs; USB diagnostics.
 - Local DFPlayer and Bluetooth playback for speech, timer, alarms and music, with local fallback.
+- Music player with normal/shuffle/repeat-one modes, Next/Previous history and LOCAL/BT status. Extended controls require hardware acceptance; see [controls](doc/CONTROLS_AND_MODES.md#music-player).
 - One volume encoder controls the active output. DFPlayer and Bluetooth volume levels are stored separately.
 - Bluetooth discovery, selection by name/MAC, automatic SSP pairing, up to four known devices and direct connection to the saved MAC.
 - Optional Wi-Fi/NTP correction with Europe/Berlin CET/CEST and offline RTC fallback.
