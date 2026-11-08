@@ -20,7 +20,7 @@ Before declaring v1.0.0 stable:
 - Initial NTP synchronization and Bluetooth playback with Wi-Fi enabled are confirmed on build 7964939; extend this to an overnight run and hourly refresh/recovery checks.
 - Verify v7/v8/v9 -> v10 save/reboot with existing alarms, daily defaults, separate volumes, network settings and known speakers intact.
 - Test unavailable access point, unavailable NTP server and later recovery.
-- Basic manual connection/disconnection is user-confirmed on build 7378aa1. Complete detailed OFF-policy checks for reboot, scan exit/cancel/timeout, late callbacks, speaker-initiated reconnect and accidental link-loss recovery; retain list deduplication/name retention.
+- Manual connection/disconnection, OFF across a power cycle and no automatic return after a subsequent scan are user-confirmed on build 7378aa1. Remaining detailed checks: scan cancel/timeout, late callbacks, speaker-initiated reconnect and accidental link-loss recovery; retain list deduplication/name retention.
 - Verify alarm selection above track 45 using files present on both cards.
 - Verify the new updater build-identity check on Windows.
 - Complete an overnight run covering scheduled speech, timer and alarms.

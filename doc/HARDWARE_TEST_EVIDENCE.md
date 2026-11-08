@@ -6,7 +6,7 @@ This summary covers the assembled Pico 2 W clock on COM8. Each section identifie
 
 Build 7378aa1 (1.0.0-rc.1+22.g7378aa1) was installed with separate approval. Pre/post read-only COM8 snapshots confirmed identical five alarm configurations, five birthday entries, four output preferences, independent volume levels and both known speakers with paired=YES. Flash v10 A/B sequences 88/89 and the legacy record were retained; Flash guard was OK. Portable returned to A2DP ACTIVE at 44100 Hz under the previously enabled policy, and NTP reported configured=YES/synced=YES after reboot. COM8 was released.
 
-The user then confirmed that connecting and disconnecting work. This validates the basic manual actions on the installed build. The report did not separately establish OFF persistence across reboot, no reconnect after scan completion/cancellation/timeout, speaker-initiated reconnect rejection, or later recovery after an accidental link loss. Those remain targeted checks in TESTING.md. The cause of the intermittent double speaker sound remains unconfirmed.
+The user first confirmed connecting and disconnecting work. They then reported disconnecting power, powering the clock again and performing a scan, with no automatic reconnection. This confirms persistent OFF across a power cycle and no automatic return in that tested post-reboot scan scenario. The report did not separately cover scan cancellation/timeout, speaker-initiated reconnect rejection, or later recovery after an accidental link loss. Those remain targeted checks in TESTING.md. The cause of the intermittent double speaker sound remains unconfirmed.
 
 ## November 8 Wi-Fi/NTP and Bluetooth coexistence
 
