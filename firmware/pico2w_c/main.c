@@ -4267,7 +4267,7 @@ int main(void) {
             }
             if (alarm_active_index>=0) cursor_column=-1;
             lcd1602_set_cursor(1,cursor_column<0?0u:(unsigned)cursor_column,
-                cursor_column<0?LCD1602_CURSOR_OFF:LCD1602_CURSOR_UNDERLINE);
+                cursor_column<0?LCD1602_CURSOR_OFF:LCD1602_CURSOR_BLINK);
         }
         sleep_ms(1);
     }

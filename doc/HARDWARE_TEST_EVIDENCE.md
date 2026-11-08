@@ -4,7 +4,11 @@ This summary covers the assembled Pico 2 W clock on COM8. Each section identifie
 
 ## User acceptance before the three-minute snooze change
 
-The user confirmed weekday alarm setup/firing and the delayed repeat work on the five-minute version. They then requested a shorter three-minute delay. After build 91d2fc7 was installed with separate approval, the user reported that it works correctly. This is user acceptance rather than a supplied timed measurement or complete serial transcript. The later LCD cursor change is separate and awaits its own installation/acceptance.
+The user confirmed weekday alarm setup/firing and the delayed repeat work on the five-minute version. They then requested a shorter three-minute delay. After build 91d2fc7 was installed with separate approval, the user reported that it works correctly. This is user acceptance rather than a supplied timed measurement or complete serial transcript.
+
+## November 8 LCD cursor acceptance
+
+Build a0d5a9e (1.0.0-rc.1+11.ga0d5a9e, BT/MP3/Wi-Fi) was installed with separate approval. COM8 verification confirmed the exact build, Flash guard, unchanged five alarm entries, separate LOCAL/BT volumes, both known speakers and Portable A2DP ACTIVE at 44100 Hz. The user confirmed that steady underline focus works, then requested a more visible blinking cursor and selected hardware character-cell blinking. This follow-up mode has not yet been installed or accepted on the physical LCD.
 
 ## November 8 weekday/snooze firmware smoke test
 
