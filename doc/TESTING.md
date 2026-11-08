@@ -59,11 +59,11 @@ Fetch tags before building if the checkout does not have them: git fetch --tags.
 
 ## Device acceptance before stable release
 
-### Date/next-alarm/startup update (pending hardware acceptance)
+### Date/next-alarm/startup update (broad user acceptance)
 
 Power-cycle and check the short version splash, responsive controls and subsequent normal clock. Confirm no new startup sound beyond existing Bluetooth behavior. On an idle clock, MINUS short should show/announce the date; hold at least 900 ms should show/announce the next eligible alarm. Check both languages and Manual=LOCAL/BT, required date folders on both cards, full date versus supported spoken year, and LOCAL fallback if a Bluetooth date segment is unavailable. USB say-date and next-alarm offer repeatable requests without changing schedules.
 
-Using existing schedules, compare the forecast with alarm-status and today's weekday. Confirm the earliest enabled match and the date on LCD. For changes to schedules, retain the original values and restore them afterward. Check an active snooze as the nearer occurrence, no-enabled-alarm display, mute (LCD without speech), no interruption of a timer/alarm/player, MINUS back/Previous/hold-to-exit behavior on the existing screens, and intact MODE time announcement. Host tests cover recurrence/calendar logic, but RAM-snooze forecast and actual speech/routing require device acceptance. This stage has not been flashed yet.
+Using existing schedules, compare the forecast with alarm-status and today's weekday. Confirm the earliest enabled match and the date on LCD. For changes to schedules, retain the original values and restore them afterward. Check an active snooze as the nearer occurrence, no-enabled-alarm display, mute (LCD without speech), no interruption of a timer/alarm/player, MINUS back/Previous/hold-to-exit behavior on the existing screens, and intact MODE time announcement. Host tests cover recurrence/calendar logic, but RAM-snooze forecast and actual speech/routing require device acceptance. Build 02b4a51 was installed with separate approval, and the user confirmed the functionality works. The detailed cases above remain regression/coverage checks; the report did not enumerate every case.
 
 
 ### Player pause and sleep update (partial user acceptance)

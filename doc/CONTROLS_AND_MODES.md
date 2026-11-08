@@ -31,7 +31,7 @@ Date speech uses weekday, day, month and an available year recording. Weekday is
 
 Information speech follows the Manual output preference and the existing Bluetooth sequence/LOCAL fallback. Mute, playback, timer/alarm and other audio owners suppress speech rather than interrupting them. LCD information remains available; physical MINUS actions retain their existing meanings in menus, music and alarm editors. No alarm or settings values are changed by these requests. A USB request while another screen owns the LCD may remain hidden until the four-second overlay expires.
 
-Startup shows Speaking Clock and the compact tag-derived firmware version for about 1.6 seconds after initialization. This is a nonblocking LCD indication: RTC, Bluetooth, controls and schedulers continue, and active UI/timer/alarm screens have priority. It queues no additional startup audio. About and USB version retain their existing version details. Date/next-alarm speech and the startup splash still require hardware acceptance.
+Startup shows Speaking Clock and the compact tag-derived firmware version for about 1.6 seconds after initialization. This is a nonblocking LCD indication: RTC, Bluetooth, controls and schedulers continue, and active UI/timer/alarm screens have priority. It queues no additional startup audio. About and USB version retain their existing version details. The user broadly accepted date/next-alarm functionality after build 02b4a51 was installed. Detailed language/output/fallback coverage remains in TESTING.md.
 
 ## Settings
 

@@ -34,8 +34,8 @@ Stage 2 playback/navigation was accepted by the user. Pause and sleep selection 
 
 1. Alarm snooze and weekday schedules are implemented and user-tested: Daily/Mon-Fri/Sat-Sun/custom days, GP28 three-minute snooze, explicit cancellation and Flash v9 migration. See TESTING.md.
 2. Music sleep timer and position-preserving pause on LOCAL/Bluetooth are implemented. The user accepted pause, time selection and the explicit OFF field; full expiry and separate LOCAL/BT coverage remain acceptance checks. GP28 cycles OFF/15/30/60/90 minutes; TIMER pauses/resumes. Existing playlist modes and audio priorities are retained. See TESTING.md for checks on both outputs.
-3. Spoken date, nearest scheduled/snoozed alarm and a nonblocking LCD startup/version splash are implemented, pending hardware acceptance. Idle-clock MINUS short/hold and USB say-date/next-alarm expose date/forecast. Available year recordings cover 2023..2029; German alarm-slot phrases are absent. No new startup sound is queued. The two-page LCD About screen remains available.
-4. Birthday/reminder events after checking available recordings.
+3. Spoken date, nearest scheduled/snoozed alarm and a nonblocking LCD startup/version splash are implemented and broadly user-accepted in build 02b4a51. Idle-clock MINUS short/hold and USB say-date/next-alarm expose date/forecast. Available year recordings cover 2023..2029; German alarm-slot phrases are absent. No new startup sound is queued. The two-page LCD About screen remains available.
+4. Birthday/reminder events: the historical documentation identifies the existing 07/000.mp3 as the birthday melody; it is present in the repository. No previous event scheduler or confirmed spoken reminder phrases were found. A five-slot annual birthday / one-time reminder model, with device/USB editing and persistent settings, is proposed for user selection before implementation.
 5. Offline RTC drift calibration if hourly NTP correction is insufficient for extended offline use.
 6. Complete the electrical schematic for the installed Pico 2 W wiring and power modules.
 

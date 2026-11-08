@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Added idle-clock MINUS short date and hold next-alarm information, plus USB say-date/next-alarm. Date speech uses existing RU/DE recordings; nearest occurrence honors weekday masks, calendar boundaries and RAM snoozes. Manual audio routing/fallback is retained. A nonblocking startup LCD/version splash adds no extra sound. Host tests and repository date-asset checks pass; physical speech/routing and splash acceptance are pending.
+- Added idle-clock MINUS short date and hold next-alarm information, plus USB say-date/next-alarm. Date speech uses existing RU/DE recordings; nearest occurrence honors weekday masks, calendar boundaries and RAM snoozes. Manual audio routing/fallback is retained. A nonblocking startup LCD/version splash adds no extra sound. Host tests and repository date-asset checks pass; the user broadly accepted the functionality after build 02b4a51 was installed. Detailed language/output/fallback coverage remains in TESTING.md.
 
 - Show an explicit OFF in the player sleep field instead of a blank. Compact PLAY/PAUS/STOP/WAIT/MUTE labels keep OFF and remaining minutes in the same position within 16 columns. Playback and deadline behavior are unchanged; the user accepted this display follow-up in build fa38eaf.
 

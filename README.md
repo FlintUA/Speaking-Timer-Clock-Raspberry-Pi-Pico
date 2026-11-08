@@ -14,7 +14,7 @@ The clock uses an I2C LCD1602, DS1302 RTC, DFPlayer Mini, two rotary encoders an
 - Menus for time, date, language and audio outputs, with hardware blinking cursor focus in editors; USB diagnostics.
 - Local DFPlayer and Bluetooth playback for speech, timer, alarms and music, with local fallback.
 - Music player with normal/shuffle/repeat-one modes, Next/Previous history, position-preserving pause and a 15/30/60/90-minute sleep timer. Pause and sleep require hardware acceptance; see [controls](doc/CONTROLS_AND_MODES.md#music-player).
-- Idle-clock MINUS short/hold requests spoken date/next alarm; a nonblocking startup screen shows the firmware version. These additions require hardware acceptance.
+- Idle-clock MINUS short/hold requests spoken date/next alarm; a nonblocking startup screen shows the firmware version. The user confirmed this functionality after build 02b4a51 was installed.
 - One volume encoder controls the active output. DFPlayer and Bluetooth volume levels are stored separately.
 - Bluetooth discovery, selection by name/MAC, automatic SSP pairing, up to four known devices and direct connection to the saved MAC.
 - Optional Wi-Fi/NTP correction with Europe/Berlin CET/CEST and offline RTC fallback.
