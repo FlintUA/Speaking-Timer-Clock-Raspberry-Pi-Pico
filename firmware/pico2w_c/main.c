@@ -2664,7 +2664,7 @@ static void print_rtc_debug(void) {
 }
 
 static void alarm_status(void) {
-    printf("[ALARM] flash v10 capable; active=%d (0=none)\n",
+    printf("[ALARM] active=%d (0=none)\n",
            alarm_active_index + 1);
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
         const alarm_entry_t *a = &alarms[i];

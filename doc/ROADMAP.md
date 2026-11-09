@@ -23,7 +23,7 @@ Before declaring v1.0.0 stable:
 - Manual connection/disconnection, OFF across a power cycle, no automatic return after a subsequent scan and automatic recovery after a Portable power cycle are user-confirmed on build 7378aa1. Remaining detailed checks: scan cancel/timeout, late callbacks and speaker-initiated reconnect; retain list deduplication/name retention.
 - Verify alarm selection above track 45 using files present on both cards.
 - The Windows updater verified the installed build ID for ab06727 against the selected UF2 sidecar.
-- Complete an overnight run covering scheduled speech, timer and alarms.
+- Daytime acceptance covers timer completion and priority at 17:00, idle hourly speech at 18:00, and the scheduled Daily alarm at 18:02. Overnight operation remains unverified.
 - Boot with Nest selected is user-confirmed on build 7378aa1. Confirm that a forgotten device remains deleted after power loss.
 
 Wi-Fi access-point loss and recovery on the assembled clock is deferred at the user's request. The available router controls did not provide a way to disconnect only the Pico for this test.

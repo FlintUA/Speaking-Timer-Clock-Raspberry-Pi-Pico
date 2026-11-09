@@ -31,6 +31,8 @@ Absolute Volume support and the cause of the clipped speech on the SSTB 10 C2 re
 
 In the user-supplied COM8 log, the timer finished at 16:59:59 RTC and started two MP3 segments over Bluetooth. At 17:00:00 RTC, the scheduled announcement logged `skipped=TIMER_PRIORITY`. Both timer segments reported zero underruns and playback completed at about 17:00:10 RTC. The user heard the timer announcement only. This verifies timer priority at an hourly boundary. An idle hourly announcement and a scheduled alarm were not observed in this excerpt.
 
+In a separate daytime test with Portable connected, the user confirmed normal hourly speech at 18:00 and a scheduled Daily alarm at 18:02. This result is user-reported and has no accompanying COM8 transcript.
+
 ## November 8 explicit Bluetooth disconnect acceptance
 
 Build 7378aa1 (1.0.0-rc.1+22.g7378aa1) was installed with separate approval. Pre/post read-only COM8 snapshots confirmed identical five alarm configurations, five birthday entries, four output preferences, independent volume levels and both known speakers with paired=YES. Flash v10 A/B sequences 88/89 and the legacy record were retained; Flash guard was OK. Portable returned to A2DP ACTIVE at 44100 Hz under the previously enabled policy, and NTP reported configured=YES/synced=YES after reboot. COM8 was released.
