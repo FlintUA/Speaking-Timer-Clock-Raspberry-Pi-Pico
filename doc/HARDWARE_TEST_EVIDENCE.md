@@ -2,6 +2,29 @@
 
 This summary covers the assembled Pico 2 W clock on COM8. Each section identifies its evidence source: direct COM8 verification, user tests or reconstructed historical project records. Software-only results and remaining physical checks are stated separately.
 
+## November 9 Bluetooth recovery, saved Nest selection and periodic NTP sync
+
+On build 7378aa1 (1.0.0-rc.1+22.g7378aa1), the user turned JBL Link Portable off and back on while the clock remained powered. The user reported that Portable reconnected automatically in about one second after switch-on and played the clock's audio. The timing is a user estimate from this test.
+
+In a separate user test, the clock was restarted with Google Nest Audio selected and the speaker left powered. The user reported immediate automatic reconnection and successful audio playback. This confirms that the preferred Nest selection survived a clock restart.
+
+In a separate passive COM8 capture on the same build, NTP reported a successful RTC synchronization at 15:21:46 CET, before Portable connected. This confirms a periodic refresh under normal network conditions. Wi-Fi outage recovery and periodic synchronization during active Bluetooth playback remain unverified.
+
+## November 9 additional Bluetooth audio devices
+
+These are short user-reported checks on build 7378aa1.
+
+| Device | Observed behavior |
+| --- | --- |
+| SilverCrest SSTB 10 C2 | Music played normally. The clock's volume control had no audible effect, while the speaker's own buttons worked. The user estimated that the first quarter-second of time and date announcements was clipped. |
+| Logitech PRO X 2 | Playback worked, announcement beginnings were audible, and the clock's volume control worked. |
+
+Absolute Volume support and the cause of the clipped speech on the SSTB 10 C2 remain unverified.
+
+## November 9 timer completion at the hourly boundary
+
+In the user-supplied COM8 log, the timer finished at 16:59:59 RTC and started two MP3 segments over Bluetooth. At 17:00:00 RTC, the scheduled announcement logged `skipped=TIMER_PRIORITY`. Both timer segments reported zero underruns and playback completed at about 17:00:10 RTC. The user heard the timer announcement only. This verifies timer priority at an hourly boundary. An idle hourly announcement and a scheduled alarm were not observed in this excerpt.
+
 ## November 8 explicit Bluetooth disconnect acceptance
 
 Build 7378aa1 (1.0.0-rc.1+22.g7378aa1) was installed with separate approval. Pre/post read-only COM8 snapshots confirmed identical five alarm configurations, five birthday entries, four output preferences, independent volume levels and both known speakers with paired=YES. Flash v10 A/B sequences 88/89 and the legacy record were retained; Flash guard was OK. Portable returned to A2DP ACTIVE at 44100 Hz under the previously enabled policy, and NTP reported configured=YES/synced=YES after reboot. COM8 was released.

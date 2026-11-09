@@ -39,7 +39,7 @@ Turn the timer encoder to choose an item or value. SETTINGS or the timer encoder
 
 A hardware blinking character cursor marks the first character of the value being edited. The LCD controller generates the blink without periodic host commands; this is a blinking character cell rather than a blinking underline. It moves between hours/minutes/seconds or day/month/year, and marks the current scalar value in other editors. In the custom weekday editor it marks ON/OFF beside the day name. The same cue is used in the precise timer and alarm editors. Lists, About, music, ringing/snooze and ordinary clock screens hide the cursor; save, cancel and timeout also remove it. The user accepted the earlier steady underline mode; the subsequent hardware blinking mode was also accepted by the user in build 755f55b.
 
-The settings menu has ten items, in this order:
+The settings menu has eleven items, in this order:
 
 1. Language
 2. Time
@@ -50,7 +50,12 @@ The settings menu has ten items, in this order:
 7. Audio Output
 8. Bluetooth
 9. Birthdays
-10. About
+10. Display Light
+11. About
+
+Display Light controls the external LCD LED. OFF switches it off. ON uses Day Brightness at all times. AUTO uses Night Brightness from 22:00 through 06:59 and Day Brightness from 07:00 through 21:59, based on local RTC time. AUTO uses the night level when the RTC is unavailable. The light schedule is independent of audio Quiet mode and mute.
+
+Turn the timer encoder to select a mode or change brightness in five-percentage-point steps from 0% to 100%. Confirm OFF to apply it immediately, confirm the day level to apply ON, or confirm both levels to apply AUTO. Completed edits use the usual deferred Flash autosave. MINUS or menu timeout discards an unfinished edit. New installations and older settings start with OFF, day 100% and night 20%. USB `display-light-status` reports the selected mode, configured levels and applied PWM duty.
 
 Volume is adjusted directly with the left encoder, including while settings are open; there is no separate Volume editor. The encoder follows the active audio output and retains independent LOCAL and Bluetooth levels. The encoder button toggles sound without replacing either stored level. USB vol N and bt-vol N remain available for explicit LOCAL and Bluetooth adjustment.
 

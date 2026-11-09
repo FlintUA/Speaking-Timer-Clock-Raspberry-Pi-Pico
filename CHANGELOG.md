@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added external LCD illumination on GP6 with hardware PWM, OFF/ON/AUTO, and independent day and night brightness. Flash v11 keeps v1-v10 reads and defaults to OFF on upgrade. Hardware acceptance is pending.
+
 - Added Bluetooth Disconnect and persistent OFF after manual disconnect or starting a scan. Scan completion/cancel/menu exit no longer resume a speaker. Explicit Connect restores normal retries; Forget remains separate. Existing no-target Flash encoding retains known devices, pairing, output preferences and volumes without a format change. Paging, pairing and late stream events are gated by the selected target, and boot connections wait for loaded settings. Policy/storage regression tests pass. The user confirmed connection/disconnection, persistent OFF across a power cycle and no automatic return after a subsequent scan on build 7378aa1. Separate cancel/timeout, incoming-peer and link-loss recovery coverage remains in TESTING.md.
 
 - Added five annual birthday dates under Birthdays (settings item 9; About becomes 10), with complete draft editing and USB status/configuration/test commands. Existing 07/000.mp3 follows Manual routing and LOCAL fallback. Events wait for idle, non-quiet audio for up to 30 minutes. Flash v10 retains v1-v9 loading and adds persistent dates/handled years, with birthdays disabled on migration. One-time reminders are excluded by user request. Host migration/calendar tests pass. The user broadly accepted build 7964939 and COM8 confirmed saved v10 dates with prior settings intact; detailed timed/audio coverage remains in TESTING.md.

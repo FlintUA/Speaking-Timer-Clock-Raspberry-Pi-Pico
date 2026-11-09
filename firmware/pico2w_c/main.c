@@ -8,6 +8,7 @@
 #include "pico/stdlib.h"
 #include "pico/bootrom.h"
 #include "hardware/i2c.h"
+#include "hardware/pwm.h"
 #include "ds1302.h"
 #include "lcd1602_i2c.h"
 #include "countdown.h"
@@ -46,6 +47,40 @@ int btstack_main(int argc, const char *argv[]);
 #define DS1302_CLK_GPIO 2
 #define DS1302_DIO_GPIO 5
 #define DS1302_CE_GPIO 4
+#define DISPLAY_LIGHT_GPIO 6
+#define DISPLAY_LIGHT_PWM_COUNTS 1000u
+
+static display_light_t display_light = {
+    DISPLAY_LIGHT_OFF, DISPLAY_LIGHT_DAY_DEFAULT, DISPLAY_LIGHT_NIGHT_DEFAULT
+};
+static uint8_t display_light_hour = 24u; // RTC unavailable until the first valid read.
+static uint8_t display_light_applied;
+
+static void display_light_init(void) {
+    pwm_config config = pwm_get_default_config();
+    pwm_config_set_wrap(&config, DISPLAY_LIGHT_PWM_COUNTS - 1u);
+    pwm_config_set_clkdiv(&config, 125.0f); // About 1.2 kHz at the Pico 2 W default clock.
+    pwm_init(pwm_gpio_to_slice_num(DISPLAY_LIGHT_GPIO), &config, true);
+    gpio_set_function(DISPLAY_LIGHT_GPIO, GPIO_FUNC_PWM);
+}
+
+static void display_light_service(void) {
+    uint8_t level = display_light_level(display_light, display_light_hour);
+    if (level == display_light_applied) return;
+    pwm_set_gpio_level(DISPLAY_LIGHT_GPIO, level * (DISPLAY_LIGHT_PWM_COUNTS / 100u));
+    display_light_applied = level;
+}
+
+static const char *display_light_mode_name(uint8_t mode) {
+    static const char *const names[] = {"OFF", "ON", "AUTO"};
+    return names[mode];
+}
+
+static void display_light_status(void) {
+    printf("[DISPLAY-LIGHT] mode=%s day=%u%% night=%u%% applied=%u%%\n",
+           display_light_mode_name(display_light.mode), (unsigned)display_light.day_percent,
+           (unsigned)display_light.night_percent, (unsigned)display_light_applied);
+}
 
 static int detect_lcd_address(void) {
     // PCF8574 or PCF8574A: scan only the typical expander address ranges.
@@ -188,11 +223,15 @@ typedef enum {
     MENU_BIRTHDAY_HOUR,
     MENU_BIRTHDAY_MINUTE,
     MENU_ABOUT,
+    MENU_DISPLAY_LIGHT_MODE,
+    MENU_DISPLAY_LIGHT_DAY,
+    MENU_DISPLAY_LIGHT_NIGHT,
     MENU_TIMER_EDITOR
 } menu_state_t;
 static menu_state_t menu_state;
 static uint8_t menu_index;
 static bool menu_about_version;
+static display_light_t display_light_draft;
 static speech_language_t menu_language_choice;
 static uint8_t menu_audio_index; // 0=manual 1=hourly 2=timer 3=alarm
 static bool menu_audio_jbl_choice; // draft, committed on button confirmation
@@ -205,7 +244,7 @@ static bool menu_half_hour_choice;
 static ds1302_datetime_t menu_rtc_choice;
 static uint64_t menu_last_input_ms;
 #define SETTINGS_MENU_TIMEOUT_MS 20000u
-#define SETTINGS_MENU_ITEMS 10u
+#define SETTINGS_MENU_ITEMS 11u
 #define SETTINGS_AUDIO_ITEMS 4u
 // Alarm editor is separate from settings; changes stay in draft until DONE.
 typedef enum {
@@ -1076,6 +1115,7 @@ static clock_settings_t settings_snapshot(void) {
         .quiet_end = quiet_end,
         .half_hour_enabled = half_hour_enabled,
         .clock_mode = clock_mode,
+        .display_light = display_light,
 #ifdef CLOCK_ENABLE_A2DP
         .audio_manual_jbl = audio_router.requested == AUDIO_OUTPUT_BT_JBL ? 1u : 0u,
         .audio_hourly_jbl = auto_voice_jbl_enabled ? 1u : 0u,
@@ -1106,6 +1146,9 @@ static bool settings_equal(clock_settings_t a, clock_settings_t b) {
         a.quiet_start != b.quiet_start || a.quiet_end != b.quiet_end ||
         a.half_hour_enabled != b.half_hour_enabled ||
         a.clock_mode != b.clock_mode ||
+        a.display_light.mode != b.display_light.mode ||
+        a.display_light.day_percent != b.display_light.day_percent ||
+        a.display_light.night_percent != b.display_light.night_percent ||
         a.audio_manual_jbl != b.audio_manual_jbl ||
         a.audio_hourly_jbl != b.audio_hourly_jbl ||
         a.audio_timer_jbl != b.audio_timer_jbl ||
@@ -1883,7 +1926,7 @@ static const char *menu_item_name(unsigned index) {
     static const char *names[SETTINGS_MENU_ITEMS] = {
         "Language", "Time", "Date", "Quiet mode",
         "Half-hour beep", "Exact-hour word", "Audio Output",
-        "Bluetooth", "Birthdays", "About"
+        "Bluetooth", "Birthdays", "Display Light", "About"
     };
     return index < SETTINGS_MENU_ITEMS ? names[index] : "?";
 }
@@ -2089,6 +2132,10 @@ static void menu_begin_edit(uint64_t now) {
             menu_state=MENU_BIRTHDAY_LIST;
             return;
         case 9:
+            display_light_draft = display_light;
+            menu_state = MENU_DISPLAY_LIGHT_MODE;
+            break;
+        case 10:
             menu_about_version = false;
             menu_state = MENU_ABOUT;
             puts("[MENU-ABOUT] Speaking Clock / Pico 2 W");
@@ -2128,6 +2175,25 @@ static void menu_commit(uint64_t now) {
             return;
         case MENU_ABOUT:
             return; // Information only; rotate TIMER to change pages.
+        case MENU_DISPLAY_LIGHT_MODE:
+            if (display_light_draft.mode != DISPLAY_LIGHT_OFF) {
+                menu_state = MENU_DISPLAY_LIGHT_DAY;
+                return;
+            }
+            display_light = display_light_draft;
+            settings_mark_changed();
+            break;
+        case MENU_DISPLAY_LIGHT_DAY:
+            if (display_light_draft.mode == DISPLAY_LIGHT_AUTO) {
+                menu_state = MENU_DISPLAY_LIGHT_NIGHT;
+                return;
+            }
+            // ON uses the daytime level. Both modes retain the other brightness setting.
+            /* fall through */
+        case MENU_DISPLAY_LIGHT_NIGHT:
+            display_light = display_light_draft;
+            settings_mark_changed();
+            break;
         case MENU_EDIT_LANGUAGE:
             if (language != menu_language_choice) {
                 language = menu_language_choice;
@@ -2331,6 +2397,18 @@ static void menu_rotate(int direction, uint64_t now) {
             else
                 puts("[MENU-ABOUT] Speaking Clock / Pico 2 W");
             break;
+        case MENU_DISPLAY_LIGHT_MODE:
+            display_light_draft.mode = wrap_u8(display_light_draft.mode,
+                DISPLAY_LIGHT_OFF, DISPLAY_LIGHT_AUTO, direction);
+            break;
+        case MENU_DISPLAY_LIGHT_DAY:
+            display_light_draft.day_percent =
+                5u * wrap_u8(display_light_draft.day_percent / 5u, 0, 20, direction);
+            break;
+        case MENU_DISPLAY_LIGHT_NIGHT:
+            display_light_draft.night_percent =
+                5u * wrap_u8(display_light_draft.night_percent / 5u, 0, 20, direction);
+            break;
         case MENU_EDIT_LANGUAGE:
             menu_language_choice = menu_language_choice == SPEECH_RU ? SPEECH_DE : SPEECH_RU;
             printf("[MENU] Language candidate: %s\n", speech_language_name(menu_language_choice));
@@ -2462,6 +2540,7 @@ static void load_settings_at_boot(void) {
         quiet_end = saved.quiet_end;
         half_hour_enabled = saved.half_hour_enabled;
         clock_mode = saved.clock_mode;
+        display_light = saved.display_light;
         memcpy(alarms, saved.alarms, sizeof(alarms));
         memcpy(birthdays,saved.birthdays,sizeof(birthdays));
         memcpy(saved_bt_target_addr, saved.bt_target_addr,
@@ -3523,6 +3602,7 @@ static void handle_command(char *line) {
                CLOCK_ALARM_SNOOZE_MINUTES);
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[NETWORK] wifi-config SSID|password; wifi-clear; ntp-status; ntp-sync; version");
+        puts("[DISPLAY-LIGHT] display-light-status shows mode and PWM level");
         puts("[INPUT] ALARM short=alarm editor; ALARM hold >=900ms=music; MUSIC TIMER=play/stop, encoder/SETTINGS/MINUS=next/previous, ALARM=mode; hold ALARM/MODE/MINUS=exit");
         puts("[INPUT] GP28=timer H/M/S editor; TIMER/SETTINGS=next/start; MINUS=back; GP28=cancel; quick encoder=1/5/10 min");
         puts("[INPUT] VOLUME push=sound toggle in clock/settings/player/editor; ringing alarm uses ALARM=stop");
@@ -3597,6 +3677,8 @@ static void handle_command(char *line) {
 #ifdef CLOCK_ENABLE_WIFI
         network_time_configure("","");
 #endif
+    } else if (strcmp(line, "display-light-status") == 0) {
+        display_light_status();
     } else if (strcmp(line,"ntp-status") == 0 || strcmp(line,"ntp-sync") == 0) {
 #ifdef CLOCK_ENABLE_WIFI
         if (strcmp(line,"ntp-sync")==0) network_time_request();
@@ -4095,6 +4177,7 @@ static void on_control_event(const control_event_t *event, void *context) {
 }
 
 int main(void) {
+    display_light_init();
     stdio_init_all();
     sleep_ms(3000); // Give VS Code Serial Monitor time to attach.
     printf("\n[BOOT] Speaking Clock %s build=%s (Pico 2 W)\n",CLOCK_FIRMWARE_VERSION,CLOCK_BUILD_ID);
@@ -4332,6 +4415,7 @@ int main(void) {
             next_rtc_ms = now + 1000u;
             ds1302_datetime_t dt = {0};
             if (ds1302_read_datetime(&dt)) {
+                display_light_hour = dt.hour;
                 snprintf(rtc_top, sizeof(rtc_top), "%02u:%02u:%02u",
                          (unsigned)dt.hour, (unsigned)dt.minute, (unsigned)dt.second);
                 snprintf(rtc_bottom, sizeof(rtc_bottom), "%02u.%02u.%04u",
@@ -4344,10 +4428,12 @@ int main(void) {
                 snprintf(rtc_top, sizeof(rtc_top), "RTC unavailable");
                 snprintf(rtc_bottom, sizeof(rtc_bottom), "Check GP2/5/4");
                 birthday_rtc_valid=false;
+                display_light_hour = 24u;
                 // RTC is polled once a second, but missing RTC doesn't stop controls.
                 puts("[RTC] Invalid/unavailable (run rtc-debug for raw bytes and error reasons)");
             }
         }
+        display_light_service();
 
         alarm_snooze_service(now);
         alarm_pending_service(now);
@@ -4455,6 +4541,16 @@ int main(void) {
                 snprintf(top, sizeof(top), "Speaking Clock");
                 snprintf(bottom, sizeof(bottom), "Pico 2 W");
             }
+        } else if (menu_state == MENU_DISPLAY_LIGHT_MODE) {
+            cursor_column = 0;
+            snprintf(top, sizeof(top), "DISPLAY LIGHT");
+            snprintf(bottom, sizeof(bottom), "%s", display_light_mode_name(display_light_draft.mode));
+        } else if (menu_state == MENU_DISPLAY_LIGHT_DAY || menu_state == MENU_DISPLAY_LIGHT_NIGHT) {
+            bool night = menu_state == MENU_DISPLAY_LIGHT_NIGHT;
+            cursor_column = 0;
+            snprintf(top, sizeof(top), "%s BRIGHTNESS", night ? "NIGHT" : "DAY");
+            snprintf(bottom, sizeof(bottom), "%u%%",
+                     (unsigned)(night ? display_light_draft.night_percent : display_light_draft.day_percent));
         } else if (menu_state == MENU_BT_SCANNING) {
 #ifdef CLOCK_ENABLE_A2DP
             snprintf(top, sizeof(top), "BT SCAN+NAMES");

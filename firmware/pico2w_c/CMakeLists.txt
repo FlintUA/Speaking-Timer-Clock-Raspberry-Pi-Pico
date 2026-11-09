@@ -57,6 +57,7 @@ target_link_libraries(speaking_clock_c PRIVATE
     hardware_uart
     hardware_sync
     hardware_flash
+    hardware_pwm
     pico_flash
     pico_bootrom
 )
