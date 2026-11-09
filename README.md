@@ -2,7 +2,7 @@
 
 The main project is C / Pico SDK firmware for **Pico 2 W (RP2350)**. MicroPython sources and the original Pico schematic are retained as historical material.
 
-Current tagged release candidate: **1.0.0-rc.1**. Main also contains subsequent player, weekday/snooze, birthday and display-light changes. See [release notes](CHANGELOG.md), the [current roadmap](doc/ROADMAP.md) and [verification instructions](doc/TESTING.md). New features require on-device acceptance before the stable release.
+Current stable release: **[1.0.0](https://github.com/FlintUA/Speaking-Timer-Clock-Raspberry-Pi-Pico/releases/tag/v1.0.0)**. See the [release notes](doc/releases/v1.0.0.md), [current roadmap](doc/ROADMAP.md) and [verification instructions](doc/TESTING.md).
 
 Firmware versions are derived automatically from local Git release tags. About shows the tag version with + for later changes; USB version includes the commit metadata. See [version rules](doc/TESTING.md#automatic-firmware-version), including tag fetching and archive fallback.
 
@@ -13,7 +13,7 @@ The clock uses an I2C LCD1602, DS1302 RTC, DFPlayer Mini, two rotary encoders an
 - Countdown timer, five alarms with selectable weekdays and three-minute snooze, Russian and German speech, and quiet hours.
 - Menus for time, date, language and audio outputs, with hardware blinking cursor focus in editors; USB diagnostics.
 - Local DFPlayer and Bluetooth playback for speech, timer, alarms and music, with local fallback.
-- Music player with normal/shuffle/repeat-one modes, Next/Previous history, position-preserving pause and a 15/30/60/90-minute sleep timer. Pause and sleep require hardware acceptance; see [controls](doc/CONTROLS_AND_MODES.md#music-player).
+- Music player with normal/shuffle/repeat-one modes, Next/Previous history, position-preserving pause and a 15/30/60/90-minute sleep timer. Pause and sleep selection were user-tested. Full timed expiry remains a follow-up check. [Controls](doc/CONTROLS_AND_MODES.md#music-player)
 - Idle-clock MINUS short/hold requests spoken date/next alarm; a nonblocking startup screen shows the firmware version. The user confirmed this functionality after build 02b4a51 was installed.
 - One volume encoder controls the active output. DFPlayer and Bluetooth volume levels are stored separately.
 - Bluetooth discovery, selection by name/MAC, automatic SSP pairing, up to four known devices and direct connection to the saved MAC.
@@ -25,7 +25,7 @@ The clock uses an I2C LCD1602, DS1302 RTC, DFPlayer Mini, two rotary encoders an
 
 Hardware tests confirm the relocated timer encoder, volume button, SPI SD/FAT32, MP3 reads and Bluetooth playback. Registry v7 tests cover discovery, saving, Portable reconnection after power loss, deletion with autosave and Portable <-> Nest switching without scanning, followed by speech on both speakers. Switching initially returned status 0x56, then recovered through an automatic retry after five seconds. See [test evidence](doc/HARDWARE_TEST_EVIDENCE.md).
 
-The release candidate added unique device lists, saved-name retention and return to the preferred speaker after leaving discovery. Current main supersedes that last behavior: Disconnect or starting a scan persists OFF until an explicit Connect, while retaining saved speakers/pairing. The initial switch retry behavior is deliberately retained. New code validation is recorded separately from those earlier hardware passes.
+Disconnect or starting a scan persists OFF until an explicit Connect while retaining saved speakers and pairing. The initial switch retry remains in place.
 
 ## Current wiring
 

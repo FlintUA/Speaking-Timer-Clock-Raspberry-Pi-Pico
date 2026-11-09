@@ -2,7 +2,9 @@
 
 This is the authoritative roadmap for the C firmware on main. Earlier MicroPython plans and migration logs are historical; unchecked boxes in those files are not the current task list.
 
-## First release: 1.0.0-rc.1
+## Release baseline
+
+Version 1.0.0 is the stable C firmware baseline. See the [release notes](releases/v1.0.0.md).
 
 Implemented for the first release candidate:
 - One combined Bluetooth device list per MAC, with known devices first.
@@ -16,7 +18,7 @@ Implemented for the first release candidate:
 - Native tests and GitHub CI for time/DST, NTP validation, Bluetooth catalog behavior, alarm scheduling and Flash migration.
 - Current English controls, network setup, release notes and hardware acceptance instructions.
 
-Before declaring v1.0.0 stable:
+Hardware acceptance and remaining coverage:
 - Initial NTP synchronization and Bluetooth playback with Wi-Fi enabled are confirmed on build 7964939. A periodic RTC refresh was observed on build 7378aa1 before Portable connected. Extend coverage to an overnight run and check refresh during Bluetooth playback.
 - The v11-capable firmware loaded the existing v10 settings and synchronized NTP. The user confirmed that brightness, alarms, birthdays, the selected speaker and audio settings survived a save and restart. Host tests cover the v10 -> v11 record migration and v1-v10 reads.
 - Test unavailable NTP server and later recovery.
@@ -29,6 +31,8 @@ Before declaring v1.0.0 stable:
 Wi-Fi access-point loss and recovery on the assembled clock is deferred at the user's request. The available router controls did not provide a way to disconnect only the Pico for this test.
 
 ## Next functional milestones
+
+Phone control starts with a separate Pico 2 W experiment. The clock provides a local Wi-Fi access point and serves a browser page without a router or Internet access. The first usable milestone is clock status and timer control from the phone. Player controls and settings follow after checking Wi-Fi and Bluetooth audio coexistence.
 
 Control restoration stage 1 is implemented. Hardware logs confirm accelerated selection, LOCAL timer start/finish/cancel and GP28 entry/back; remaining precise-field and player-mute checks are in TESTING.md. The user also confirmed timer routing to the selected Bluetooth speaker after changing its independent output preference.
 

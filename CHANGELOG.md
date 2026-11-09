@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.0.0
+
+First stable source release for Pico 2 W. See the [release notes](doc/releases/v1.0.0.md) for local build instructions, validation and known follow-up checks.
 
 - Added external LCD illumination on GP6 with hardware PWM, OFF/ON/AUTO, and independent day and night brightness. Flash v11 keeps v1-v10 reads and defaults to OFF on upgrade. The user confirmed switching, brightness adjustment without audible interference and retention after restart on build ab06727. AUTO time transitions are deferred.
 

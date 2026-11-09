@@ -59,7 +59,7 @@ About reserves the second line for by FlintUA; version text is bounded to the LC
 
 Fetch tags before building if the checkout does not have them: git fetch --tags. A shallow checkout must include a reachable release tag, or fetch full history using git fetch --unshallow --tags. Tag creation alone does not alter firmware already installed on a board; rebuild and flash it.
 
-## Device acceptance before stable release
+## Device acceptance and follow-up checks
 
 ### External LCD illumination
 
@@ -100,7 +100,7 @@ Using existing schedules, compare the forecast with alarm-status and today's wee
 
 ### Player pause and sleep update (partial user acceptance)
 
-The user reported pause and sleep-time selection working in build 38182d4, but did not provide output-specific coverage or confirm a full expiry. Explicit OFF display is a follow-up change pending installation.
+The user reported pause and sleep-time selection working in build 38182d4 and accepted the explicit OFF display in build fa38eaf. Output-specific coverage and full expiry remain open.
 
 On both Manual=LOCAL and Manual=BT, start a recognizable long track, pause after several seconds with TIMER, wait, and resume. Expect PAUS on LCD and continuation from the same passage rather than the beginning. Check rapid double presses, pause immediately after opening/Next, volume adjustment during pause, EOF after resume, and Next/Previous from pause. Confirm SHUF/NORM/REP1 continue to behave as before.
 
@@ -128,7 +128,7 @@ Close other COM monitors, then run tools/capture-pico-log.ps1 -Port COM8 -Minute
 Choose a new log filename for each run; existing logs are preserved. The SDK labels a suspended A2DP stream as Stream paused. The full raw log is always recorded even if a line is absent from the concise console filter. A COM capture does not record sound itself.
 
 Follow [network acceptance](NETWORK_TIME.md#hardware-acceptance) and [firmware verification](../firmware/pico2w_c/README.md#on-device-verification). In addition:
-- Start discovery, select no new device and exit; the preferred connection must resume.
+- Start discovery, select no new device and exit. Reconnect must remain OFF until an explicit Connect.
 - Find a saved speaker again; it must appear once and keep its useful name even if discovery reports Unknown.
 - Test a music alarm above track 45 with a real matching file.
 - Check version after updating and retain the UF2 build-ID sidecar.
