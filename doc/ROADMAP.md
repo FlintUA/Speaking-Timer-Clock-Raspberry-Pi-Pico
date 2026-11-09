@@ -18,11 +18,11 @@ Implemented for the first release candidate:
 
 Before declaring v1.0.0 stable:
 - Initial NTP synchronization and Bluetooth playback with Wi-Fi enabled are confirmed on build 7964939. A periodic RTC refresh was observed on build 7378aa1 before Portable connected. Extend coverage to an overnight run and check refresh during Bluetooth playback.
-- Verify v10 -> v11 save/reboot on hardware with existing alarms, birthdays, separate volumes, network settings and known speakers intact. Host tests cover v1-v10 reads and representative A/B migrations.
+- The v11-capable firmware loaded the existing v10 settings and synchronized NTP. The user confirmed that brightness, alarms, birthdays, the selected speaker and audio settings survived a save and restart. Host tests cover the v10 -> v11 record migration and v1-v10 reads.
 - Test unavailable NTP server and later recovery.
 - Manual connection/disconnection, OFF across a power cycle, no automatic return after a subsequent scan and automatic recovery after a Portable power cycle are user-confirmed on build 7378aa1. Remaining detailed checks: scan cancel/timeout, late callbacks and speaker-initiated reconnect; retain list deduplication/name retention.
 - Verify alarm selection above track 45 using files present on both cards.
-- Verify the new updater build-identity check on Windows.
+- The Windows updater verified the installed build ID for ab06727 against the selected UF2 sidecar.
 - Complete an overnight run covering scheduled speech, timer and alarms.
 - Boot with Nest selected is user-confirmed on build 7378aa1. Confirm that a forgotten device remains deleted after power loss.
 
@@ -40,7 +40,7 @@ Stage 2 playback/navigation was accepted by the user. Pause and sleep selection 
 4. Five annual birthday dates are implemented and broadly user-accepted in build 7964939; COM8 confirms configured dates saved in v10 and prior settings retained: menu/USB editing, persistent dates/handled years (Flash v10), existing 07/000.mp3 melody via Manual routing, idle/non-quiet delivery with 30-minute expiry. The user explicitly excluded one-time reminders because suitable spoken recordings are absent. February 29 matches only in leap years.
 5. Offline RTC drift calibration remains conditional on measured need. The assembled board now has confirmed NTP synchronization and user-verified Bluetooth playback with Wi-Fi enabled. Next verify sustained operation/recovery, then compare a trustworthy reference over several days before choosing a drift rate. A fixed initial clock offset alone is not a rate measurement; the historical MicroPython calibration required at least five days between trusted references. No C drift correction has been added or enabled.
 6. Complete the electrical schematic for the installed Pico 2 W wiring and power modules.
-7. External LCD illumination on GP6 is implemented. The user confirmed ON/OFF, brightness adjustment and no audible interference on build ab06727. Verify AUTO time transitions and persistence after a v11 save and restart on the assembled clock.
+7. External LCD illumination on GP6 is implemented. The user confirmed ON/OFF, brightness adjustment, no audible interference and persistence after restart on build ab06727. AUTO time transitions are deferred at the user's request.
 
 Each milestone requires focused tests and a hardware acceptance step. The statuses above distinguish implemented follow-up work from remaining plans; the first release candidate predates these follow-up changes.
 
