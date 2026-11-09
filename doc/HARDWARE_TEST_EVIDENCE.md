@@ -2,6 +2,12 @@
 
 This summary covers the assembled Pico 2 W clock on COM8. Each section identifies its evidence source: direct COM8 verification, user tests or reconstructed historical project records. Software-only results and remaining physical checks are stated separately.
 
+## External LCD illumination acceptance
+
+Build ab06727 (1.0.0-rc.1+25.gab06727) was installed with separate approval. On first boot with the existing v10 records, COM8 reported `mode=OFF day=100% night=20% applied=0%`. Pre/post snapshots matched for all five alarms, all five birthdays, audio output preferences, both volume levels and the Bluetooth catalog and selected speaker. The Flash guard was OK, Portable resumed A2DP and NTP synchronized.
+
+The user confirmed that illumination switched on and off, brightness adjustment worked, and there was no audible interference during the test. AUTO transitions at 07:00 and 22:00 and persistence after a v11 save and restart remain hardware checks.
+
 ## November 9 Bluetooth recovery, saved Nest selection and periodic NTP sync
 
 On build 7378aa1 (1.0.0-rc.1+22.g7378aa1), the user turned JBL Link Portable off and back on while the clock remained powered. The user reported that Portable reconnected automatically in about one second after switch-on and played the clock's audio. The timing is a user estimate from this test.

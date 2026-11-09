@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Added external LCD illumination on GP6 with hardware PWM, OFF/ON/AUTO, and independent day and night brightness. Flash v11 keeps v1-v10 reads and defaults to OFF on upgrade. Hardware acceptance is pending.
+- Added external LCD illumination on GP6 with hardware PWM, OFF/ON/AUTO, and independent day and night brightness. Flash v11 keeps v1-v10 reads and defaults to OFF on upgrade. The user confirmed switching and brightness adjustment without audible interference on build ab06727. AUTO time transitions and persistence remain hardware checks.
 
 - Added Bluetooth Disconnect and persistent OFF after manual disconnect or starting a scan. Scan completion/cancel/menu exit no longer resume a speaker. Explicit Connect restores normal retries; Forget remains separate. Existing no-target Flash encoding retains known devices, pairing, output preferences and volumes without a format change. Paging, pairing and late stream events are gated by the selected target, and boot connections wait for loaded settings. Policy/storage regression tests pass. The user confirmed connection/disconnection, persistent OFF across a power cycle and no automatic return after a subsequent scan on build 7378aa1. Separate cancel/timeout, incoming-peer and link-loss recovery coverage remains in TESTING.md.
 
@@ -55,4 +55,4 @@ After new saves replace both clock settings slots with v8, old v7 firmware canno
 
 ### Deferred
 
-Bluetooth switch-latency optimization, physical LCD illumination/PWM and the missing German timer-completion recording remain at the end of the roadmap, in that order. See [ROADMAP.md](doc/ROADMAP.md) for other planned functional milestones.
+Bluetooth switch-latency optimization and the missing German timer-completion recording remain at the end of the roadmap, in that order. See [ROADMAP.md](doc/ROADMAP.md) for other planned functional milestones.
