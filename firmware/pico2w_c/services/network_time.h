@@ -6,6 +6,9 @@ void network_time_init(bool radio_ready);
 void network_time_configure(const char *ssid, const char *password);
 void network_time_request(void);
 void network_time_status(void);
+#ifdef CLOCK_ENABLE_PHONE_WEB
+void network_time_suspend_home(bool suspended);
+#endif
 // Network callbacks only stage time. RTC updates are returned to the idle main loop.
 bool network_time_service(uint64_t now_ms, bool idle, ds1302_datetime_t *local);
 void network_time_applied(bool success);

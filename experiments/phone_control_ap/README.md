@@ -43,3 +43,21 @@ powershell -ExecutionPolicy Bypass -File .\experiments\phone_control_ap\connect-
 4. Restart the prototype and confirm that it waits for local provisioning again. Restore the clock firmware through manual BOOTSEL when finished.
 
 On 2026-11-10, the user confirmed that the STA prototype joined the home Wi-Fi network and that the Speaking Clock page opened on the phone through the router. Credential lifetime after reboot and operation with the router disconnected from the Internet were not separately tested. NTP and Bluetooth coexistence are covered later in the integrated clock firmware.
+
+## Integrated read-only clock status
+
+Build the normal clock application with the experimental web profile:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build-clock-bt.ps1 -Mp3 -PhoneWeb
+```
+
+The build ID ends in `-bt-mp3-wifi-phone`. The clock uses the existing saved home Wi-Fi credentials. The integrated build serves an embedded page and a read-only `/status.json` snapshot. The snapshot contains RTC time, countdown or selected duration, player state and track, and the output currently selected by the clock's audio-volume routing. There are no browser controls in this stage.
+
+1. Boot on the existing home network and open **Settings → Phone Control (11)**. Open the displayed IP address over HTTP from a phone on the home Wi-Fi network. The USB `phone-web-status` command reports the mode and address.
+2. Check that the browser follows changes made with the clock's controls. Start and stop the timer, then check the player in LOCAL and BT modes. Verify that sound plays normally and NTP still reports a successful sync.
+3. In **Phone Control**, turn the timer encoder to **Start direct?** and press it. The LCD shows the **SpeakingClock** SSID and a fresh WPA2 password. Join that network on the phone and open `http://192.168.4.1/`. Leaving the menu keeps direct Wi-Fi active so the clock controls remain available.
+4. Leave the direct network on the phone. On the clock, select **Return to home?** and press the timer encoder. Close settings to allow the existing idle network service to reconnect to the router and request a fresh NTP sample. Rejoin the home network from the phone and open the displayed address.
+5. Repeat the switch, check the timer and Bluetooth audio in both modes, and confirm a reboot starts in home mode. The direct password and active network mode are kept only in RAM.
+
+Integrated hardware acceptance is pending. The standalone AP and STA results above cover only the individual network modes.

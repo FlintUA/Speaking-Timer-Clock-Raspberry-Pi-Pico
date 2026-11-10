@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static bool ready, configured, joining, waiting, dns_pending, request_now;
+static bool ready, configured, joining, waiting, dns_pending, request_now, home_suspended;
 static bool received, anchor_valid, apply_pending;
 static char ssid_value[33], password_value[65];
 static uint64_t join_started, next_join, deadline, next_ntp;
@@ -71,11 +71,26 @@ void network_time_configure(const char *ssid, const char *password) {
         cyw43_arch_lwip_end();
     }
     next_ntp=0; request_now=true;
-    if (ready) cyw43_wifi_leave(&cyw43_state,CYW43_ITF_STA);
+    if (ready && !home_suspended) cyw43_wifi_leave(&cyw43_state,CYW43_ITF_STA);
     puts(configured ? "[WIFI] Configuration accepted (password hidden)" :
                       "[WIFI] Disabled; RTC continues offline");
 }
 void network_time_request(void) { request_now=true; }
+#ifdef CLOCK_ENABLE_PHONE_WEB
+void network_time_suspend_home(bool suspended) {
+    home_suspended = suspended;
+    joining = false;
+    next_join = 0;
+    join_failures = 0;
+    request_now = true;
+    cyw43_arch_lwip_begin();
+    waiting = false;
+    received = false;
+    // Let an outstanding DNS callback clear dns_pending. It cannot send
+    // another NTP request while waiting is false.
+    cyw43_arch_lwip_end();
+}
+#endif
 void network_time_status(void) {
     printf("[NTP] zone=Europe/Berlin configured=%s radio=%s synced=%s offset=%d last_sync_age=%llus\n",
         configured?"YES":"NO",ready?"READY":"OFFLINE",anchor_valid?"YES":"NO",
@@ -94,7 +109,7 @@ bool network_time_service(uint64_t now, bool idle, ds1302_datetime_t *local) {
     cyw43_arch_lwip_end();
     if (fresh) puts("[NTP] Validated UTC sample received");
     if (timed_out) puts("[NTP] Request timed out; RTC remains active");
-    if (configured) {
+    if (configured && !home_suspended) {
         int link=cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA);
         if (link!=CYW43_LINK_UP) {
             if (joining && (now-join_started>=15000 || link<0)) {

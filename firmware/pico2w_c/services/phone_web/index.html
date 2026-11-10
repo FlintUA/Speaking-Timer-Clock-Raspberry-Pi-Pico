@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Speaking Clock</title>
+<style>
+  body { font: 1rem/1.5 system-ui, sans-serif; max-width: 28rem; margin: 2rem auto; padding: 0 1rem; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: .65rem 1.25rem; }
+  dd { margin: 0; font-variant-numeric: tabular-nums; }
+</style>
+<main>
+  <h1>Speaking Clock</h1>
+  <p id="connection" role="status">Connecting to the clock…</p>
+  <dl>
+    <dt>Time</dt><dd id="time">—</dd>
+    <dt>Timer</dt><dd id="timer">—</dd>
+    <dt>Player</dt><dd id="player">—</dd>
+    <dt>Audio output</dt><dd id="output">—</dd>
+  </dl>
+</main>
+<script>
+  const labels = Object.fromEntries(
+    ["connection", "time", "timer", "player", "output"].map(id => [id, document.getElementById(id)])
+  );
+  function duration(seconds) {
+    const parts = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60];
+    return parts.map(value => String(value).padStart(2, "0")).join(":");
+  }
+  async function update() {
+    const request = new AbortController();
+    const deadline = setTimeout(() => request.abort(), 3500);
+    try {
+      const response = await fetch("/status.json", {cache: "no-store", signal: request.signal});
+      if (!response.ok) throw new Error("Status unavailable");
+      const data = await response.json();
+      labels.connection.textContent = "Live status";
+      labels.time.textContent = data.time || "RTC unavailable";
+      labels.timer.textContent = (data.timer_running ? "Running · " : "Set · ") + duration(data.timer_seconds);
+      labels.player.textContent = data.player + (data.track ? " · Track " + data.track : "");
+      labels.output.textContent = data.output;
+    } catch {
+      labels.connection.textContent = "Connection lost. Reconnecting…";
+      for (const key of ["time", "timer", "player", "output"]) labels[key].textContent = "—";
+    } finally {
+      clearTimeout(deadline);
+      setTimeout(update, 1000);
+    }
+  }
+  update();
+</script>
+</html>

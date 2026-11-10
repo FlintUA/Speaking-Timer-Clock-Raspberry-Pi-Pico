@@ -35,6 +35,9 @@ static bool radio_ready;
 #ifdef CLOCK_ENABLE_WIFI
 #include "network_time.h"
 #endif
+#ifdef CLOCK_ENABLE_PHONE_WEB
+#include "phone_web.h"
+#endif
 #ifdef CLOCK_ENABLE_A2DP
 #include "pico/cyw43_arch.h"
 #include "clock_a2dp_control.h"
@@ -226,6 +229,9 @@ typedef enum {
     MENU_DISPLAY_LIGHT_MODE,
     MENU_DISPLAY_LIGHT_DAY,
     MENU_DISPLAY_LIGHT_NIGHT,
+#ifdef CLOCK_ENABLE_PHONE_WEB
+    MENU_PHONE_WEB,
+#endif
     MENU_TIMER_EDITOR
 } menu_state_t;
 static menu_state_t menu_state;
@@ -244,7 +250,12 @@ static bool menu_half_hour_choice;
 static ds1302_datetime_t menu_rtc_choice;
 static uint64_t menu_last_input_ms;
 #define SETTINGS_MENU_TIMEOUT_MS 20000u
+#ifdef CLOCK_ENABLE_PHONE_WEB
+#define SETTINGS_MENU_ITEMS 12u
+static uint8_t phone_menu_page;
+#else
 #define SETTINGS_MENU_ITEMS 11u
+#endif
 #define SETTINGS_AUDIO_ITEMS 4u
 // Alarm editor is separate from settings; changes stay in draft until DONE.
 typedef enum {
@@ -1926,7 +1937,11 @@ static const char *menu_item_name(unsigned index) {
     static const char *names[SETTINGS_MENU_ITEMS] = {
         "Language", "Time", "Date", "Quiet mode",
         "Half-hour beep", "Exact-hour word", "Audio Output",
-        "Bluetooth", "Birthdays", "Display Light", "About"
+        "Bluetooth", "Birthdays", "Display Light",
+#ifdef CLOCK_ENABLE_PHONE_WEB
+        "Phone Control",
+#endif
+        "About"
     };
     return index < SETTINGS_MENU_ITEMS ? names[index] : "?";
 }
@@ -2136,6 +2151,12 @@ static void menu_begin_edit(uint64_t now) {
             menu_state = MENU_DISPLAY_LIGHT_MODE;
             break;
         case 10:
+#ifdef CLOCK_ENABLE_PHONE_WEB
+            menu_state = MENU_PHONE_WEB;
+            phone_menu_page = 0;
+            return;
+        case 11:
+#endif
             menu_about_version = false;
             menu_state = MENU_ABOUT;
             puts("[MENU-ABOUT] Speaking Clock / Pico 2 W");
@@ -2175,6 +2196,14 @@ static void menu_commit(uint64_t now) {
             return;
         case MENU_ABOUT:
             return; // Information only; rotate TIMER to change pages.
+#ifdef CLOCK_ENABLE_PHONE_WEB
+        case MENU_PHONE_WEB:
+            if (phone_menu_page == 1u) {
+                bool direct = !phone_web_direct();
+                phone_menu_page = phone_web_set_direct(direct) && direct ? 2u : 0u;
+            }
+            return;
+#endif
         case MENU_DISPLAY_LIGHT_MODE:
             if (display_light_draft.mode != DISPLAY_LIGHT_OFF) {
                 menu_state = MENU_DISPLAY_LIGHT_DAY;
@@ -2336,6 +2365,10 @@ static void menu_back(uint64_t now) {
     } else if (menu_state == MENU_ABOUT) {
         menu_state = MENU_LIST;
         puts("[MENU-ABOUT] Back to settings");
+#ifdef CLOCK_ENABLE_PHONE_WEB
+    } else if (menu_state == MENU_PHONE_WEB) {
+        menu_state = MENU_LIST;
+#endif
     } else if (menu_state == MENU_EDIT_AUDIO_OUTPUT) {
         puts("[MENU-AUDIO] Choice discarded");
         menu_state = MENU_AUDIO_LIST;
@@ -2397,6 +2430,11 @@ static void menu_rotate(int direction, uint64_t now) {
             else
                 puts("[MENU-ABOUT] Speaking Clock / Pico 2 W");
             break;
+#ifdef CLOCK_ENABLE_PHONE_WEB
+        case MENU_PHONE_WEB:
+            phone_menu_page = wrap_u8(phone_menu_page, 0, phone_web_direct() ? 2u : 1u, direction);
+            break;
+#endif
         case MENU_DISPLAY_LIGHT_MODE:
             display_light_draft.mode = wrap_u8(display_light_draft.mode,
                 DISPLAY_LIGHT_OFF, DISPLAY_LIGHT_AUTO, direction);
@@ -3602,6 +3640,9 @@ static void handle_command(char *line) {
                CLOCK_ALARM_SNOOZE_MINUTES);
         puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[NETWORK] wifi-config SSID|password; wifi-clear; ntp-status; ntp-sync; version");
+#ifdef CLOCK_ENABLE_PHONE_WEB
+        puts("[PHONE-WEB] phone-web-status shows the active network and IPv4 address");
+#endif
         puts("[DISPLAY-LIGHT] display-light-status shows mode and PWM level");
         puts("[INPUT] ALARM short=alarm editor; ALARM hold >=900ms=music; MUSIC TIMER=play/stop, encoder/SETTINGS/MINUS=next/previous, ALARM=mode; hold ALARM/MODE/MINUS=exit");
         puts("[INPUT] GP28=timer H/M/S editor; TIMER/SETTINGS=next/start; MINUS=back; GP28=cancel; quick encoder=1/5/10 min");
@@ -3676,6 +3717,10 @@ static void handle_command(char *line) {
         settings_mark_changed();
 #ifdef CLOCK_ENABLE_WIFI
         network_time_configure("","");
+#endif
+#ifdef CLOCK_ENABLE_PHONE_WEB
+    } else if (strcmp(line, "phone-web-status") == 0) {
+        phone_web_status();
 #endif
     } else if (strcmp(line, "display-light-status") == 0) {
         display_light_status();
@@ -4224,6 +4269,9 @@ int main(void) {
     network_time_init(radio_ready);
     network_time_configure(saved_wifi_ssid,saved_wifi_password);
 #endif
+#ifdef CLOCK_ENABLE_PHONE_WEB
+    phone_web_init(radio_ready);
+#endif
     audio_queue_set_volume(&audio_queue, volume);
     puts("[AUDIO] DFPlayer UART0 GP16/17 BUSY GP18");
     puts("[AUTO] runtime=ON after boot; first observed RTC boundary will be consumed");
@@ -4234,6 +4282,9 @@ int main(void) {
     char last_bottom[17] = {0};
     char rtc_top[17] = "RTC unavailable";
     char rtc_bottom[17] = "Check GP2/5/4";
+#ifdef CLOCK_ENABLE_PHONE_WEB
+    bool rtc_available = false;
+#endif
     uint64_t next_rtc_ms = 0;
     uint32_t previous_remaining = UINT32_MAX;
     uint64_t startup_until_ms=to_ms_since_boot(get_absolute_time())+1600u;
@@ -4414,7 +4465,11 @@ int main(void) {
         if (now >= next_rtc_ms) {
             next_rtc_ms = now + 1000u;
             ds1302_datetime_t dt = {0};
-            if (ds1302_read_datetime(&dt)) {
+            bool read_ok = ds1302_read_datetime(&dt);
+#ifdef CLOCK_ENABLE_PHONE_WEB
+            rtc_available = read_ok;
+#endif
+            if (read_ok) {
                 display_light_hour = dt.hour;
                 snprintf(rtc_top, sizeof(rtc_top), "%02u:%02u:%02u",
                          (unsigned)dt.hour, (unsigned)dt.minute, (unsigned)dt.second);
@@ -4438,6 +4493,23 @@ int main(void) {
         alarm_snooze_service(now);
         alarm_pending_service(now);
         birthday_service(now);
+#ifdef CLOCK_ENABLE_PHONE_WEB
+        static uint64_t next_phone_snapshot_ms;
+        if (now >= next_phone_snapshot_ms) {
+            next_phone_snapshot_ms = now + 250u;
+            phone_web_snapshot_t snapshot = {
+                .timer_seconds = timer.running ? countdown_remaining(&timer, now) : timer.duration_seconds,
+                .track = music_ui_open ? music_ui_track : 0,
+                .timer_running = timer.running,
+                .bluetooth = volume_for_bluetooth(),
+                .player = !music_ui_open ? "Closed" : !sound_enabled ? "Muted" :
+                          music_ui_pending ? "Waiting" : music_ui_paused ? "Paused" :
+                          music_ui_playing ? "Playing" : "Stopped",
+            };
+            if (rtc_available) memcpy(snapshot.time, rtc_top, sizeof(snapshot.time));
+            phone_web_publish(&snapshot);
+        }
+#endif
 #ifdef CLOCK_ENABLE_A2DP
         if (menu_state == MENU_BT_SCANNING && !clock_a2dp_scan_active()) {
             menu_state = MENU_BT_LIST;
@@ -4541,6 +4613,21 @@ int main(void) {
                 snprintf(top, sizeof(top), "Speaking Clock");
                 snprintf(bottom, sizeof(bottom), "Pico 2 W");
             }
+#ifdef CLOCK_ENABLE_PHONE_WEB
+        } else if (menu_state == MENU_PHONE_WEB) {
+            bool direct = phone_web_direct();
+            const char *ip = phone_web_address();
+            if (phone_menu_page == 0u) {
+                snprintf(top, sizeof(top), "%s Wi-Fi", direct ? "Direct" : "Home");
+                snprintf(bottom, sizeof(bottom), "%s", *ip ? ip : "No address");
+            } else if (phone_menu_page == 1u) {
+                snprintf(top, sizeof(top), "%s", direct ? "Return to home?" : "Start direct?");
+                snprintf(bottom, sizeof(bottom), "TIMER=OK");
+            } else {
+                snprintf(top, sizeof(top), "%s", PHONE_WEB_SSID);
+                snprintf(bottom, sizeof(bottom), "%s", phone_web_password());
+            }
+#endif
         } else if (menu_state == MENU_DISPLAY_LIGHT_MODE) {
             cursor_column = 0;
             snprintf(top, sizeof(top), "DISPLAY LIGHT");

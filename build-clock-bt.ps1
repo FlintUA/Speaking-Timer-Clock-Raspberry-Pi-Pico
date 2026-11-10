@@ -4,9 +4,11 @@ param(
     [switch]$Mp3,
     [switch]$NoWifi,
     [string]$BuildDirectory = '',
-    [string]$HelixPath = ''
+    [string]$HelixPath = '',
+    [switch]$PhoneWeb
 )
 $ErrorActionPreference = 'Stop'
+if ($PhoneWeb -and $NoWifi) { throw '-PhoneWeb requires Wi-Fi.' }
 if ($JblAddress -ne '' -and $JblAddress -notmatch '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$') {
     throw 'JblAddress must have format XX:XX:XX:XX:XX:XX'
 }
@@ -47,6 +49,7 @@ $options = @(
     "-DPICO_SDK_PATH=$sdk","-DPICO_EXAMPLES_PATH=$examples",
     '-DCLOCK_ENABLE_A2DP=ON',
     ("-DCLOCK_ENABLE_WIFI=" + $(if ($NoWifi) { 'OFF' } else { 'ON' })),
+    ("-DCLOCK_ENABLE_PHONE_WEB=" + $(if ($PhoneWeb) { 'ON' } else { 'OFF' })),
     ("-DCLOCK_ENABLE_MP3=" + $(if ($Mp3) { 'ON' } else { 'OFF' })),
     ("-DCLOCK_HELIX_PATH=" + $(if ($Mp3) { $HelixPath } else { '' })),
     "-DCLOCK_A2DP_TARGET_ADDR=$JblAddress",
