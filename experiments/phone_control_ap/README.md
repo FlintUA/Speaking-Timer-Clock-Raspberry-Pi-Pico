@@ -60,4 +60,6 @@ The build ID ends in `-bt-mp3-wifi-phone`. The clock uses the existing saved hom
 4. Leave the direct network on the phone. On the clock, select **Return to home?** and press the timer encoder. Close settings to allow the existing idle network service to reconnect to the router and request a fresh NTP sample. Rejoin the home network from the phone and open the displayed address.
 5. Repeat the switch, check the timer and Bluetooth audio in both modes, and confirm a reboot starts in home mode. The direct password and active network mode are kept only in RAM.
 
-Integrated hardware acceptance is pending. The standalone AP and STA results above cover only the individual network modes.
+On 2026-11-10, integrated build `1b824915e670-bt-mp3-wifi-phone` booted on the existing home network. USB reported successful NTP synchronization, an active A2DP stream and valid v11 settings slots. A PC fetched the page and two JSON snapshots with advancing RTC time. The user opened the page on the phone and confirmed live time, the selected timer duration, timer start, player activity and the current track while using the clock's controls.
+
+Direct mode and the return to home Wi-Fi on the integrated build remain to be verified. The standalone AP and STA results above cover only the individual network modes.
