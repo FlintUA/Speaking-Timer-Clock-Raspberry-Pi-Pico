@@ -42,4 +42,4 @@ powershell -ExecutionPolicy Bypass -File .\experiments\phone_control_ap\connect-
 3. Open the printed URL on a phone connected to the same home network. Expect the Speaking Clock page. To check the address again, rerun the script or send `phone-sta-status` in a serial terminal.
 4. Restart the prototype and confirm that it waits for local provisioning again. Restore the clock firmware through manual BOOTSEL when finished.
 
-Home Wi-Fi hardware acceptance is pending. NTP and Bluetooth coexistence are covered later in the integrated clock firmware.
+On 2026-11-10, the user confirmed that the STA prototype joined the home Wi-Fi network and that the Speaking Clock page opened on the phone through the router. Credential lifetime after reboot and operation with the router disconnected from the Internet were not separately tested. NTP and Bluetooth coexistence are covered later in the integrated clock firmware.
