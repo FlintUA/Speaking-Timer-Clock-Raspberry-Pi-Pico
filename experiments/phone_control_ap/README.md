@@ -62,4 +62,4 @@ The build ID ends in `-bt-mp3-wifi-phone`. The clock uses the existing saved hom
 
 On 2026-11-10, integrated build `1b824915e670-bt-mp3-wifi-phone` booted on the existing home network. USB reported successful NTP synchronization, an active A2DP stream and valid v11 settings slots. A PC fetched the page and two JSON snapshots with advancing RTC time. The user opened the page on the phone and confirmed live time, the selected timer duration, timer start, player activity and the current track while using the clock's controls.
 
-Direct mode and the return to home Wi-Fi on the integrated build remain to be verified. The standalone AP and STA results above cover only the individual network modes.
+On build `6eec0ace9b26-bt-mp3-wifi-phone`, the user confirmed switching to direct mode, connecting the phone and reconnecting through the router after returning to home mode. The updater also verified that a reboot returned to home mode and that the clock served its status page after NTP and Bluetooth recovered. The exact password screen duration and playback under sustained web traffic in direct mode were not separately measured.
