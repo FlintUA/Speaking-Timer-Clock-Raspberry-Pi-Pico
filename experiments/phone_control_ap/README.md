@@ -25,4 +25,6 @@ The output is `clock_phone_ap.uf2`. This target has no Bluetooth, MP3 or NTP ser
 4. Leave the Wi-Fi network, rejoin it without restarting the Pico and reload the page. If the Pico was restarted, forget the saved network and join again with the new password.
 5. Restore the clock firmware and verify that its saved configuration is still present.
 
-Hardware acceptance is pending.
+On 2026-11-10, the user joined the SpeakingClock network with a phone and confirmed that the test page opened in the browser. The USB log showed the DHCP server assigning the phone an address on the prototype network.
+
+Rejoining after leaving the network and checking the saved clock configuration after restoring the clock firmware remain separate checks.
