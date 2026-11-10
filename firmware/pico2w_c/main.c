@@ -184,6 +184,9 @@ static uint8_t saved_audio_timer, saved_audio_alarm;
 // Save selected Bluetooth sink MAC even in BT-free firmware builds.
 static uint8_t saved_bt_target_addr[6];
 static char saved_wifi_ssid[33], saved_wifi_password[65];
+#ifndef CLOCK_ENABLE_PHONE_WEB
+static phone_settings_t saved_phone;
+#endif
 static uint64_t rtc_replay_guard_until;
 static uint8_t bt_known_count;
 static clock_bt_known_t bt_known[CLOCK_BT_KNOWN_MAX];
@@ -232,6 +235,7 @@ typedef enum {
 #ifdef CLOCK_ENABLE_PHONE_WEB
     MENU_PHONE_WEB,
     MENU_PHONE_PAIR_CODE,
+    MENU_PHONE_CONFIRM,
 #endif
     MENU_TIMER_EDITOR
 } menu_state_t;
@@ -254,7 +258,10 @@ static uint64_t menu_last_input_ms;
 #ifdef CLOCK_ENABLE_PHONE_WEB
 #define SETTINGS_MENU_ITEMS 12u
 #define PHONE_ACCESS_PAGE 2u
-#define PHONE_PASSWORD_PAGE 3u
+#define PHONE_TRUST_PAGE 3u
+#define PHONE_FORGET_PAGE 4u
+#define PHONE_ROTATE_PAGE 5u
+#define PHONE_PASSWORD_PAGE 6u
 #define PHONE_PASSWORD_TIMEOUT_MS (SETTINGS_MENU_TIMEOUT_MS + 30000u)
 static uint8_t phone_menu_page;
 #else
@@ -1172,37 +1179,43 @@ static clock_settings_t settings_snapshot(void) {
     memcpy(cfg.bt_known, bt_known, sizeof(cfg.bt_known));
     memcpy(cfg.wifi_ssid,saved_wifi_ssid,sizeof(cfg.wifi_ssid));
     memcpy(cfg.wifi_password,saved_wifi_password,sizeof(cfg.wifi_password));
+#ifdef CLOCK_ENABLE_PHONE_WEB
+    phone_web_get_settings(&cfg.phone);
+#else
+    cfg.phone = saved_phone;
+#endif
     return cfg;
 }
 
-static bool settings_equal(clock_settings_t a, clock_settings_t b) {
+static bool settings_equal(const clock_settings_t *a, const clock_settings_t *b) {
     // Compare fields explicitly, not struct padding.
-    if (a.language != b.language || a.volume != b.volume ||
-        a.bt_volume != b.bt_volume ||
-        a.exact_hour != b.exact_hour || a.quiet_enabled != b.quiet_enabled ||
-        a.quiet_start != b.quiet_start || a.quiet_end != b.quiet_end ||
-        a.half_hour_enabled != b.half_hour_enabled ||
-        a.clock_mode != b.clock_mode ||
-        a.display_light.mode != b.display_light.mode ||
-        a.display_light.day_percent != b.display_light.day_percent ||
-        a.display_light.night_percent != b.display_light.night_percent ||
-        a.audio_manual_jbl != b.audio_manual_jbl ||
-        a.audio_hourly_jbl != b.audio_hourly_jbl ||
-        a.audio_timer_jbl != b.audio_timer_jbl ||
-        a.audio_alarm_jbl != b.audio_alarm_jbl ||
-         memcmp(a.bt_target_addr, b.bt_target_addr, sizeof(a.bt_target_addr)) != 0 ||
-         a.bt_known_count != b.bt_known_count ||
-         memcmp(a.bt_known, b.bt_known, sizeof(a.bt_known)) != 0 ||
-         strcmp(a.wifi_ssid,b.wifi_ssid) || strcmp(a.wifi_password,b.wifi_password))
+    if (a->language != b->language || a->volume != b->volume ||
+        a->bt_volume != b->bt_volume ||
+        a->exact_hour != b->exact_hour || a->quiet_enabled != b->quiet_enabled ||
+        a->quiet_start != b->quiet_start || a->quiet_end != b->quiet_end ||
+        a->half_hour_enabled != b->half_hour_enabled ||
+        a->clock_mode != b->clock_mode ||
+        a->display_light.mode != b->display_light.mode ||
+        a->display_light.day_percent != b->display_light.day_percent ||
+        a->display_light.night_percent != b->display_light.night_percent ||
+        a->audio_manual_jbl != b->audio_manual_jbl ||
+        a->audio_hourly_jbl != b->audio_hourly_jbl ||
+        a->audio_timer_jbl != b->audio_timer_jbl ||
+        a->audio_alarm_jbl != b->audio_alarm_jbl ||
+         memcmp(a->bt_target_addr, b->bt_target_addr, sizeof(a->bt_target_addr)) != 0 ||
+         a->bt_known_count != b->bt_known_count ||
+         memcmp(a->bt_known, b->bt_known, sizeof(a->bt_known)) != 0 ||
+         strcmp(a->wifi_ssid,b->wifi_ssid) || strcmp(a->wifi_password,b->wifi_password) ||
+         memcmp(&a->phone, &b->phone, sizeof(a->phone)) != 0)
         return false;
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
-        const alarm_entry_t *x = &a.alarms[i], *y = &b.alarms[i];
+        const alarm_entry_t *x = &a->alarms[i], *y = &b->alarms[i];
         if (x->enabled != y->enabled || x->hour != y->hour ||
             x->minute != y->minute || x->sound != y->sound ||
             x->track != y->track || x->weekdays!=y->weekdays) return false;
     }
     for (unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i) {
-        const birthday_t *x=&a.birthdays[i], *y=&b.birthdays[i];
+        const birthday_t *x=&a->birthdays[i], *y=&b->birthdays[i];
         if (x->enabled!=y->enabled || x->month!=y->month || x->day!=y->day ||
             x->hour!=y->hour || x->minute!=y->minute || x->last_year!=y->last_year) return false;
     }
@@ -1211,7 +1224,7 @@ static bool settings_equal(clock_settings_t a, clock_settings_t b) {
 
 static void settings_mark_changed(void) {
     clock_settings_t current = settings_snapshot();
-    autosave_pending = !settings_equal(current, last_persisted_settings);
+    autosave_pending = !settings_equal(&current, &last_persisted_settings);
     last_settings_change_ms = to_ms_since_boot(get_absolute_time());
     if (autosave_pending) {
         puts("[FLASH] settings changed; autosave pending after 5s");
@@ -1241,7 +1254,7 @@ static void autosave_service(uint64_t now_ms) {
        ) return;
 
     clock_settings_t cfg = settings_snapshot();
-    if (settings_equal(cfg, last_persisted_settings)) {
+    if (settings_equal(&cfg, &last_persisted_settings)) {
         autosave_pending = false;
         return;
     }
@@ -2229,9 +2242,20 @@ static void menu_commit(uint64_t now) {
                 phone_menu_page = phone_web_set_direct(direct) && direct ? PHONE_PASSWORD_PAGE : 0u;
                 menu_last_input_ms = to_ms_since_boot(get_absolute_time());
             } else if (phone_menu_page == PHONE_ACCESS_PAGE) {
-                if (phone_web_has_access()) phone_web_revoke();
-                else if (phone_web_begin_pair()) menu_state = MENU_PHONE_PAIR_CODE;
+                if (phone_web_begin_pair()) menu_state = MENU_PHONE_PAIR_CODE;
+            } else if (phone_menu_page == PHONE_TRUST_PAGE && saved_wifi_ssid[0]) {
+                phone_web_set_home_trusted(!phone_web_home_trusted());
+            } else if (phone_menu_page == PHONE_FORGET_PAGE || phone_menu_page == PHONE_ROTATE_PAGE) {
+                menu_state = MENU_PHONE_CONFIRM;
             }
+            return;
+        case MENU_PHONE_CONFIRM:
+            if (phone_menu_page == PHONE_FORGET_PAGE) {
+                phone_web_revoke();
+            } else if (phone_web_rotate_password() && phone_web_direct()) {
+                phone_menu_page = PHONE_PASSWORD_PAGE;
+            }
+            menu_state = MENU_PHONE_WEB;
             return;
         case MENU_PHONE_PAIR_CODE:
             return;
@@ -2400,7 +2424,7 @@ static void menu_back(uint64_t now) {
 #ifdef CLOCK_ENABLE_PHONE_WEB
     } else if (menu_state == MENU_PHONE_WEB) {
         menu_state = MENU_LIST;
-    } else if (menu_state == MENU_PHONE_PAIR_CODE) {
+    } else if (menu_state == MENU_PHONE_PAIR_CODE || menu_state == MENU_PHONE_CONFIRM) {
         menu_state = MENU_PHONE_WEB;
 #endif
     } else if (menu_state == MENU_EDIT_AUDIO_OUTPUT) {
@@ -2467,9 +2491,10 @@ static void menu_rotate(int direction, uint64_t now) {
 #ifdef CLOCK_ENABLE_PHONE_WEB
         case MENU_PHONE_WEB:
             phone_menu_page = wrap_u8(phone_menu_page, 0,
-                phone_web_direct() ? PHONE_PASSWORD_PAGE : PHONE_ACCESS_PAGE, direction);
+                phone_web_direct() ? PHONE_PASSWORD_PAGE : PHONE_ROTATE_PAGE, direction);
             break;
         case MENU_PHONE_PAIR_CODE:
+        case MENU_PHONE_CONFIRM:
             break;
 #endif
         case MENU_DISPLAY_LIGHT_MODE:
@@ -2624,6 +2649,11 @@ static void load_settings_at_boot(void) {
         memcpy(bt_known, saved.bt_known, sizeof(bt_known));
         memcpy(saved_wifi_ssid,saved.wifi_ssid,sizeof(saved_wifi_ssid));
         memcpy(saved_wifi_password,saved.wifi_password,sizeof(saved_wifi_password));
+#ifdef CLOCK_ENABLE_PHONE_WEB
+        phone_web_load_settings(&saved.phone);
+#else
+        saved_phone = saved.phone;
+#endif
         // v5/v6 stored only the preferred MAC. Keep it selectable by MAC
         // until a fresh scan supplies its advertised name.
         bool legacy_target = false, cleared_target = true;
@@ -3738,6 +3768,14 @@ static void handle_command(char *line) {
             (key_size==64 && strspn(separator+1,"0123456789abcdefABCDEF")!=64)) {
             puts("[WIFI] Invalid configuration; SSID 1..32, password empty or 8..64 characters");
         } else {
+            if (strlen(saved_wifi_ssid) != n || memcmp(saved_wifi_ssid, ssid, n) != 0 ||
+                strcmp(saved_wifi_password, separator + 1) != 0) {
+#ifdef CLOCK_ENABLE_PHONE_WEB
+                phone_web_set_home_trusted(false);
+#else
+                saved_phone.home_trusted = 0;
+#endif
+            }
             memset(saved_wifi_ssid,0,sizeof(saved_wifi_ssid));
             memset(saved_wifi_password,0,sizeof(saved_wifi_password));
             memcpy(saved_wifi_ssid,ssid,n);
@@ -3751,6 +3789,11 @@ static void handle_command(char *line) {
     } else if (strcmp(line,"wifi-clear") == 0) {
         memset(saved_wifi_ssid,0,sizeof(saved_wifi_ssid));
         memset(saved_wifi_password,0,sizeof(saved_wifi_password));
+#ifdef CLOCK_ENABLE_PHONE_WEB
+        phone_web_set_home_trusted(false);
+#else
+        saved_phone.home_trusted = 0;
+#endif
         settings_mark_changed();
 #ifdef CLOCK_ENABLE_WIFI
         network_time_configure("","");
@@ -4378,6 +4421,7 @@ int main(void) {
         controls_poll(to_ms_since_boot(get_absolute_time()), on_control_event, NULL);
         uint64_t now = to_ms_since_boot(get_absolute_time());
 #ifdef CLOCK_ENABLE_PHONE_WEB
+        if (phone_web_take_changes()) settings_mark_changed();
         service_phone_timer(now);
 #endif
         countdown_service(&timer, now);
@@ -4672,19 +4716,30 @@ int main(void) {
                 snprintf(top, sizeof(top), "%s", direct ? "Return to home?" : "Start direct?");
                 snprintf(bottom, sizeof(bottom), "TIMER=OK");
             } else if (phone_menu_page == PHONE_ACCESS_PAGE) {
-                snprintf(top, sizeof(top), "%s", phone_web_has_access() ? "End access?" : "Pair phone?");
+                snprintf(top, sizeof(top), "Pair phone?");
                 snprintf(bottom, sizeof(bottom), "%s", *ip ? "TIMER=OK" : "No address");
+            } else if (phone_menu_page == PHONE_TRUST_PAGE) {
+                snprintf(top, sizeof(top), "Home trust: %s", phone_web_home_trusted() ? "ON" : "OFF");
+                snprintf(bottom, sizeof(bottom), "%s", saved_wifi_ssid[0] ? "TIMER=CHANGE" : "Set home Wi-Fi");
+            } else if (phone_menu_page == PHONE_FORGET_PAGE || phone_menu_page == PHONE_ROTATE_PAGE) {
+                snprintf(top, sizeof(top), "%s", phone_menu_page == PHONE_FORGET_PAGE ?
+                    "Forget browsers?" : "New Wi-Fi key?");
+                snprintf(bottom, sizeof(bottom), "TIMER=OK");
             } else {
                 snprintf(top, sizeof(top), "%s", PHONE_WEB_SSID);
                 snprintf(bottom, sizeof(bottom), "%s", phone_web_password());
             }
+        } else if (menu_state == MENU_PHONE_CONFIRM) {
+            snprintf(top, sizeof(top), "%s", phone_menu_page == PHONE_FORGET_PAGE ?
+                "Forget all?" : "Replace Wi-Fi?");
+            snprintf(bottom, sizeof(bottom), "TIMER=YES -=BACK");
         } else if (menu_state == MENU_PHONE_PAIR_CODE) {
             uint32_t code;
             if (phone_web_pair_code(&code)) {
                 snprintf(top, sizeof(top), "PHONE CODE");
                 snprintf(bottom, sizeof(bottom), "%06lu", (unsigned long)code);
             } else {
-                snprintf(top, sizeof(top), "%s", phone_web_has_access() ? "Phone paired" : "Code unavailable");
+                snprintf(top, sizeof(top), "%s", phone_web_pair_succeeded() ? "Phone paired" : "Code unavailable");
                 snprintf(bottom, sizeof(bottom), "MINUS=BACK");
             }
 #endif

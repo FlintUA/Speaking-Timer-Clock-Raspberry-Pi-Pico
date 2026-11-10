@@ -4,6 +4,7 @@
 #include "alarm_engine.h"
 #include "birthday.h"
 #include "display_light.h"
+#include "phone_settings.h"
 
 #define CLOCK_BT_KNOWN_MAX 4u
 #define CLOCK_BT_NAME_SIZE 25u
@@ -43,6 +44,7 @@ typedef struct {
     char wifi_password[65];
     birthday_t birthdays[CLOCK_BIRTHDAY_COUNT]; // v10; v1-v9 default disabled.
     display_light_t display_light; // v11; older records default to OFF.
+    phone_settings_t phone; // v12; older records have home trust OFF and no credentials.
 } clock_settings_t;
 
 typedef enum {
@@ -64,5 +66,5 @@ void settings_store_inspect(void);
 void settings_store_dump_tail(void);
 settings_store_result_t settings_store_load(clock_settings_t *out);
 // Writes occur only when requested by the application; load never migrates.
-// Current writes use v11; historical v1-v10 records remain readable.
+// Writes with phone settings use v12; records without them still use v11.
 settings_store_result_t settings_store_save(const clock_settings_t *settings);

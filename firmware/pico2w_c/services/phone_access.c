@@ -37,23 +37,47 @@ bool phone_access_same_origin(const char *header, size_t length, const char *add
 }
 
 void phone_access_begin(phone_access_t *access, uint32_t code, uint64_t now) {
-    *access = (phone_access_t){.code_until = now + PHONE_CODE_MS, .code = code, .attempts = 5};
+    access->code = code;
+    access->code_until = now + PHONE_CODE_MS;
+    access->attempts = 5;
+    access->paired = false;
 }
 
-static bool hex_token(const char *text) {
-    for (unsigned i = 0; i < PHONE_TOKEN_LEN; ++i) {
-        char c = text[i];
-        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+void phone_access_reset(phone_access_t *access, uint32_t epoch) {
+    access->code_until = 0;
+    access->attempts = 0;
+    access->paired = false;
+    access->epoch = epoch;
+    access->last = (phone_timer_request_t){0};
+    access->result = PHONE_TIMER_PENDING;
+}
+
+static unsigned browser_index(const phone_access_t *access, const char *token, uint8_t scope) {
+    for (unsigned i = 0; i < PHONE_BROWSER_MAX; ++i) {
+        const phone_browser_t *browser = &access->settings.browsers[i];
+        unsigned difference = 0;
+        for (unsigned j = 0; j < PHONE_TOKEN_LEN; ++j)
+            difference |= (unsigned)(browser->token[j] ^ token[j]);
+        if (browser->scope == scope && !difference) return i;
     }
-    return true;
+    return PHONE_BROWSER_MAX;
 }
 
-static bool authorized(const phone_access_t *access, const char *token, uint64_t now) {
-    if (now >= access->session_until) return false;
-    unsigned difference = 0;
-    for (unsigned i = 0; i < PHONE_TOKEN_LEN; ++i)
-        difference |= (unsigned)(access->token[i] ^ token[i]);
-    return difference == 0;
+phone_reply_t phone_access_check(const phone_access_t *access, const char *token, uint8_t scope) {
+    if (strlen(token) != PHONE_TOKEN_LEN || !phone_hex_valid(token, PHONE_TOKEN_LEN))
+        return PHONE_INVALID;
+    return browser_index(access, token, scope) < PHONE_BROWSER_MAX ? PHONE_OK : PHONE_DENIED;
+}
+
+phone_reply_t phone_access_logout(phone_access_t *access, const char *token, uint8_t scope) {
+    if (strlen(token) != PHONE_TOKEN_LEN || !phone_hex_valid(token, PHONE_TOKEN_LEN))
+        return PHONE_INVALID;
+    unsigned i = browser_index(access, token, scope);
+    if (i < PHONE_BROWSER_MAX) {
+        access->settings.browsers[i] = (phone_browser_t){0};
+        access->changed = true;
+    }
+    return PHONE_OK;
 }
 
 static bool read_number(const char **text, uint32_t *value) {
@@ -70,31 +94,48 @@ static bool read_number(const char **text, uint32_t *value) {
     return true;
 }
 
-phone_reply_t phone_access_pair(phone_access_t *access, const char *body, uint64_t now) {
-    if (strlen(body) != 7u + PHONE_TOKEN_LEN || body[6] != ' ' || !hex_token(body + 7))
-        return PHONE_INVALID;
+phone_reply_t phone_access_pair(phone_access_t *access, const char *body, uint64_t now, uint8_t scope) {
+    if (strlen(body) != 7u + PHONE_TOKEN_LEN || body[6] != ' ' ||
+        !phone_hex_valid(body + 7, PHONE_TOKEN_LEN)) return PHONE_INVALID;
     const char *end = body;
     uint32_t code;
     if (!read_number(&end, &code) || end != body + 6) return PHONE_INVALID;
     const char *token = body + 7;
-    if (authorized(access, token, now)) return PHONE_OK;
+    if (browser_index(access, token, scope) < PHONE_BROWSER_MAX) return PHONE_OK;
     if (now >= access->code_until || !access->attempts) return PHONE_DENIED;
     --access->attempts;
     if (code != access->code) return PHONE_DENIED;
-    access->code_until = 0;
-    memcpy(access->token, token, PHONE_TOKEN_LEN + 1);
-    access->session_until = now + PHONE_SESSION_MS;
-    return PHONE_OK;
+    for (unsigned i = 0; i < PHONE_BROWSER_MAX; ++i) {
+        phone_browser_t *browser = &access->settings.browsers[i];
+        if (!browser->scope) {
+            browser->scope = scope;
+            memcpy(browser->token, token, sizeof(browser->token));
+            access->code_until = 0;
+            access->paired = true;
+            access->changed = true;
+            return PHONE_OK;
+        }
+    }
+    return PHONE_BUSY;
 }
 
-phone_reply_t phone_access_timer(phone_access_t *access, const char *body, uint64_t now) {
-    if (strlen(body) <= PHONE_TOKEN_LEN || body[PHONE_TOKEN_LEN] != ' ' || !hex_token(body))
-        return PHONE_INVALID;
-    if (!authorized(access, body, now)) return PHONE_DENIED;
+phone_reply_t phone_access_timer(phone_access_t *access, const char *body, uint8_t scope, bool home_peer) {
+    const char *p;
+    if (strncmp(body, "- ", 2) == 0) {
+        if (scope != PHONE_SCOPE_HOME || !home_peer || !access->settings.home_trusted) return PHONE_DENIED;
+        p = body + 2;
+    } else {
+        if (strlen(body) <= PHONE_TOKEN_LEN || body[PHONE_TOKEN_LEN] != ' ' ||
+            !phone_hex_valid(body, PHONE_TOKEN_LEN)) return PHONE_INVALID;
+        if (browser_index(access, body, scope) == PHONE_BROWSER_MAX) return PHONE_DENIED;
+        p = body + PHONE_TOKEN_LEN + 1;
+    }
 
-    const char *p = body + PHONE_TOKEN_LEN + 1;
+    uint32_t epoch;
     phone_timer_request_t request = {0};
-    if (!read_number(&p, &request.id) || !request.id || *p++ != ' ') return PHONE_INVALID;
+    if (!read_number(&p, &epoch) || *p++ != ' ' ||
+        !read_number(&p, &request.id) || !request.id || *p++ != ' ' ||
+        !read_number(&p, &request.nonce) || !request.nonce || *p++ != ' ') return PHONE_INVALID;
     if (strncmp(p, "set ", 4) == 0) {
         request.action = PHONE_TIMER_SET;
         p += 4;
@@ -112,13 +153,13 @@ phone_reply_t phone_access_timer(phone_access_t *access, const char *body, uint6
          request.seconds == 0 || request.seconds > CLOCK_TIMER_MAX_SECONDS))
         return PHONE_INVALID;
 
+    if (epoch != access->epoch) return PHONE_BUSY;
     if (request.id == access->last.id)
-        return request.action == access->last.action &&
-               request.seconds == access->last.seconds ? PHONE_OK : PHONE_INVALID;
-    if (request.id < access->last.id) return PHONE_INVALID;
-    if (access->last.id && access->result == PHONE_TIMER_PENDING) return PHONE_BUSY;
+        return request.nonce == access->last.nonce && request.action == access->last.action &&
+               request.seconds == access->last.seconds ? PHONE_OK : PHONE_BUSY;
+    if (request.id != access->last.id + 1u ||
+        (access->last.id && access->result == PHONE_TIMER_PENDING)) return PHONE_BUSY;
     access->last = request;
     access->result = PHONE_TIMER_PENDING;
-    access->session_until = now + PHONE_SESSION_MS;
     return PHONE_OK;
 }

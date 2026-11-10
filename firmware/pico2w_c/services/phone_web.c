@@ -8,6 +8,7 @@
 #include "dhcpserver.h"
 #include "lwip/apps/fs.h"
 #include "lwip/apps/httpd.h"
+#include "lwip/ip.h"
 #include "lwip/mem.h"
 #include "lwip/netif.h"
 #include "lwip/pbuf.h"
@@ -17,14 +18,16 @@
 
 static bool ready, direct_active;
 static dhcp_server_t dhcp;
-static char password[17];
 static char address[IP4ADDR_STRLEN_MAX];
 static phone_web_snapshot_t published = {.player = "Closed"};
 static phone_access_t access;
 
+typedef enum { POST_PAIR, POST_TIMER, POST_ACCESS, POST_LOGOUT } phone_post_action_t;
+
 typedef struct {
     void *connection;
-    bool pairing;
+    phone_post_action_t action;
+    bool home_peer;
     uint16_t length, received;
     char body[81];
 } phone_post_t;
@@ -35,8 +38,8 @@ static uint64_t now_ms(void) {
     return to_ms_since_boot(get_absolute_time());
 }
 
-static void revoke_locked(void) {
-    memset(&access, 0, sizeof(access));
+static void reset_requests_locked(void) {
+    phone_access_reset(&access, get_rand_32());
     memset(posts, 0, sizeof(posts));
 }
 
@@ -44,7 +47,6 @@ bool phone_web_begin_pair(void) {
     if (!ready || !address[0]) return false;
     uint32_t code = get_rand_32() % 1000000u;
     cyw43_arch_lwip_begin();
-    revoke_locked();
     phone_access_begin(&access, code, now_ms());
     cyw43_arch_lwip_end();
     return true;
@@ -59,19 +61,54 @@ bool phone_web_pair_code(uint32_t *code) {
     return active;
 }
 
-bool phone_web_has_access(void) {
+bool phone_web_pair_succeeded(void) {
     if (!ready) return false;
     cyw43_arch_lwip_begin();
-    bool active = now_ms() < access.session_until;
+    bool paired = access.paired;
     cyw43_arch_lwip_end();
-    return active;
+    return paired;
 }
 
 void phone_web_revoke(void) {
     if (!ready) return;
     cyw43_arch_lwip_begin();
-    revoke_locked();
+    memset(access.settings.browsers, 0, sizeof(access.settings.browsers));
+    reset_requests_locked();
+    access.changed = true;
     cyw43_arch_lwip_end();
+}
+
+void phone_web_load_settings(const phone_settings_t *settings) {
+    access.settings = *settings; // Before starting the web server.
+}
+
+void phone_web_get_settings(phone_settings_t *settings) {
+    if (ready) cyw43_arch_lwip_begin();
+    *settings = access.settings;
+    if (ready) cyw43_arch_lwip_end();
+}
+
+bool phone_web_take_changes(void) {
+    if (!ready) return false;
+    cyw43_arch_lwip_begin();
+    bool changed = access.changed;
+    access.changed = false;
+    cyw43_arch_lwip_end();
+    return changed;
+}
+
+bool phone_web_home_trusted(void) {
+    return access.settings.home_trusted != 0;
+}
+
+void phone_web_set_home_trusted(bool enabled) {
+    if (ready) cyw43_arch_lwip_begin();
+    if (access.settings.home_trusted != (uint8_t)enabled) {
+        access.settings.home_trusted = (uint8_t)enabled;
+        if (ready) reset_requests_locked();
+        access.changed = true;
+    }
+    if (ready) cyw43_arch_lwip_end();
 }
 
 bool phone_web_timer_pending(phone_timer_request_t *request) {
@@ -94,27 +131,47 @@ void phone_web_init(bool radio_ready) {
     ready = radio_ready;
     if (!ready) return;
     cyw43_arch_lwip_begin();
+    reset_requests_locked();
     httpd_init();
     cyw43_arch_lwip_end();
 }
 
 bool phone_web_direct(void) { return direct_active; }
 const char *phone_web_address(void) { return address; }
-const char *phone_web_password(void) { return password; }
+const char *phone_web_password(void) { return access.settings.password; }
+
+static void new_password_locked(void) {
+    uint64_t random = get_rand_64();
+    snprintf(access.settings.password, sizeof(access.settings.password), "%016" PRIx64, random);
+    access.changed = true;
+}
+
+bool phone_web_rotate_password(void) {
+    if (!ready) return false;
+    bool restart_direct = direct_active;
+    if (restart_direct && !phone_web_set_direct(false)) return false;
+    cyw43_arch_lwip_begin();
+    new_password_locked();
+    for (unsigned i = 0; i < PHONE_BROWSER_MAX; ++i)
+        if (access.settings.browsers[i].scope == PHONE_SCOPE_DIRECT)
+            access.settings.browsers[i] = (phone_browser_t){0};
+    cyw43_arch_lwip_end();
+    return !restart_direct || phone_web_set_direct(true);
+}
 
 bool phone_web_set_direct(bool direct) {
     if (!ready) return false;
     if (direct == direct_active) return true;
     cyw43_arch_lwip_begin();
     address[0] = '\0';
-    revoke_locked();
+    reset_requests_locked();
     cyw43_arch_lwip_end();
     if (direct) {
-        snprintf(password, sizeof(password), "%016" PRIx64, get_rand_64());
         network_time_suspend_home(true);
         cyw43_arch_lwip_begin();
         cyw43_arch_disable_sta_mode();
-        cyw43_arch_enable_ap_mode(PHONE_WEB_SSID, password, CYW43_AUTH_WPA2_AES_PSK);
+        if (!access.settings.password[0]) new_password_locked();
+        cyw43_arch_enable_ap_mode(PHONE_WEB_SSID, access.settings.password, CYW43_AUTH_WPA2_AES_PSK);
         struct netif *ap = &cyw43_state.netif[CYW43_ITF_AP];
         if (netif_is_up(ap) && !ip4_addr_isany(netif_ip4_addr(ap))) {
             ip_addr_t ip = *netif_ip4_addr(ap);
@@ -136,7 +193,6 @@ bool phone_web_set_direct(bool direct) {
     cyw43_arch_enable_sta_mode();
     cyw43_arch_lwip_end();
     direct_active = false;
-    memset(password, 0, sizeof(password));
     network_time_suspend_home(false);
     puts(direct ? "[PHONE-WEB] Direct Wi-Fi failed; home mode restored" :
                   "[PHONE-WEB] Home Wi-Fi resumed");
@@ -161,9 +217,18 @@ void phone_web_publish(const phone_web_snapshot_t *snapshot) {
     }
     if (strcmp(address, new_address) != 0) {
         memcpy(address, new_address, sizeof(address));
-        revoke_locked();
+        reset_requests_locked();
     }
     cyw43_arch_lwip_end();
+}
+
+static bool trusted_home_peer(void) {
+    const struct netif *home = &cyw43_state.netif[CYW43_ITF_STA];
+    const ip_addr_t *peer = ip_current_src_addr();
+    return !direct_active && access.settings.home_trusted &&
+           ip_current_input_netif() == home && IP_IS_V4(peer) &&
+           !ip4_addr_isany(netif_ip4_netmask(home)) &&
+           ip4_addr_netcmp(ip_2_ip4(peer), netif_ip4_addr(home), netif_ip4_netmask(home));
 }
 
 static const char *reply_path(phone_reply_t reply) {
@@ -177,8 +242,12 @@ err_t httpd_post_begin(void *connection, const char *uri, const char *header,
                       u16_t header_length, int length, char *response_uri,
                       u16_t response_length, u8_t *auto_window) {
     (void)auto_window;
-    bool pairing = strcmp(uri, "/pair") == 0;
-    if (!pairing && strcmp(uri, "/timer") != 0) return ERR_ARG;
+    phone_post_action_t action;
+    if (strcmp(uri, "/pair") == 0) action = POST_PAIR;
+    else if (strcmp(uri, "/timer") == 0) action = POST_TIMER;
+    else if (strcmp(uri, "/access") == 0) action = POST_ACCESS;
+    else if (strcmp(uri, "/logout") == 0) action = POST_LOGOUT;
+    else return ERR_ARG;
     // lwIP passes the header after the URI and terminates it at the blank line.
     if (!phone_access_same_origin(header, header_length, address)) {
         snprintf(response_uri, response_length, "%s", reply_path(PHONE_DENIED));
@@ -190,8 +259,8 @@ err_t httpd_post_begin(void *connection, const char *uri, const char *header,
     }
     for (unsigned i = 0; i < sizeof(posts) / sizeof(posts[0]); ++i) {
         if (!posts[i].connection) {
-            posts[i] = (phone_post_t){.connection = connection, .pairing = pairing,
-                                      .length = (uint16_t)length};
+            posts[i] = (phone_post_t){.connection = connection, .action = action,
+                                      .home_peer = trusted_home_peer(), .length = (uint16_t)length};
             return ERR_OK;
         }
     }
@@ -222,8 +291,13 @@ void httpd_post_finished(void *connection, char *response_uri, u16_t response_le
     phone_reply_t reply = PHONE_INVALID;
     if (post && post->received == post->length && !memchr(post->body, '\0', post->length)) {
         post->body[post->length] = '\0';
-        reply = post->pairing ? phone_access_pair(&access, post->body, now_ms()) :
-                                phone_access_timer(&access, post->body, now_ms());
+        uint8_t scope = direct_active ? PHONE_SCOPE_DIRECT : PHONE_SCOPE_HOME;
+        switch (post->action) {
+            case POST_PAIR: reply = phone_access_pair(&access, post->body, now_ms(), scope); break;
+            case POST_TIMER: reply = phone_access_timer(&access, post->body, scope, post->home_peer); break;
+            case POST_ACCESS: reply = phone_access_check(&access, post->body, scope); break;
+            case POST_LOGOUT: reply = phone_access_logout(&access, post->body, scope); break;
+        }
     }
     if (post) memset(post, 0, sizeof(*post));
     snprintf(response_uri, response_length, "%s", reply_path(reply));
@@ -238,7 +312,7 @@ int fs_open_custom(struct fs_file *file, const char *name) {
             if (strcmp(name, reply_path((phone_reply_t)i)) == 0) status = codes[i];
         if (!status) return 0;
     }
-    const size_t capacity = 320;
+    const size_t capacity = 416;
     char *response = mem_malloc(capacity);
     if (!response) return 0;
     int len = snprintf(response, capacity, "HTTP/1.0 %s\r\nContent-Type: application/json\r\n"
@@ -253,11 +327,13 @@ int fs_open_custom(struct fs_file *file, const char *name) {
         body_length = snprintf(response + len, capacity - (size_t)len,
         "{\"time\":\"%s\",\"timer_running\":%s,\"timer_seconds\":%" PRIu32
         ",\"player\":\"%s\",\"track\":%u,\"output\":\"%s\",\"timer_request\":%" PRIu32
-        ",\"timer_result\":\"%s\"}\n",
+        ",\"timer_result\":\"%s\",\"timer_nonce\":%" PRIu32 ",\"epoch\":%" PRIu32
+        ",\"home_trusted\":%s}\n",
         published.time, published.timer_running ? "true" : "false",
         published.timer_seconds, published.player, (unsigned)published.track,
         published.bluetooth ? "BT" : "LOCAL", access.last.id,
-        access.last.id ? results[access.result] : "none");
+        access.last.id ? results[access.result] : "none", access.last.nonce, access.epoch,
+        trusted_home_peer() ? "true" : "false");
     } else {
         body_length = snprintf(response + len, capacity - (size_t)len, "{}\n");
     }
