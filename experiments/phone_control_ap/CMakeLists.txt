@@ -17,16 +17,20 @@ pico_set_lwip_httpd_content(clock_phone_content INTERFACE
 )
 
 add_executable(clock_phone_ap main.c "${DHCP_DIR}/dhcpserver.c")
-target_include_directories(clock_phone_ap PRIVATE
-    "${CMAKE_CURRENT_LIST_DIR}" "${WIFI_EXAMPLES}" "${DHCP_DIR}"
-)
-target_link_libraries(clock_phone_ap PRIVATE
-    pico_stdlib pico_rand pico_cyw43_arch_lwip_threadsafe_background
-    pico_lwip_http clock_phone_content
-)
+target_include_directories(clock_phone_ap PRIVATE "${DHCP_DIR}")
+target_link_libraries(clock_phone_ap PRIVATE pico_rand)
 pico_configure_ip4_address(clock_phone_ap PRIVATE
     CYW43_DEFAULT_IP_AP_ADDRESS 192.168.4.1
 )
-pico_enable_stdio_usb(clock_phone_ap 1)
-pico_enable_stdio_uart(clock_phone_ap 0)
-pico_add_extra_outputs(clock_phone_ap)
+
+add_executable(clock_phone_sta sta_main.c)
+foreach(target IN ITEMS clock_phone_ap clock_phone_sta)
+    target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_LIST_DIR}" "${WIFI_EXAMPLES}")
+    target_link_libraries(${target} PRIVATE
+        pico_stdlib pico_cyw43_arch_lwip_threadsafe_background
+        pico_lwip_http clock_phone_content
+    )
+    pico_enable_stdio_usb(${target} 1)
+    pico_enable_stdio_uart(${target} 0)
+    pico_add_extra_outputs(${target})
+endforeach()

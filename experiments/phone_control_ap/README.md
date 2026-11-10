@@ -1,6 +1,6 @@
-# Phone control step 1: direct Wi-Fi prototype
+# Phone control Wi-Fi prototypes
 
-This standalone Pico 2 W image brings up a WPA2 access point, leases an IPv4 address to the phone through DHCP and serves a static page with the Pico SDK's lwIP HTTP server. CMake embeds the HTML in the image. The prototype has no clock controls or settings storage code.
+The two standalone Pico 2 W targets serve the same static page with the Pico SDK's lwIP HTTP server. CMake embeds one HTML source in both images. The AP target leases an address to the phone. The STA target obtains its address from the home router.
 
 ## Build on Windows
 
@@ -13,11 +13,12 @@ $cmake = "$sdkRoot\cmake\v4.3.4\bin\cmake.exe"
 $build = 'C:\pico_clock_compile\phone-ap'
 & $cmake -S experiments/phone_control_ap -B $build -G Ninja -DPICO_BOARD=pico2_w "-DPICO_SDK_PATH=$sdkRoot/sdk/2.3.1" "-DPICO_EXAMPLES_PATH=$sdkRoot/pico-examples" "-Dpicotool_DIR=$sdkRoot/picotool/2.3.1/picotool" "-Dpioasm_DIR=$sdkRoot/tools/2.3.1/pioasm"
 & $cmake --build $build --target clock_phone_ap
+& $cmake --build $build --target clock_phone_sta
 ```
 
-The output is `clock_phone_ap.uf2`. This target has no Bluetooth, MP3 or NTP service.
+The outputs are `clock_phone_ap.uf2` and `clock_phone_sta.uf2`. These standalone targets contain no clock controls, settings storage, Bluetooth, MP3 or NTP service.
 
-## Hardware acceptance
+## Direct Wi-Fi hardware acceptance
 
 1. Before installing the prototype, keep a verified Speaking Clock UF2 available for restoration. The prototype temporarily takes the place of the clock application on the board. Use manual BOOTSEL to load the prototype and restore the clock firmware. The clock updater expects application diagnostics that this image does not implement.
 2. After installing the prototype, open its USB serial port at 115200 baud. It prints the SSID and a new WPA2 password generated at each boot. Send `?` to show them again. Keep the password in the local terminal.
@@ -28,3 +29,17 @@ The output is `clock_phone_ap.uf2`. This target has no Bluetooth, MP3 or NTP ser
 On 2026-11-10, the user joined the SpeakingClock network with a phone and confirmed that the test page opened in the browser. The USB log showed the DHCP server assigning the phone an address on the prototype network.
 
 Rejoining after leaving the network and checking the saved clock configuration after restoring the clock firmware remain separate checks.
+
+## Home Wi-Fi hardware acceptance
+
+1. Install `clock_phone_sta.uf2` through manual BOOTSEL. After it starts, close any serial monitor using the prototype's port.
+2. From the repository root, run the local setup script. The password entry is masked and the prototype uses the credentials for this boot only.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\experiments\phone_control_ap\connect-home-wifi.ps1 -Port COM8
+```
+
+3. Open the printed URL on a phone connected to the same home network. Expect the Speaking Clock page. To check the address again, rerun the script or send `phone-sta-status` in a serial terminal.
+4. Restart the prototype and confirm that it waits for local provisioning again. Restore the clock firmware through manual BOOTSEL when finished.
+
+Home Wi-Fi hardware acceptance is pending. NTP and Bluetooth coexistence are covered later in the integrated clock firmware.
