@@ -1,14 +1,12 @@
 #include "countdown.h"
 
-#define MAX_TIMER_SECONDS (4u * 60u * 60u)
-
 void countdown_init(countdown_t *timer) {
     *timer = (countdown_t){.duration_seconds = 60u};
 }
 
 void countdown_set_duration(countdown_t *timer, uint32_t seconds) {
     if (seconds < 1u) seconds = 1u;
-    if (seconds > MAX_TIMER_SECONDS) seconds = MAX_TIMER_SECONDS;
+    if (seconds > CLOCK_TIMER_MAX_SECONDS) seconds = CLOCK_TIMER_MAX_SECONDS;
     timer->duration_seconds = seconds;
 }
 

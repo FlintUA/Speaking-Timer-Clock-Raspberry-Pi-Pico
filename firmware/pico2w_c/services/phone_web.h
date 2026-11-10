@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "phone_access.h"
 
 #define PHONE_WEB_SSID "SpeakingClock"
 
@@ -21,3 +22,9 @@ const char *phone_web_address(void);
 const char *phone_web_password(void);
 void phone_web_status(void);
 void phone_web_publish(const phone_web_snapshot_t *snapshot);
+bool phone_web_begin_pair(void);
+bool phone_web_pair_code(uint32_t *code);
+bool phone_web_has_access(void);
+void phone_web_revoke(void);
+bool phone_web_timer_pending(phone_timer_request_t *request);
+void phone_web_timer_complete(uint32_t id, bool applied);

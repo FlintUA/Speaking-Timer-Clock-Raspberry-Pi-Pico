@@ -7,6 +7,10 @@
   body { font: 1rem/1.5 system-ui, sans-serif; max-width: 28rem; margin: 2rem auto; padding: 0 1rem; }
   dl { display: grid; grid-template-columns: auto 1fr; gap: .65rem 1.25rem; }
   dd { margin: 0; font-variant-numeric: tabular-nums; }
+  form { margin: 1.25rem 0; }
+  input, button { font: inherit; }
+  input[type=number] { width: 4.5rem; }
+  button { margin: .35rem .25rem .35rem 0; }
 </style>
 <main>
   <h1>Speaking Clock</h1>
@@ -17,11 +21,115 @@
     <dt>Player</dt><dd id="player">—</dd>
     <dt>Audio output</dt><dd id="output">—</dd>
   </dl>
+  <form id="pair">
+    <label for="code">Code from Phone Control</label>
+    <input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" required>
+    <button>Pair phone</button>
+  </form>
+  <form id="controls" hidden>
+    <label>Minutes <input id="minutes" type="number" min="0" max="240" value="1" required></label>
+    <label>Seconds <input id="seconds" type="number" min="0" max="59" value="0" required></label>
+    <div>
+      <button type="button" data-action="set">Set</button>
+      <button type="button" data-action="start">Start</button>
+      <button type="button" data-action="cancel">Cancel timer</button>
+    </div>
+  </form>
+  <p id="feedback" role="status"></p>
 </main>
 <script>
   const labels = Object.fromEntries(
     ["connection", "time", "timer", "player", "output"].map(id => [id, document.getElementById(id)])
   );
+  const pairForm = document.getElementById("pair");
+  const controls = document.getElementById("controls");
+  const minutes = document.getElementById("minutes");
+  const seconds = document.getElementById("seconds");
+  const feedback = document.getElementById("feedback");
+  let session = null;
+  try { session = JSON.parse(sessionStorage.getItem("clock-session")); } catch {}
+  let busy = false, pending = null, live = null, edited = false;
+
+  function saveSession(value) {
+    session = value;
+    try { sessionStorage.setItem("clock-session", JSON.stringify(value)); } catch {}
+  }
+  function updateControls() {
+    pairForm.hidden = Boolean(session);
+    controls.hidden = !session;
+    for (const button of controls.querySelectorAll("button")) {
+      button.disabled = busy || Boolean(pending) || !live ||
+        (live.timer_running && button.dataset.action !== "cancel");
+    }
+  }
+  async function post(path, body) {
+    for (let attempt = 0; ; attempt++) {
+      const request = new AbortController();
+      const deadline = setTimeout(() => request.abort(), 3000);
+      try {
+        return await fetch(path, {method: "POST", body, signal: request.signal});
+      } catch (error) {
+        if (attempt) throw error;
+      } finally {
+        clearTimeout(deadline);
+      }
+    }
+  }
+  pairForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (busy) return;
+    const code = document.getElementById("code");
+    busy = true;
+    try {
+      const token = Array.from(crypto.getRandomValues(new Uint8Array(16)),
+        byte => byte.toString(16).padStart(2, "0")).join("");
+      const response = await post("/pair", code.value + " " + token);
+      if (response.ok) {
+        saveSession({token, sequence: 0});
+        feedback.textContent = "Phone paired. Close settings on the clock to use the timer.";
+      } else {
+        feedback.textContent = "Pairing denied. Open Pair phone? on the clock for a new code.";
+      }
+    } catch {
+      feedback.textContent = "Could not pair. Check the Wi-Fi connection.";
+    } finally {
+      code.value = "";
+      busy = false;
+      updateControls();
+    }
+  });
+  controls.addEventListener("input", () => { edited = true; });
+  controls.addEventListener("submit", event => event.preventDefault());
+  controls.addEventListener("click", async event => {
+    const action = event.target.dataset.action;
+    if (!action || !session || busy || pending || !live) return;
+    const durationSeconds = action === "cancel" ? 0 : Number(minutes.value) * 60 + Number(seconds.value);
+    if (action !== "cancel" && (!controls.reportValidity() || durationSeconds < 1 || durationSeconds > 14400)) {
+      feedback.textContent = "Enter a duration between one second and four hours.";
+      return;
+    }
+    const id = session.sequence + 1;
+    saveSession({token: session.token, sequence: id});
+    busy = true;
+    updateControls();
+    try {
+      const response = await post("/timer", [session.token, id, action, durationSeconds].join(" "));
+      if (response.ok) {
+        pending = {id, until: Date.now() + 5000};
+        feedback.textContent = "Waiting for the clock…";
+      } else if (response.status === 403) {
+        saveSession(null);
+        feedback.textContent = "Access expired or ended. Pair again on the clock.";
+      } else {
+        feedback.textContent = "Command refused. Try again.";
+      }
+    } catch {
+      feedback.textContent = "Connection lost. Check the live timer before trying again.";
+    } finally {
+      busy = false;
+      updateControls();
+    }
+  });
   function duration(seconds) {
     const parts = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60];
     return parts.map(value => String(value).padStart(2, "0")).join(":");
@@ -33,19 +141,37 @@
       const response = await fetch("/status.json", {cache: "no-store", signal: request.signal});
       if (!response.ok) throw new Error("Status unavailable");
       const data = await response.json();
+      live = data;
       labels.connection.textContent = "Live status";
       labels.time.textContent = data.time || "RTC unavailable";
       labels.timer.textContent = (data.timer_running ? "Running · " : "Set · ") + duration(data.timer_seconds);
       labels.player.textContent = data.player + (data.track ? " · Track " + data.track : "");
       labels.output.textContent = data.output;
+      if (pending && data.timer_request === pending.id && data.timer_result !== "pending") {
+        feedback.textContent = data.timer_result === "applied" ? "Timer updated." :
+          "Timer busy. Close settings or the player and check the countdown.";
+        if (data.timer_result === "applied") edited = false;
+        pending = null;
+      }
+      if (!edited && !data.timer_running) {
+        minutes.value = Math.floor(data.timer_seconds / 60);
+        seconds.value = data.timer_seconds % 60;
+      }
     } catch {
+      live = null;
       labels.connection.textContent = "Connection lost. Reconnecting…";
       for (const key of ["time", "timer", "player", "output"]) labels[key].textContent = "—";
     } finally {
+      if (pending && Date.now() >= pending.until) {
+        pending = null;
+        feedback.textContent = "No confirmation. Check the live timer before trying again.";
+      }
+      updateControls();
       clearTimeout(deadline);
       setTimeout(update, 1000);
     }
   }
+  updateControls();
   update();
 </script>
 </html>

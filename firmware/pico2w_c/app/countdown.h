@@ -2,6 +2,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define CLOCK_TIMER_MAX_SECONDS (4u * 60u * 60u)
+
 // Port of source/v3/timer_engine.py, including 1..14400 seconds,
 // ceil-to-next-second remaining time and one-shot finish event.
 typedef struct {

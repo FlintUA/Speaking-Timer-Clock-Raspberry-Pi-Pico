@@ -52,7 +52,7 @@ Build the normal clock application with the experimental web profile:
 powershell -ExecutionPolicy Bypass -File .\build-clock-bt.ps1 -Mp3 -PhoneWeb
 ```
 
-The build ID ends in `-bt-mp3-wifi-phone`. The clock uses the existing saved home Wi-Fi credentials. The integrated build serves an embedded page and a read-only `/status.json` snapshot. The snapshot contains RTC time, countdown or selected duration, player state and track, and the output currently selected by the clock's audio-volume routing. There are no browser controls in this stage.
+The build ID ends in `-bt-mp3-wifi-phone`. The clock uses the existing saved home Wi-Fi credentials. The integrated build serves an embedded page and a read-only `/status.json` snapshot. The snapshot contains RTC time, countdown or selected duration, player state and track, and the output currently selected by the clock's audio-volume routing.
 
 1. Boot on the existing home network and open **Settings → Phone Control (11)**. Open the displayed IP address over HTTP from a phone on the home Wi-Fi network. The USB `phone-web-status` command reports the mode and address.
 2. Check that the browser follows changes made with the clock's controls. Start and stop the timer, then check the player in LOCAL and BT modes. Verify that sound plays normally and NTP still reports a successful sync.
@@ -63,3 +63,13 @@ The build ID ends in `-bt-mp3-wifi-phone`. The clock uses the existing saved hom
 On 2026-11-10, integrated build `1b824915e670-bt-mp3-wifi-phone` booted on the existing home network. USB reported successful NTP synchronization, an active A2DP stream and valid v11 settings slots. A PC fetched the page and two JSON snapshots with advancing RTC time. The user opened the page on the phone and confirmed live time, the selected timer duration, timer start, player activity and the current track while using the clock's controls.
 
 On build `6eec0ace9b26-bt-mp3-wifi-phone`, the user confirmed switching to direct mode, connecting the phone and reconnecting through the router after returning to home mode. The updater also verified that a reboot returned to home mode and that the clock served its status page after NTP and Bluetooth recovered. The exact password screen duration and playback under sustained web traffic in direct mode were not separately measured.
+
+## Timer control from the phone
+
+1. Open the clock's numeric IP address over HTTP on the phone. Use the trusted home network or the clock's direct WPA2 network.
+2. Open **Settings → Phone Control → Pair phone?** and press the timer encoder. Enter the six digits shown on the LCD into the browser within 60 seconds. Up to five attempts are allowed per code.
+3. Once the LCD reports **Phone paired**, press MINUS until the normal clock display returns. In the browser, enter minutes and seconds. **Set** updates the idle timer duration, **Start** starts that duration, and **Cancel timer** stops a running countdown.
+4. Check that a timer started in the browser can be cancelled on the clock and that one started on the clock can be cancelled from the browser. Repeat in both Wi-Fi modes. Start a short timer and disconnect the phone before it finishes. The clock should still play its usual completion sound.
+5. Select **End access?** under **Phone Control** while the clock is idle. The next timer command should be refused until the phone pairs again. Test that switching networks also ends access and that the timer state continues locally.
+
+The clock allows one browser session and expires it after 15 minutes without a timer command. Tokens stay in the browser tab and in clock RAM. The controller rejects requests from a different browser origin and repeated command IDs cannot restart a countdown. The firmware serves local HTTP, so keep this interface on a trusted network. Host tests cover code expiry, retry limits, session expiry, origin checking, invalid durations and duplicate requests. Hardware acceptance is pending.

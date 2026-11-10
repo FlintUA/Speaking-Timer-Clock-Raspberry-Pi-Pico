@@ -231,6 +231,7 @@ typedef enum {
     MENU_DISPLAY_LIGHT_NIGHT,
 #ifdef CLOCK_ENABLE_PHONE_WEB
     MENU_PHONE_WEB,
+    MENU_PHONE_PAIR_CODE,
 #endif
     MENU_TIMER_EDITOR
 } menu_state_t;
@@ -252,7 +253,8 @@ static uint64_t menu_last_input_ms;
 #define SETTINGS_MENU_TIMEOUT_MS 20000u
 #ifdef CLOCK_ENABLE_PHONE_WEB
 #define SETTINGS_MENU_ITEMS 12u
-#define PHONE_PASSWORD_PAGE 2u
+#define PHONE_ACCESS_PAGE 2u
+#define PHONE_PASSWORD_PAGE 3u
 #define PHONE_PASSWORD_TIMEOUT_MS (SETTINGS_MENU_TIMEOUT_MS + 30000u)
 static uint8_t phone_menu_page;
 #else
@@ -1115,6 +1117,28 @@ static void timer_cancel_now(void) {
     finished_screen_until_ms = 0;
     timer_audio_cancel();
 }
+
+#ifdef CLOCK_ENABLE_PHONE_WEB
+static void service_phone_timer(uint64_t now) {
+    phone_timer_request_t request;
+    if (!phone_web_timer_pending(&request)) return;
+    bool applied = false;
+    if (request.action == PHONE_TIMER_CANCEL) {
+        if (timer.running) timer_cancel_now();
+        applied = true;
+    } else if (!timer.running && menu_state == MENU_CLOSED &&
+               alarm_ui_state == ALARM_UI_CLOSED && !music_ui_open) {
+        countdown_set_duration(&timer, request.seconds);
+        if (request.action == PHONE_TIMER_START) timer_start_now(now);
+        else {
+            timer_screen = true;
+            finished_screen_until_ms = 0;
+        }
+        applied = true;
+    }
+    phone_web_timer_complete(request.id, applied);
+}
+#endif
 
 
 static clock_settings_t settings_snapshot(void) {
@@ -2204,7 +2228,12 @@ static void menu_commit(uint64_t now) {
                 bool direct = !phone_web_direct();
                 phone_menu_page = phone_web_set_direct(direct) && direct ? PHONE_PASSWORD_PAGE : 0u;
                 menu_last_input_ms = to_ms_since_boot(get_absolute_time());
+            } else if (phone_menu_page == PHONE_ACCESS_PAGE) {
+                if (phone_web_has_access()) phone_web_revoke();
+                else if (phone_web_begin_pair()) menu_state = MENU_PHONE_PAIR_CODE;
             }
+            return;
+        case MENU_PHONE_PAIR_CODE:
             return;
 #endif
         case MENU_DISPLAY_LIGHT_MODE:
@@ -2371,6 +2400,8 @@ static void menu_back(uint64_t now) {
 #ifdef CLOCK_ENABLE_PHONE_WEB
     } else if (menu_state == MENU_PHONE_WEB) {
         menu_state = MENU_LIST;
+    } else if (menu_state == MENU_PHONE_PAIR_CODE) {
+        menu_state = MENU_PHONE_WEB;
 #endif
     } else if (menu_state == MENU_EDIT_AUDIO_OUTPUT) {
         puts("[MENU-AUDIO] Choice discarded");
@@ -2436,7 +2467,9 @@ static void menu_rotate(int direction, uint64_t now) {
 #ifdef CLOCK_ENABLE_PHONE_WEB
         case MENU_PHONE_WEB:
             phone_menu_page = wrap_u8(phone_menu_page, 0,
-                phone_web_direct() ? PHONE_PASSWORD_PAGE : 1u, direction);
+                phone_web_direct() ? PHONE_PASSWORD_PAGE : PHONE_ACCESS_PAGE, direction);
+            break;
+        case MENU_PHONE_PAIR_CODE:
             break;
 #endif
         case MENU_DISPLAY_LIGHT_MODE:
@@ -4344,6 +4377,9 @@ int main(void) {
         audio_queue_service(&audio_queue, to_ms_since_boot(get_absolute_time()));
         controls_poll(to_ms_since_boot(get_absolute_time()), on_control_event, NULL);
         uint64_t now = to_ms_since_boot(get_absolute_time());
+#ifdef CLOCK_ENABLE_PHONE_WEB
+        service_phone_timer(now);
+#endif
         countdown_service(&timer, now);
         // countdown_service clears timer.running at zero; the finish
         // event and its audio must take priority over flash writes.
@@ -4357,6 +4393,8 @@ int main(void) {
 #ifdef CLOCK_ENABLE_PHONE_WEB
         if (menu_state == MENU_PHONE_WEB && phone_menu_page == PHONE_PASSWORD_PAGE)
             menu_timeout_ms = PHONE_PASSWORD_TIMEOUT_MS;
+        else if (menu_state == MENU_PHONE_PAIR_CODE)
+            menu_timeout_ms = PHONE_CODE_MS;
 #endif
         if (menu_state != MENU_CLOSED &&
 #ifdef CLOCK_ENABLE_A2DP
@@ -4633,9 +4671,21 @@ int main(void) {
             } else if (phone_menu_page == 1u) {
                 snprintf(top, sizeof(top), "%s", direct ? "Return to home?" : "Start direct?");
                 snprintf(bottom, sizeof(bottom), "TIMER=OK");
+            } else if (phone_menu_page == PHONE_ACCESS_PAGE) {
+                snprintf(top, sizeof(top), "%s", phone_web_has_access() ? "End access?" : "Pair phone?");
+                snprintf(bottom, sizeof(bottom), "%s", *ip ? "TIMER=OK" : "No address");
             } else {
                 snprintf(top, sizeof(top), "%s", PHONE_WEB_SSID);
                 snprintf(bottom, sizeof(bottom), "%s", phone_web_password());
+            }
+        } else if (menu_state == MENU_PHONE_PAIR_CODE) {
+            uint32_t code;
+            if (phone_web_pair_code(&code)) {
+                snprintf(top, sizeof(top), "PHONE CODE");
+                snprintf(bottom, sizeof(bottom), "%06lu", (unsigned long)code);
+            } else {
+                snprintf(top, sizeof(top), "%s", phone_web_has_access() ? "Phone paired" : "Code unavailable");
+                snprintf(bottom, sizeof(bottom), "MINUS=BACK");
             }
 #endif
         } else if (menu_state == MENU_DISPLAY_LIGHT_MODE) {
