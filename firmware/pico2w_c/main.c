@@ -252,6 +252,8 @@ static uint64_t menu_last_input_ms;
 #define SETTINGS_MENU_TIMEOUT_MS 20000u
 #ifdef CLOCK_ENABLE_PHONE_WEB
 #define SETTINGS_MENU_ITEMS 12u
+#define PHONE_PASSWORD_PAGE 2u
+#define PHONE_PASSWORD_TIMEOUT_MS (SETTINGS_MENU_TIMEOUT_MS + 30000u)
 static uint8_t phone_menu_page;
 #else
 #define SETTINGS_MENU_ITEMS 11u
@@ -2200,7 +2202,8 @@ static void menu_commit(uint64_t now) {
         case MENU_PHONE_WEB:
             if (phone_menu_page == 1u) {
                 bool direct = !phone_web_direct();
-                phone_menu_page = phone_web_set_direct(direct) && direct ? 2u : 0u;
+                phone_menu_page = phone_web_set_direct(direct) && direct ? PHONE_PASSWORD_PAGE : 0u;
+                menu_last_input_ms = to_ms_since_boot(get_absolute_time());
             }
             return;
 #endif
@@ -2432,7 +2435,8 @@ static void menu_rotate(int direction, uint64_t now) {
             break;
 #ifdef CLOCK_ENABLE_PHONE_WEB
         case MENU_PHONE_WEB:
-            phone_menu_page = wrap_u8(phone_menu_page, 0, phone_web_direct() ? 2u : 1u, direction);
+            phone_menu_page = wrap_u8(phone_menu_page, 0,
+                phone_web_direct() ? PHONE_PASSWORD_PAGE : 1u, direction);
             break;
 #endif
         case MENU_DISPLAY_LIGHT_MODE:
@@ -4349,14 +4353,20 @@ int main(void) {
             timer_screen = false;
             finished_screen_until_ms = now + 3000u;
         }
+        uint32_t menu_timeout_ms = SETTINGS_MENU_TIMEOUT_MS;
+#ifdef CLOCK_ENABLE_PHONE_WEB
+        if (menu_state == MENU_PHONE_WEB && phone_menu_page == PHONE_PASSWORD_PAGE)
+            menu_timeout_ms = PHONE_PASSWORD_TIMEOUT_MS;
+#endif
         if (menu_state != MENU_CLOSED &&
 #ifdef CLOCK_ENABLE_A2DP
             // Remote-name requests follow the 10s Classic inquiry and can
             // take several more seconds. Never close the scan screen midway.
             !(menu_state == MENU_BT_SCANNING && clock_a2dp_scan_active()) &&
 #endif
-            now - menu_last_input_ms >= SETTINGS_MENU_TIMEOUT_MS) {
-            puts("[MENU] Timeout (20s); unsaved edit discarded");
+            now - menu_last_input_ms >= menu_timeout_ms) {
+            printf("[MENU] Timeout (%lus); unsaved edit discarded\n",
+                   (unsigned long)(menu_timeout_ms / 1000u));
             menu_close();
         }
         if (alarm_ui_state != ALARM_UI_CLOSED &&
