@@ -32,7 +32,14 @@ Wi-Fi access-point loss and recovery on the assembled clock is deferred at the u
 
 ## Next functional milestones
 
-Phone control starts with a separate Pico 2 W experiment. The clock provides a local Wi-Fi access point and serves a browser page without a router or Internet access. The first usable milestone is clock status and timer control from the phone. Player controls and settings follow after checking Wi-Fi and Bluetooth audio coexistence.
+Phone control is being developed on `codex/phone-control`. Standalone direct and home Wi-Fi prototypes, integrated live status and browser timer control have passed user testing. The user also confirmed home access without repeated pairing, direct Wi-Fi reconnection without re-entering the password, and the LCD connection-progress screen. These experimental results are separate from the stable main release. See the [phone control instructions and evidence](../experiments/phone_control_ap/README.md).
+
+The remaining web-control work proceeds on the assembled hardware in this order:
+
+1. Add browser player transport controls for play, pause/resume, stop, next and previous track. Use the existing player logic and keep physical and browser controls consistent.
+2. Test player control in direct and home Wi-Fi modes, on LOCAL and Bluetooth outputs. Check sound continuity during page refreshes, timer/alarm priorities and recovery after the phone disconnects. Complete the outstanding browser Sign out, second-device access, home-trust disable and credential persistence checks alongside this stage.
+3. Add browser settings in small groups, starting with volume, audio output preferences, language and display brightness, followed by alarm and birthday editing. Reuse the existing validation and A/B autosave.
+4. Verify simultaneous use of the web interface and physical controls, repeated commands and network recovery. Finish the English user instructions, update hardware acceptance evidence and prepare the web-control release after user testing.
 
 Control restoration stage 1 is implemented. Hardware logs confirm accelerated selection, LOCAL timer start/finish/cancel and GP28 entry/back; remaining precise-field and player-mute checks are in TESTING.md. The user also confirmed timer routing to the selected Bluetooth speaker after changing its independent output preference.
 
@@ -58,3 +65,9 @@ The intermittent double Bluetooth sound is deferred until the planned feature wo
 ## Existing behavior retained
 
 Separate DFPlayer/Bluetooth volume levels remain intentional. MAC addresses remain internal identifiers and USB diagnostics; the LCD displays names. SD access remains read-only. SSP confirmation remains automatic, and legacy PIN-only speakers are unsupported.
+
+## Future device hardware
+
+On 2026-11-11, the user selected I2S audio through a MAX98357A amplifier as a logical direction for a likely new device with updated hardware. This is a future hardware milestone. Current web-control development continues on the assembled DFPlayer-based clock.
+
+The proposed audio path is the Pico-connected SPI SD card, the existing software MP3 decoder, a PCM buffer, PIO/DMA I2S output and the MAX98357A speaker amplifier. A shared decode path could serve local audio and Bluetooth and consolidate audio assets onto one SD card. A separate hardware prototype should first verify available GPIO/PIO/DMA resources, amplifier power, speaker compatibility, memory use and sound continuity with Wi-Fi active. Exact wiring, resource allocation and performance remain to be measured.
