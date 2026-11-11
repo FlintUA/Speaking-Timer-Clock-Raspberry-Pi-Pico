@@ -98,7 +98,7 @@ The browser uses the same music player as the physical controls. Access follows 
 
 Timer and player commands share one bounded queue in the main loop. The HTTP callbacks only validate and queue commands. The global sequence, per-request nonce and clock epoch prevent a retried Next or Play request from executing twice and reject conflicting concurrent commands. The existing timer POST format and `timer_*` status fields remain available. New clients use the shared `command_id`, `command_nonce` and `command_result` fields for completion feedback.
 
-Hardware acceptance is pending:
+Hardware acceptance checklist:
 
 1. Close settings and any timer or alarm. Open the page on the phone and select Play. Confirm music, the current track and the actual LOCAL or BT output.
 2. Pause and resume from the phone. Check that the physical TIMER button and browser controls can both operate the same playback state.
@@ -109,3 +109,5 @@ Hardware acceptance is pending:
 7. Use the page from two devices during playback and check for audio interruptions or repeated track changes. Complete the outstanding Sign out and remembered-access checks from the timer section.
 
 Host tests cover player authentication, action validation, shared timer/player sequencing and idempotent retries. A JavaScript execution check covers the browser's player buttons, pause/resume label, track status, a lost response after Next was applied and timer control after Stop.
+
+On 2026-11-11, after installation of build `44ca0814caac-bt-mp3-wifi-phone`, the user confirmed that the planned player controls worked correctly without observed problems. This accepts the functional workflow. The report did not separately identify every network/output combination or the extended alarm, two-device and sustained-playback scenarios above.
