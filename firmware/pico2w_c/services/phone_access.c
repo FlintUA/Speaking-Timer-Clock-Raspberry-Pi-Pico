@@ -119,6 +119,44 @@ phone_reply_t phone_access_pair(phone_access_t *access, const char *body, uint64
     return PHONE_BUSY;
 }
 
+// Lossless encodings of editable fields, independent of the Flash record layout.
+// A birthday's handled year is maintained by the clock and is not editable.
+uint32_t phone_alarm_revision(const alarm_entry_t *alarm) {
+    return (uint32_t)alarm->enabled | ((uint32_t)alarm->hour << 1) |
+        ((uint32_t)alarm->minute << 6) | ((uint32_t)alarm->sound << 12) |
+        ((uint32_t)alarm->track << 13) | ((uint32_t)alarm->weekdays << 21);
+}
+
+uint32_t phone_birthday_revision(const birthday_t *birthday) {
+    return (uint32_t)birthday->enabled | ((uint32_t)birthday->month << 1) |
+        ((uint32_t)birthday->day << 5) | ((uint32_t)birthday->hour << 10) |
+        ((uint32_t)birthday->minute << 15);
+}
+
+static bool read_schedule(const char *text, phone_command_t *request) {
+    uint32_t fields[8] = {0};
+    unsigned count = request->action == PHONE_SET_ALARM ? 8u : 7u;
+    for (unsigned i = 0; i < count; ++i) {
+        if (!read_number(&text, &fields[i]) ||
+            (i + 1u == count ? *text != '\0' : *text++ != ' ')) return false;
+    }
+    unsigned slots = request->action == PHONE_SET_ALARM ? CLOCK_ALARM_COUNT : CLOCK_BIRTHDAY_COUNT;
+    if (fields[0] < 1u || fields[0] > slots || fields[2] > 1u) return false;
+    for (unsigned i = 3; i < count; ++i)
+        if (fields[i] > UINT8_MAX) return false;
+    request->slot = (uint8_t)(fields[0] - 1u);
+    request->expected = fields[1];
+    if (request->action == PHONE_SET_ALARM) {
+        request->alarm = (alarm_entry_t){.enabled = fields[2] != 0, .hour = (uint8_t)fields[3],
+            .minute = (uint8_t)fields[4], .weekdays = (uint8_t)fields[5],
+            .sound = (alarm_sound_t)fields[6], .track = (uint8_t)fields[7]};
+        return alarm_entry_valid(&request->alarm);
+    }
+    request->birthday = (birthday_t){.enabled = fields[2] != 0, .month = (uint8_t)fields[3],
+        .day = (uint8_t)fields[4], .hour = (uint8_t)fields[5], .minute = (uint8_t)fields[6]};
+    return birthday_valid(&request->birthday);
+}
+
 static phone_reply_t accept_command(phone_access_t *access, const char *body,
                                     uint8_t scope, bool home_peer, unsigned first, unsigned limit) {
     const char *p;
@@ -147,7 +185,8 @@ static phone_reply_t accept_command(phone_access_t *access, const char *body,
         {"volume_local ", 0, 30}, {"volume_bt ", 0, 30}, {"language ", 0, 1},
         {"audio_manual ", 0, 1}, {"audio_hourly ", 0, 1},
         {"audio_timer ", 0, 1}, {"audio_alarm ", 0, 1},
-        {"light_mode ", 0, 2}, {"light_day ", 0, 100}, {"light_night ", 0, 100}
+        {"light_mode ", 0, 2}, {"light_day ", 0, 100}, {"light_night ", 0, 100},
+        {"set ", 0, 0}, {"set ", 0, 0}
     };
     _Static_assert(sizeof(actions) / sizeof(actions[0]) == PHONE_ACTION_COUNT, "Missing phone action");
     unsigned i = first;
@@ -160,14 +199,20 @@ static phone_reply_t accept_command(phone_access_t *access, const char *body,
         }
     }
     if (i == limit) return PHONE_INVALID;
-    if (!read_number(&p, &request.value) || *p ||
+    if (request.action >= PHONE_SET_ALARM) {
+        if (!read_schedule(p, &request)) return PHONE_INVALID;
+    } else if (!read_number(&p, &request.value) || *p ||
         request.value < actions[i].minimum || request.value > actions[i].maximum)
         return PHONE_INVALID;
 
     if (epoch != access->epoch) return PHONE_BUSY;
     if (request.id == access->last.id)
         return request.nonce == access->last.nonce && request.action == access->last.action &&
-               request.value == access->last.value ? PHONE_OK : PHONE_BUSY;
+               request.value == access->last.value && request.slot == access->last.slot &&
+               request.expected == access->last.expected &&
+               phone_alarm_revision(&request.alarm) == phone_alarm_revision(&access->last.alarm) &&
+               phone_birthday_revision(&request.birthday) == phone_birthday_revision(&access->last.birthday) ?
+               PHONE_OK : PHONE_BUSY;
     if (request.id != access->last.id + 1u ||
         (access->last.id && access->result == PHONE_COMMAND_PENDING)) return PHONE_BUSY;
     access->last = request;
@@ -184,5 +229,13 @@ phone_reply_t phone_access_player(phone_access_t *access, const char *body, uint
 }
 
 phone_reply_t phone_access_settings(phone_access_t *access, const char *body, uint8_t scope, bool home_peer) {
-    return accept_command(access, body, scope, home_peer, PHONE_SET_VOLUME_LOCAL, PHONE_ACTION_COUNT);
+    return accept_command(access, body, scope, home_peer, PHONE_SET_VOLUME_LOCAL, PHONE_SET_ALARM);
+}
+
+phone_reply_t phone_access_alarm(phone_access_t *access, const char *body, uint8_t scope, bool home_peer) {
+    return accept_command(access, body, scope, home_peer, PHONE_SET_ALARM, PHONE_SET_BIRTHDAY);
+}
+
+phone_reply_t phone_access_birthday(phone_access_t *access, const char *body, uint8_t scope, bool home_peer) {
+    return accept_command(access, body, scope, home_peer, PHONE_SET_BIRTHDAY, PHONE_ACTION_COUNT);
 }

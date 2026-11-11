@@ -1,5 +1,10 @@
 #pragma once
+#ifdef CLOCK_ENABLE_PHONE_WEB
+// Leave room for two status responses and their TCP copies.
+#define MEM_SIZE 16384
+#else
 #define MEM_SIZE 8192
+#endif
 #include "lwipopts_examples_common.h"
 
 #ifdef CLOCK_ENABLE_PHONE_WEB

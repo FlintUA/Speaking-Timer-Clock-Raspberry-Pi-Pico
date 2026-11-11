@@ -133,6 +133,7 @@ static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
 static void alarm_pending_service(uint64_t now);
 static void music_ui_close(const char *reason);
 static void music_ui_stop(const char *reason);
+static void birthday_apply(unsigned index, birthday_t draft);
 static char command_line[160];
 static size_t command_length;
 // BOOTSEL is intentionally a two-step, time-limited serial operation.
@@ -2120,9 +2121,32 @@ static bool service_phone_settings(const phone_command_t *request) {
     return false;
 }
 
+static phone_command_result_t service_phone_schedule(const phone_command_t *request) {
+    if (!phone_settings_idle()) return PHONE_COMMAND_BLOCKED;
+    unsigned slot = request->slot;
+    if (request->action == PHONE_SET_ALARM) {
+        if (phone_alarm_revision(&alarms[slot]) != request->expected) return PHONE_COMMAND_CONFLICT;
+        if (phone_alarm_revision(&alarms[slot]) != phone_alarm_revision(&request->alarm)) {
+            alarms[slot] = request->alarm;
+            alarm_clear_waiting(slot);
+            alarm_consume_current_minute(slot);
+            settings_mark_changed();
+        }
+    } else {
+        if (phone_birthday_revision(&birthdays[slot]) != request->expected) return PHONE_COMMAND_CONFLICT;
+        if (phone_birthday_revision(&birthdays[slot]) != phone_birthday_revision(&request->birthday))
+            birthday_apply(slot, request->birthday);
+    }
+    return PHONE_COMMAND_APPLIED;
+}
+
 static void service_phone_command(uint64_t now) {
     phone_command_t request;
     if (!phone_web_command_pending(&request)) return;
+    if (request.action >= PHONE_SET_ALARM) {
+        phone_web_command_complete(request.id, service_phone_schedule(&request));
+        return;
+    }
     bool applied = false;
     if (request.action >= PHONE_SET_VOLUME_LOCAL) {
         applied = service_phone_settings(&request);
@@ -2141,7 +2165,7 @@ static void service_phone_command(uint64_t now) {
         }
         applied = true;
     }
-    phone_web_command_complete(request.id, applied);
+    phone_web_command_complete(request.id, applied ? PHONE_COMMAND_APPLIED : PHONE_COMMAND_BLOCKED);
 }
 #endif
 
@@ -4725,6 +4749,8 @@ int main(void) {
                           music_ui_playing ? "Playing" : "Stopped",
             };
             if (rtc_available) memcpy(snapshot.time, rtc_top, sizeof(snapshot.time));
+            memcpy(snapshot.alarms, alarms, sizeof(snapshot.alarms));
+            memcpy(snapshot.birthdays, birthdays, sizeof(snapshot.birthdays));
             phone_web_publish(&snapshot);
         }
 #endif

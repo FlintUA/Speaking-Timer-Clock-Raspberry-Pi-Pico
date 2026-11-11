@@ -156,5 +156,63 @@ int main(void) {
     settings.result = PHONE_COMMAND_APPLIED;
     settings.settings.home_trusted = 0;
     assert(phone_access_settings(&settings, "- 30 30 40 light_day 50", PHONE_SCOPE_HOME, true) == PHONE_DENIED);
+
+    phone_access_t schedule = {0};
+    phone_access_reset(&schedule, 40);
+    const char *alarm_body = "- 40 1 10 set 5 0 1 23 59 127 1 255";
+    assert(phone_access_alarm(&schedule, alarm_body, PHONE_SCOPE_HOME, true) == PHONE_DENIED);
+    schedule.settings.home_trusted = 1;
+    assert(phone_access_alarm(&schedule, alarm_body, PHONE_SCOPE_DIRECT, true) == PHONE_DENIED);
+    assert(phone_access_alarm(&schedule, alarm_body, PHONE_SCOPE_HOME, false) == PHONE_DENIED);
+    const char *const invalid_alarms[] = {
+        "- 40 1 10 set 0 0 1 7 0 127 0 1", "- 40 1 10 set 6 0 1 7 0 127 0 1",
+        "- 40 1 10 set 1 0 2 7 0 127 0 1", "- 40 1 10 set 1 0 1 24 0 127 0 1",
+        "- 40 1 10 set 1 0 1 7 60 127 0 1", "- 40 1 10 set 1 0 1 7 0 0 0 1",
+        "- 40 1 10 set 1 0 1 7 0 128 0 1", "- 40 1 10 set 1 0 1 7 0 127 2 1",
+        "- 40 1 10 set 1 0 1 7 0 127 1 0", "- 40 1 10 set 1 0 1 7 0 127 1 256",
+        "- 40 1 10 set 1 0 1 256 0 127 0 1", "- 40 1 10 set 1 4294967296 1 7 0 127 0 1",
+        "- 40 1 10 set 1 0 1 7 0 127 0", "- 40 1 10 set 1 0 1 7 0 127 0 1 extra"
+    };
+    for (unsigned i = 0; i < sizeof(invalid_alarms) / sizeof(invalid_alarms[0]); ++i) {
+        assert(phone_access_alarm(&schedule, invalid_alarms[i], PHONE_SCOPE_HOME, true) == PHONE_INVALID);
+        assert(!schedule.last.id);
+    }
+    assert(phone_access_alarm(&schedule, alarm_body, PHONE_SCOPE_HOME, true) == PHONE_OK);
+    assert(schedule.last.slot == 4 && schedule.last.alarm.track == 255);
+    assert(schedule.last.alarm.weekdays == 127 && schedule.last.alarm.hour == 23);
+    assert(phone_access_settings(&schedule, "- 40 2 11 volume_local 15", PHONE_SCOPE_HOME, true) == PHONE_BUSY);
+    schedule.result = PHONE_COMMAND_APPLIED;
+    assert(phone_access_alarm(&schedule, alarm_body, PHONE_SCOPE_HOME, true) == PHONE_OK);
+    assert(schedule.result == PHONE_COMMAND_APPLIED);
+    assert(phone_access_alarm(&schedule, "- 40 1 10 set 5 1 1 23 59 127 1 255", PHONE_SCOPE_HOME, true) == PHONE_BUSY);
+    assert(phone_access_settings(&schedule, alarm_body, PHONE_SCOPE_HOME, true) == PHONE_INVALID);
+    assert(phone_access_timer(&schedule, alarm_body, PHONE_SCOPE_HOME, true) == PHONE_INVALID);
+    const char *const invalid_birthdays[] = {
+        "- 40 2 11 set 0 0 1 1 1 7 0", "- 40 2 11 set 6 0 1 1 1 7 0",
+        "- 40 2 11 set 1 0 2 1 1 7 0", "- 40 2 11 set 1 0 1 0 1 7 0",
+        "- 40 2 11 set 1 0 1 13 1 7 0", "- 40 2 11 set 1 0 1 4 31 7 0",
+        "- 40 2 11 set 1 0 1 2 30 7 0", "- 40 2 11 set 1 0 1 1 0 7 0",
+        "- 40 2 11 set 1 0 1 1 1 24 0", "- 40 2 11 set 1 0 1 1 1 7 60",
+        "- 40 2 11 set 1 0 1 1 1 7", "- 40 2 11 set 1 0 1 1 1 7 0 extra"
+    };
+    for (unsigned i = 0; i < sizeof(invalid_birthdays) / sizeof(invalid_birthdays[0]); ++i)
+        assert(phone_access_birthday(&schedule, invalid_birthdays[i], PHONE_SCOPE_HOME, true) == PHONE_INVALID);
+    assert(phone_access_birthday(&schedule, "- 40 2 11 set 1 0 1 2 29 7 0", PHONE_SCOPE_HOME, true) == PHONE_OK);
+    assert(schedule.last.slot == 0 && schedule.last.birthday.month == 2 && schedule.last.birthday.day == 29);
+    assert(schedule.last.birthday.last_year == 0);
+    birthday_t birthday = schedule.last.birthday;
+    uint32_t revision = phone_birthday_revision(&birthday);
+    birthday.last_year = 2026;
+    assert(phone_birthday_revision(&birthday) == revision);
+    birthday.minute++;
+    assert(phone_birthday_revision(&birthday) != revision);
+    alarm_entry_t alarm = {.enabled=true,.hour=7,.minute=30,.weekdays=31,.track=255,.sound=ALARM_SOUND_MUSIC};
+    revision = phone_alarm_revision(&alarm);
+    alarm.weekdays = 96;
+    assert(phone_alarm_revision(&alarm) != revision);
+    schedule.result = PHONE_COMMAND_CONFLICT;
+    assert(phone_access_birthday(&schedule, "- 40 2 11 set 1 0 1 2 29 7 0", PHONE_SCOPE_HOME, true) == PHONE_OK);
+    assert(schedule.result == PHONE_COMMAND_CONFLICT);
+    assert(phone_access_birthday(&schedule, "- 40 2 11 set 1 0 1 2 28 7 0", PHONE_SCOPE_HOME, true) == PHONE_BUSY);
     return 0;
 }

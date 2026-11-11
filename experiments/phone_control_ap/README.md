@@ -135,3 +135,25 @@ Hardware acceptance checklist:
 Host checks cover authorization, setting ranges, rejected actions on the wrong endpoint and shared command retries. A JavaScript execution check covers independent fields, unapplied edits, updates from physical controls, save feedback, editor/idle guards and continued timer/player control.
 
 On 2026-11-11, after installation of build `aa20a9cc4962-bt-mp3-wifi-phone`, the user confirmed that the implemented settings functionality worked correctly. This accepts the functional workflow. The report did not separately enumerate every network/output combination, the power-cycle persistence check or the individual guard scenarios above. Full AUTO day/night transition coverage remains deferred.
+
+## Alarm and birthday editors
+
+The page edits the five existing alarm slots and five annual birthday slots. Select a slot, edit its fields and use Apply alarm or Apply birthday. Alarm fields include enabled state, local time, Daily/Mon-Fri/Sat-Sun/custom weekdays, Signal/Music and a folder 08 music track in the supported 1..255 range. The selected music file must exist on the audio card used by the chosen output. Birthday fields include enabled state, month, day and local announcement time. February 29 remains a leap-year event. Existing birthday audio and handled-year behavior are reused.
+
+Each Apply submits one complete record. The clock validates it before queuing and applies it from the main loop only while the player, timer, alarm, audio and physical editors are idle. Editing an alarm clears only that slot's queued/snoozed occurrence and consumes its current-minute match, following the physical editor. Birthday edits use the existing apply function, which preserves the handled year when date and time are unchanged. All changes use the existing v12 A/B settings autosave.
+
+A lossless revision of the editable fields accompanies each request. If a physical edit or another browser changes the selected record first, the clock reports a conflict and retains its current record. Use Reload to discard the local draft and read the latest values. Unapplied drafts survive status polling. Apply or Reload before switching slots. Duplicate requests retain their result, including conflicts, without applying the record twice.
+
+The authenticated `/alarm` and `/birthday` endpoints share the existing command sequence. Read-only status includes the five records of each kind. Calendar validation, access checks and the matching Host/Origin requirement also apply to these endpoints. Scheduling uses the clock's Europe/Berlin time; browser time zone settings do not change the entered hours.
+
+Hardware acceptance is pending:
+
+1. Choose an unused alarm slot, configure a future time, weekdays, enabled state and Signal. Apply, then compare the physical alarm editor. Check its scheduled operation.
+2. Test Daily, Mon-Fri, Sat-Sun and custom days. At least one day is required. Select Music with a known existing folder 08 track and check that the track is retained.
+3. Configure or disable a birthday in an unused slot and compare the clock's menu. Test a future date/time with the existing melody. Restore the intended record afterward.
+4. Leave a draft open in the browser, edit that slot on the clock or another browser, then try Apply. Check that the newer clock record is preserved and Reload retrieves it.
+5. Edit different slots in turn and verify that the other slots retain their values. Try an invalid calendar date and check that it is refused. February 29 is valid.
+6. Check that record editing is disabled during playback, a countdown, a ringing alarm or a physical editor. Stop/close the activity and retry. Timer and player controls should still work.
+7. Wait for Settings saved, restart and verify the accepted alarm/birthday records. Repeat basic editing in direct and home Wi-Fi modes.
+
+Native checks cover malformed or out-of-range records, slot boundaries, weekday masks, 1..255 tracks, calendar validation, access rules and retry handling. A JavaScript execution check covers preset/custom days, conflicts, Reload, draft preservation, slot isolation, a lost reply after applying, calendar messages and the timer. A format check parses the maximum-length status response with five alarms and five birthdays and verifies its buffer limit. The web profile uses a 16 KiB lwIP heap to accommodate the larger responses and TCP copies; the regular profile retains 8 KiB.

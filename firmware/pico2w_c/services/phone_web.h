@@ -24,6 +24,8 @@ typedef struct {
     const char *player; // Static, firmware-defined state label.
     const char *player_mode;
     phone_web_preferences_t preferences;
+    alarm_entry_t alarms[CLOCK_ALARM_COUNT];
+    birthday_t birthdays[CLOCK_BIRTHDAY_COUNT];
 } phone_web_snapshot_t;
 
 void phone_web_init(bool radio_ready);
@@ -44,4 +46,4 @@ bool phone_web_pair_code(uint32_t *code);
 bool phone_web_pair_succeeded(void);
 void phone_web_revoke(void);
 bool phone_web_command_pending(phone_command_t *request);
-void phone_web_command_complete(uint32_t id, bool applied);
+void phone_web_command_complete(uint32_t id, phone_command_result_t result);

@@ -23,14 +23,16 @@ static phone_web_snapshot_t published = {.player = "Closed", .player_mode = ""};
 static uint32_t published_command_id;
 static phone_access_t access;
 
-typedef enum { POST_PAIR, POST_TIMER, POST_PLAYER, POST_SETTINGS, POST_ACCESS, POST_LOGOUT } phone_post_action_t;
+typedef enum {
+    POST_PAIR, POST_TIMER, POST_PLAYER, POST_SETTINGS, POST_ALARM, POST_BIRTHDAY, POST_ACCESS, POST_LOGOUT
+} phone_post_action_t;
 
 typedef struct {
     void *connection;
     phone_post_action_t action;
     bool home_peer;
     uint16_t length, received;
-    char body[96];
+    char body[128];
 } phone_post_t;
 
 static phone_post_t posts[2];
@@ -122,10 +124,10 @@ bool phone_web_command_pending(phone_command_t *request) {
     return pending;
 }
 
-void phone_web_command_complete(uint32_t id, bool applied) {
+void phone_web_command_complete(uint32_t id, phone_command_result_t result) {
     cyw43_arch_lwip_begin();
     if (access.last.id == id)
-        access.result = applied ? PHONE_COMMAND_APPLIED : PHONE_COMMAND_BLOCKED;
+        access.result = result;
     cyw43_arch_lwip_end();
 }
 
@@ -251,6 +253,8 @@ err_t httpd_post_begin(void *connection, const char *uri, const char *header,
     else if (strcmp(uri, "/timer") == 0) action = POST_TIMER;
     else if (strcmp(uri, "/player") == 0) action = POST_PLAYER;
     else if (strcmp(uri, "/settings") == 0) action = POST_SETTINGS;
+    else if (strcmp(uri, "/alarm") == 0) action = POST_ALARM;
+    else if (strcmp(uri, "/birthday") == 0) action = POST_BIRTHDAY;
     else if (strcmp(uri, "/access") == 0) action = POST_ACCESS;
     else if (strcmp(uri, "/logout") == 0) action = POST_LOGOUT;
     else return ERR_ARG;
@@ -303,12 +307,41 @@ void httpd_post_finished(void *connection, char *response_uri, u16_t response_le
             case POST_TIMER: reply = phone_access_timer(&access, post->body, scope, post->home_peer); break;
             case POST_PLAYER: reply = phone_access_player(&access, post->body, scope, post->home_peer); break;
             case POST_SETTINGS: reply = phone_access_settings(&access, post->body, scope, post->home_peer); break;
+            case POST_ALARM: reply = phone_access_alarm(&access, post->body, scope, post->home_peer); break;
+            case POST_BIRTHDAY: reply = phone_access_birthday(&access, post->body, scope, post->home_peer); break;
             case POST_ACCESS: reply = phone_access_check(&access, post->body, scope); break;
             case POST_LOGOUT: reply = phone_access_logout(&access, post->body, scope); break;
         }
     }
     if (post) memset(post, 0, sizeof(*post));
     snprintf(response_uri, response_length, "%s", reply_path(reply));
+}
+
+static int schedule_json(char *buffer, size_t capacity) {
+    size_t used = 0;
+    for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
+        const alarm_entry_t *alarm = &published.alarms[i];
+        int length = snprintf(buffer + used, capacity - used,
+            "%s{\"enabled\":%s,\"hour\":%u,\"minute\":%u,\"days\":%u,\"sound\":%u,\"track\":%u,\"revision\":%" PRIu32 "}",
+            i ? "," : ",\"alarms\":[", alarm->enabled ? "true" : "false",
+            (unsigned)alarm->hour, (unsigned)alarm->minute, (unsigned)alarm->weekdays,
+            (unsigned)alarm->sound, (unsigned)alarm->track, phone_alarm_revision(alarm));
+        if (length < 0 || (size_t)length >= capacity - used) return -1;
+        used += (size_t)length;
+    }
+    for (unsigned i = 0; i < CLOCK_BIRTHDAY_COUNT; ++i) {
+        const birthday_t *birthday = &published.birthdays[i];
+        int length = snprintf(buffer + used, capacity - used,
+            "%s{\"enabled\":%s,\"month\":%u,\"day\":%u,\"hour\":%u,\"minute\":%u,\"revision\":%" PRIu32 "}",
+            i ? "," : "],\"birthdays\":[", birthday->enabled ? "true" : "false",
+            (unsigned)birthday->month, (unsigned)birthday->day, (unsigned)birthday->hour,
+            (unsigned)birthday->minute, phone_birthday_revision(birthday));
+        if (length < 0 || (size_t)length >= capacity - used) return -1;
+        used += (size_t)length;
+    }
+    int length = snprintf(buffer + used, capacity - used, "]}\n");
+    if (length < 0 || (size_t)length >= capacity - used) return -1;
+    return (int)used + length;
 }
 
 int fs_open_custom(struct fs_file *file, const char *name) {
@@ -320,7 +353,7 @@ int fs_open_custom(struct fs_file *file, const char *name) {
             if (strcmp(name, reply_path((phone_reply_t)i)) == 0) status = codes[i];
         if (!status) return 0;
     }
-    const size_t capacity = 1024;
+    const size_t capacity = 2048;
     char *response = mem_malloc(capacity);
     if (!response) return 0;
     int len = snprintf(response, capacity, "HTTP/1.0 %s\r\nContent-Type: application/json\r\n"
@@ -331,7 +364,7 @@ int fs_open_custom(struct fs_file *file, const char *name) {
     }
     int body_length;
     if (snapshot) {
-        static const char *const results[] = {"pending", "applied", "blocked"};
+        static const char *const results[] = {"pending", "applied", "blocked", "conflict"};
         body_length = snprintf(response + len, capacity - (size_t)len,
         "{\"time\":\"%s\",\"timer_running\":%s,\"timer_seconds\":%" PRIu32
         ",\"player\":\"%s\",\"track\":%u,\"output\":\"%s\",\"timer_request\":%" PRIu32
@@ -341,7 +374,7 @@ int fs_open_custom(struct fs_file *file, const char *name) {
         ",\"settings\":{\"snapshot_id\":%" PRIu32 ",\"volume_local\":%u,\"volume_bt\":%u,\"language\":%u"
         ",\"audio_manual\":%u,\"audio_hourly\":%u,\"audio_timer\":%u,\"audio_alarm\":%u"
         ",\"light_mode\":%u,\"light_day\":%u,\"light_night\":%u"
-        ",\"editing\":%s,\"idle\":%s,\"bt_supported\":%s,\"saving\":\"%s\"}}\n",
+        ",\"editing\":%s,\"idle\":%s,\"bt_supported\":%s,\"saving\":\"%s\"}",
         published.time, published.timer_running ? "true" : "false",
         published.timer_seconds, published.player, (unsigned)published.track,
         published.bluetooth ? "BT" : "LOCAL", access.last.id,
@@ -366,6 +399,14 @@ int fs_open_custom(struct fs_file *file, const char *name) {
         return 0;
     }
     len += body_length;
+    if (snapshot) {
+        int length = schedule_json(response + len, capacity - (size_t)len);
+        if (length < 0) {
+            mem_free(response);
+            return 0;
+        }
+        len += length;
+    }
     *file = (struct fs_file){.data = response, .len = len, .index = len,
                              .flags = FS_FILE_FLAGS_HEADER_INCLUDED};
     return 1;
