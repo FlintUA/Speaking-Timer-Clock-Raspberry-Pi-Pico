@@ -78,6 +78,8 @@ The clock remembers up to four browser and network-mode combinations. Pairing is
 
 Home trust is off by default, resets when the configured home Wi-Fi credentials change, and applies only to clients on the clock's home IPv4 subnet. Any client on that subnet can control the clock while home trust is enabled. Signing out from a paired browser removes its key. To stop code-free control, switch home trust off on the clock. The firmware serves local HTTP. Keep it on a trusted network and do not expose it to the Internet.
 
-The controller requires matching Host and Origin headers for commands. The command sequence and nonce prevent a repeat or a concurrent request from silently starting the timer twice. Host tests cover code expiry, retry limits, access scope, logout, origin checking, concurrent commands and v11 to v12 settings compatibility. Hardware acceptance for the new access modes is pending.
+The controller requires matching Host and Origin headers for commands. The command sequence and nonce prevent a repeat or a concurrent request from silently starting the timer twice. Host tests cover code expiry, retry limits, access scope, logout, origin checking, concurrent commands and v11 to v12 settings compatibility.
 
 On 2026-11-10, the user confirmed that the earlier temporary pairing and browser timer control passed on build `ab46f94d9c4d-bt-mp3-wifi-phone` in both direct and home Wi-Fi modes. A separate check from a PC on the home network confirmed that the page and status endpoint responded and that a timer command without a valid session returned HTTP 403.
+
+On 2026-11-11, following installation of build `10c22e15f5e9-bt-mp3-wifi-phone`, the user confirmed access through the home network without repeated pairing and reconnection in direct mode without re-entering the Wi-Fi password. Browser Sign out, independent access from a second device, disabling home trust and persistence after a power cycle remain separate hardware acceptance checks.
