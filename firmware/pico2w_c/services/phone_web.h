@@ -3,8 +3,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "phone_access.h"
+#include "display_light.h"
 
 #define PHONE_WEB_SSID "SpeakingClock"
+
+typedef struct {
+    uint8_t volume_local, volume_bt, language;
+    uint8_t audio[4];
+    display_light_t light;
+    bool editing, idle, bt_supported, pending, retry;
+} phone_web_preferences_t;
 
 typedef struct {
     char time[9]; // HH:MM:SS, or empty when the RTC is unavailable.
@@ -15,6 +23,7 @@ typedef struct {
     bool bluetooth;
     const char *player; // Static, firmware-defined state label.
     const char *player_mode;
+    phone_web_preferences_t preferences;
 } phone_web_snapshot_t;
 
 void phone_web_init(bool radio_ready);

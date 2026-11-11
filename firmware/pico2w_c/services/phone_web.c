@@ -20,16 +20,17 @@ static bool ready, direct_active;
 static dhcp_server_t dhcp;
 static char address[IP4ADDR_STRLEN_MAX];
 static phone_web_snapshot_t published = {.player = "Closed", .player_mode = ""};
+static uint32_t published_command_id;
 static phone_access_t access;
 
-typedef enum { POST_PAIR, POST_TIMER, POST_PLAYER, POST_ACCESS, POST_LOGOUT } phone_post_action_t;
+typedef enum { POST_PAIR, POST_TIMER, POST_PLAYER, POST_SETTINGS, POST_ACCESS, POST_LOGOUT } phone_post_action_t;
 
 typedef struct {
     void *connection;
     phone_post_action_t action;
     bool home_peer;
     uint16_t length, received;
-    char body[81];
+    char body[96];
 } phone_post_t;
 
 static phone_post_t posts[2];
@@ -40,6 +41,7 @@ static uint64_t now_ms(void) {
 
 static void reset_requests_locked(void) {
     phone_access_reset(&access, get_rand_32());
+    published_command_id = 0;
     memset(posts, 0, sizeof(posts));
 }
 
@@ -209,6 +211,8 @@ void phone_web_publish(const phone_web_snapshot_t *snapshot) {
     if (!ready) return;
     cyw43_arch_lwip_begin();
     published = *snapshot;
+    published_command_id = access.last.id;
+    if (published_command_id && access.result == PHONE_COMMAND_PENDING) --published_command_id;
     char new_address[sizeof(address)] = {0};
     struct netif *net = &cyw43_state.netif[direct_active ? CYW43_ITF_AP : CYW43_ITF_STA];
     if (netif_is_up(net) && (direct_active || netif_is_link_up(net)) &&
@@ -246,6 +250,7 @@ err_t httpd_post_begin(void *connection, const char *uri, const char *header,
     if (strcmp(uri, "/pair") == 0) action = POST_PAIR;
     else if (strcmp(uri, "/timer") == 0) action = POST_TIMER;
     else if (strcmp(uri, "/player") == 0) action = POST_PLAYER;
+    else if (strcmp(uri, "/settings") == 0) action = POST_SETTINGS;
     else if (strcmp(uri, "/access") == 0) action = POST_ACCESS;
     else if (strcmp(uri, "/logout") == 0) action = POST_LOGOUT;
     else return ERR_ARG;
@@ -297,6 +302,7 @@ void httpd_post_finished(void *connection, char *response_uri, u16_t response_le
             case POST_PAIR: reply = phone_access_pair(&access, post->body, now_ms(), scope); break;
             case POST_TIMER: reply = phone_access_timer(&access, post->body, scope, post->home_peer); break;
             case POST_PLAYER: reply = phone_access_player(&access, post->body, scope, post->home_peer); break;
+            case POST_SETTINGS: reply = phone_access_settings(&access, post->body, scope, post->home_peer); break;
             case POST_ACCESS: reply = phone_access_check(&access, post->body, scope); break;
             case POST_LOGOUT: reply = phone_access_logout(&access, post->body, scope); break;
         }
@@ -314,7 +320,7 @@ int fs_open_custom(struct fs_file *file, const char *name) {
             if (strcmp(name, reply_path((phone_reply_t)i)) == 0) status = codes[i];
         if (!status) return 0;
     }
-    const size_t capacity = 640;
+    const size_t capacity = 1024;
     char *response = mem_malloc(capacity);
     if (!response) return 0;
     int len = snprintf(response, capacity, "HTTP/1.0 %s\r\nContent-Type: application/json\r\n"
@@ -331,13 +337,27 @@ int fs_open_custom(struct fs_file *file, const char *name) {
         ",\"player\":\"%s\",\"track\":%u,\"output\":\"%s\",\"timer_request\":%" PRIu32
         ",\"timer_result\":\"%s\",\"timer_nonce\":%" PRIu32 ",\"epoch\":%" PRIu32
         ",\"home_trusted\":%s,\"track_count\":%u,\"player_mode\":\"%s\""
-        ",\"command_id\":%" PRIu32 ",\"command_nonce\":%" PRIu32 ",\"command_result\":\"%s\"}\n",
+        ",\"command_id\":%" PRIu32 ",\"command_nonce\":%" PRIu32 ",\"command_result\":\"%s\""
+        ",\"settings\":{\"snapshot_id\":%" PRIu32 ",\"volume_local\":%u,\"volume_bt\":%u,\"language\":%u"
+        ",\"audio_manual\":%u,\"audio_hourly\":%u,\"audio_timer\":%u,\"audio_alarm\":%u"
+        ",\"light_mode\":%u,\"light_day\":%u,\"light_night\":%u"
+        ",\"editing\":%s,\"idle\":%s,\"bt_supported\":%s,\"saving\":\"%s\"}}\n",
         published.time, published.timer_running ? "true" : "false",
         published.timer_seconds, published.player, (unsigned)published.track,
         published.bluetooth ? "BT" : "LOCAL", access.last.id,
         access.last.id ? results[access.result] : "none", access.last.nonce, access.epoch,
         trusted_home_peer() ? "true" : "false", (unsigned)published.track_count, published.player_mode,
-        access.last.id, access.last.nonce, access.last.id ? results[access.result] : "none");
+        access.last.id, access.last.nonce, access.last.id ? results[access.result] : "none",
+        published_command_id,
+        (unsigned)published.preferences.volume_local, (unsigned)published.preferences.volume_bt,
+        (unsigned)published.preferences.language,
+        (unsigned)published.preferences.audio[0], (unsigned)published.preferences.audio[1],
+        (unsigned)published.preferences.audio[2], (unsigned)published.preferences.audio[3],
+        (unsigned)published.preferences.light.mode, (unsigned)published.preferences.light.day_percent,
+        (unsigned)published.preferences.light.night_percent,
+        published.preferences.editing ? "true" : "false", published.preferences.idle ? "true" : "false",
+        published.preferences.bt_supported ? "true" : "false",
+        published.preferences.retry ? "retry" : published.preferences.pending || access.changed ? "pending" : "saved");
     } else {
         body_length = snprintf(response + len, capacity - (size_t)len, "{}\n");
     }

@@ -111,3 +111,25 @@ Hardware acceptance checklist:
 Host tests cover player authentication, action validation, shared timer/player sequencing and idempotent retries. A JavaScript execution check covers the browser's player buttons, pause/resume label, track status, a lost response after Next was applied and timer control after Stop.
 
 On 2026-11-11, after installation of build `44ca0814caac-bt-mp3-wifi-phone`, the user confirmed that the planned player controls worked correctly without observed problems. This accepts the functional workflow. The report did not separately identify every network/output combination or the extended alarm, two-device and sustained-playback scenarios above.
+
+## Basic settings from the phone
+
+The Settings panel exposes independent LOCAL and Bluetooth volume levels, language, Manual/music, Hourly, Timer and Alarm output preferences, and display-light mode with day/night brightness. Each Apply changes one field. Live snapshots update fields which have no unapplied local edit, so changing brightness does not submit an older copy of the audio settings.
+
+Volume uses the existing output-specific setter and 0..30 range. Brightness uses the existing 0..100 percent validation, OFF/ON/AUTO modes and 22:00 to 07:00 night period. Both can be changed during music playback. Close physical settings or alarm editors before applying browser changes. Language and audio-route changes additionally require the player, timer, alarm and other audio to be idle. Bluetooth is a preferred output with the usual LOCAL fallback, and selecting it does not connect to a speaker.
+
+Accepted values take effect in the main loop and use the existing settings autosave. The page distinguishes saved settings, pending changes and a save error awaiting retry. Keep the clock powered until Settings saved appears. Playback, open menus, active countdowns and the normal write cooldown can delay saving. The settings record format remains v12.
+
+The authenticated `/settings` endpoint shares the timer/player command sequence and retry handling. Only these settings enter the status snapshot. Wi-Fi passwords and browser keys are excluded.
+
+Hardware acceptance is pending:
+
+1. Change LOCAL volume and verify the built-in speaker and left encoder. Change Bluetooth volume separately and confirm that the LOCAL value stays unchanged. Repeat with Bluetooth playback.
+2. Change language while idle and request the next spoken time. Restore the preferred language.
+3. While idle, set the four audio output preferences and check the corresponding settings on the clock. Check that selecting Bluetooth while disconnected retains LOCAL fallback.
+4. Change display-light mode and both brightness levels. Confirm the immediate effect in ON mode and compare with the clock's menu. Full AUTO day/night transition coverage remains deferred.
+5. Leave a brightness edit unapplied in the browser, turn the volume encoder on the clock, and check that volume updates without overwriting the brightness edit. Apply brightness and confirm that the other settings retain their current values.
+6. During playback, check that volume and brightness remain available and language/output controls are disabled. Open an editor on the clock and verify that browser settings are disabled until it closes.
+7. Wait for Settings saved, restart, and verify the accepted values. Repeat basic settings control in direct and home Wi-Fi modes.
+
+Host checks cover authorization, setting ranges, rejected actions on the wrong endpoint and shared command retries. A JavaScript execution check covers independent fields, unapplied edits, updates from physical controls, save feedback, editor/idle guards and continued timer/player control.

@@ -1690,27 +1690,6 @@ static bool service_phone_player(phone_action_t action) {
     }
 }
 
-static void service_phone_command(uint64_t now) {
-    phone_command_t request;
-    if (!phone_web_command_pending(&request)) return;
-    bool applied = false;
-    if (request.action >= PHONE_PLAYER_PLAY) {
-        applied = service_phone_player(request.action);
-    } else if (request.action == PHONE_TIMER_CANCEL) {
-        if (timer.running) timer_cancel_now();
-        applied = true;
-    } else if (!timer.running && menu_state == MENU_CLOSED &&
-               alarm_ui_state == ALARM_UI_CLOSED && !music_ui_open) {
-        countdown_set_duration(&timer, request.seconds);
-        if (request.action == PHONE_TIMER_START) timer_start_now(now);
-        else {
-            timer_screen = true;
-            finished_screen_until_ms = 0;
-        }
-        applied = true;
-    }
-    phone_web_command_complete(request.id, applied);
-}
 #endif
 
 static void alarm_ui_open(uint64_t now) {
@@ -2084,6 +2063,87 @@ static void menu_audio_apply(unsigned index, bool jbl) {
     puts("[MENU-AUDIO] BT unavailable in this firmware; LOCAL only");
 #endif
 }
+
+#ifdef CLOCK_ENABLE_PHONE_WEB
+static bool phone_settings_idle(void) {
+    bool idle = !timer.running && alarm_active_index < 0 && !music_ui_open &&
+        menu_state == MENU_CLOSED && alarm_ui_state == ALARM_UI_CLOSED &&
+        audio_queue_idle(&audio_queue) && !dfplayer_busy() &&
+        !mp3_play_active() && !mp3_probe_active() && !sd_fat32_stream_active();
+#ifdef CLOCK_ENABLE_A2DP
+    idle = idle && !bt_speech_running && !bt_timer_running && !bt_alarm_running && !routed_test_pending;
+#endif
+    return idle;
+}
+
+static bool service_phone_settings(const phone_command_t *request) {
+    if (menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED) return false;
+    uint8_t value = (uint8_t)request->value;
+    if (request->action == PHONE_SET_VOLUME_LOCAL || request->action == PHONE_SET_VOLUME_BT) {
+#ifndef CLOCK_ENABLE_A2DP
+        if (request->action == PHONE_SET_VOLUME_BT) return false;
+#endif
+        set_output_volume(request->action == PHONE_SET_VOLUME_BT, value);
+        return true;
+    }
+    if (request->action >= PHONE_SET_LIGHT_MODE && request->action <= PHONE_SET_LIGHT_NIGHT) {
+        display_light_t light = display_light;
+        switch (request->action) {
+            case PHONE_SET_LIGHT_MODE: light.mode = value; break;
+            case PHONE_SET_LIGHT_DAY: light.day_percent = value; break;
+            case PHONE_SET_LIGHT_NIGHT: light.night_percent = value; break;
+            default: return false;
+        }
+        if (!display_light_valid(light)) return false;
+        if (light.mode != display_light.mode || light.day_percent != display_light.day_percent ||
+            light.night_percent != display_light.night_percent) {
+            display_light = light;
+            settings_mark_changed();
+        }
+        return true;
+    }
+    if (!phone_settings_idle()) return false;
+    if (request->action == PHONE_SET_LANGUAGE) {
+        if ((uint8_t)language != value) {
+            language = (speech_language_t)value;
+            settings_mark_changed();
+        }
+        return true;
+    }
+    if (request->action >= PHONE_SET_AUDIO_MANUAL && request->action <= PHONE_SET_AUDIO_ALARM) {
+#ifndef CLOCK_ENABLE_A2DP
+        if (value) return false;
+#endif
+        menu_audio_apply((unsigned)(request->action - PHONE_SET_AUDIO_MANUAL), value != 0);
+        return true;
+    }
+    return false;
+}
+
+static void service_phone_command(uint64_t now) {
+    phone_command_t request;
+    if (!phone_web_command_pending(&request)) return;
+    bool applied = false;
+    if (request.action >= PHONE_SET_VOLUME_LOCAL) {
+        applied = service_phone_settings(&request);
+    } else if (request.action >= PHONE_PLAYER_PLAY) {
+        applied = service_phone_player(request.action);
+    } else if (request.action == PHONE_TIMER_CANCEL) {
+        if (timer.running) timer_cancel_now();
+        applied = true;
+    } else if (!timer.running && menu_state == MENU_CLOSED &&
+               alarm_ui_state == ALARM_UI_CLOSED && !music_ui_open) {
+        countdown_set_duration(&timer, request.value);
+        if (request.action == PHONE_TIMER_START) timer_start_now(now);
+        else {
+            timer_screen = true;
+            finished_screen_until_ms = 0;
+        }
+        applied = true;
+    }
+    phone_web_command_complete(request.id, applied);
+}
+#endif
 
 static void birthday_status(void) {
     for (unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i) {
@@ -4646,6 +4706,18 @@ int main(void) {
                 .track = music_ui_open ? music_ui_track : 0,
                 .track_count = music_ui_open ? music_track_count : 0,
                 .player_mode = music_ui_open ? music_playlist_mode_name(music_playlist.mode) : "",
+                .preferences = {
+                    .volume_local = volume, .volume_bt = bt_volume, .language = (uint8_t)language,
+                    .audio = {menu_audio_selected_jbl(0), menu_audio_selected_jbl(1),
+                              menu_audio_selected_jbl(2), menu_audio_selected_jbl(3)},
+                    .light = display_light,
+                    .editing = menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED,
+                    .idle = phone_settings_idle(),
+#ifdef CLOCK_ENABLE_A2DP
+                    .bt_supported = true,
+#endif
+                    .pending = autosave_pending, .retry = autosave_attempted,
+                },
                 .timer_running = timer.running,
                 .bluetooth = volume_for_bluetooth(),
                 .player = !music_ui_open ? "Closed" : !sound_enabled ? "Muted" :

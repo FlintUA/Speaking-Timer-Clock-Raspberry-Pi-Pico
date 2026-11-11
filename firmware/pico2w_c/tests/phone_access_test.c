@@ -49,7 +49,7 @@ int main(void) {
     assert(phone_access_timer(&access, TOKEN " 9 4294967296 11 start 60", PHONE_SCOPE_HOME, false) == PHONE_INVALID);
     assert(phone_access_timer(&access, TOKEN " 9 1 11 start 60 extra", PHONE_SCOPE_HOME, false) == PHONE_INVALID);
     assert(phone_access_timer(&access, "- 9 1 11 start 60", PHONE_SCOPE_HOME, true) == PHONE_OK);
-    assert(access.last.id == 1 && access.last.action == PHONE_TIMER_START && access.last.seconds == 60);
+    assert(access.last.id == 1 && access.last.action == PHONE_TIMER_START && access.last.value == 60);
     assert(access.result == PHONE_COMMAND_PENDING);
     assert(phone_access_timer(&access, TOKEN " 9 2 12 cancel 0", PHONE_SCOPE_HOME, false) == PHONE_BUSY);
     access.result = PHONE_COMMAND_APPLIED;
@@ -109,5 +109,52 @@ int main(void) {
     }
     phone_access_reset(&player, 21);
     assert(phone_access_player(&player, "- 20 1 11 play 0", PHONE_SCOPE_HOME, true) == PHONE_BUSY);
+
+    phone_access_t settings = {0};
+    phone_access_reset(&settings, 30);
+    assert(phone_access_settings(&settings, "- 30 1 40 volume_local 15", PHONE_SCOPE_HOME, true) == PHONE_DENIED);
+    settings.settings.home_trusted = 1;
+    assert(phone_access_settings(&settings, "- 30 1 40 light_day 50", PHONE_SCOPE_HOME, false) == PHONE_DENIED);
+    assert(phone_access_settings(&settings, "- 30 1 40 light_day 50", PHONE_SCOPE_DIRECT, true) == PHONE_DENIED);
+    assert(phone_access_settings(&settings, "- 30 1 40 next 0", PHONE_SCOPE_HOME, true) == PHONE_INVALID);
+    assert(phone_access_player(&settings, "- 30 1 40 volume_local 15", PHONE_SCOPE_HOME, true) == PHONE_INVALID);
+    assert(phone_access_timer(&settings, "- 30 1 40 light_day 50", PHONE_SCOPE_HOME, true) == PHONE_INVALID);
+    const struct { const char *name; unsigned maximum; phone_action_t action; } fields[] = {
+        {"volume_local", 30, PHONE_SET_VOLUME_LOCAL}, {"volume_bt", 30, PHONE_SET_VOLUME_BT},
+        {"language", 1, PHONE_SET_LANGUAGE}, {"audio_manual", 1, PHONE_SET_AUDIO_MANUAL},
+        {"audio_hourly", 1, PHONE_SET_AUDIO_HOURLY}, {"audio_timer", 1, PHONE_SET_AUDIO_TIMER},
+        {"audio_alarm", 1, PHONE_SET_AUDIO_ALARM}, {"light_mode", 2, PHONE_SET_LIGHT_MODE},
+        {"light_day", 100, PHONE_SET_LIGHT_DAY}, {"light_night", 100, PHONE_SET_LIGHT_NIGHT}
+    };
+    unsigned id = 1;
+    for (unsigned i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i) {
+        char body[96];
+        snprintf(body, sizeof(body), "- 30 %u 40 %s %u", id, fields[i].name, fields[i].maximum + 1u);
+        assert(phone_access_settings(&settings, body, PHONE_SCOPE_HOME, true) == PHONE_INVALID);
+        snprintf(body, sizeof(body), "- 30 %u 40 %s %u", id, fields[i].name, fields[i].maximum);
+        assert(phone_access_settings(&settings, body, PHONE_SCOPE_HOME, true) == PHONE_OK);
+        assert(settings.last.action == fields[i].action && settings.last.value == fields[i].maximum);
+        assert(phone_access_timer(&settings, "- 30 99 45 cancel 0", PHONE_SCOPE_HOME, true) == PHONE_BUSY);
+        settings.result = PHONE_COMMAND_APPLIED;
+        assert(phone_access_settings(&settings, body, PHONE_SCOPE_HOME, true) == PHONE_OK);
+        assert(settings.result == PHONE_COMMAND_APPLIED);
+        snprintf(body, sizeof(body), "- 30 %u 41 %s 0", ++id, fields[i].name);
+        assert(phone_access_settings(&settings, body, PHONE_SCOPE_HOME, true) == PHONE_OK);
+        assert(settings.last.value == 0);
+        settings.result = PHONE_COMMAND_APPLIED;
+        ++id;
+    }
+    char body[96];
+    snprintf(body, sizeof(body), "- 30 %u 40 light_day -1", id);
+    assert(phone_access_settings(&settings, body, PHONE_SCOPE_HOME, true) == PHONE_INVALID);
+    snprintf(body, sizeof(body), "- 30 %u 40 light_day 4294967296", id);
+    assert(phone_access_settings(&settings, body, PHONE_SCOPE_HOME, true) == PHONE_INVALID);
+    phone_access_begin(&settings, 42, 100);
+    assert(phone_access_pair(&settings, "000042 " TOKEN, 101, PHONE_SCOPE_DIRECT) == PHONE_OK);
+    snprintf(body, sizeof(body), TOKEN " 30 %u 4294967295 audio_manual 1", id);
+    assert(phone_access_settings(&settings, body, PHONE_SCOPE_DIRECT, false) == PHONE_OK);
+    settings.result = PHONE_COMMAND_APPLIED;
+    settings.settings.home_trusted = 0;
+    assert(phone_access_settings(&settings, "- 30 30 40 light_day 50", PHONE_SCOPE_HOME, true) == PHONE_DENIED);
     return 0;
 }

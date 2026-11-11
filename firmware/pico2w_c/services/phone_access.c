@@ -120,7 +120,7 @@ phone_reply_t phone_access_pair(phone_access_t *access, const char *body, uint64
 }
 
 static phone_reply_t accept_command(phone_access_t *access, const char *body,
-                                    uint8_t scope, bool home_peer, bool player) {
+                                    uint8_t scope, bool home_peer, unsigned first, unsigned limit) {
     const char *p;
     if (strncmp(body, "- ", 2) == 0) {
         if (scope != PHONE_SCOPE_HOME || !home_peer || !access->settings.home_trusted) return PHONE_DENIED;
@@ -137,29 +137,37 @@ static phone_reply_t accept_command(phone_access_t *access, const char *body,
     if (!read_number(&p, &epoch) || *p++ != ' ' ||
         !read_number(&p, &request.id) || !request.id || *p++ != ' ' ||
         !read_number(&p, &request.nonce) || !request.nonce || *p++ != ' ') return PHONE_INVALID;
-    static const char *const actions[] = {
-        "set ", "start ", "cancel ", "play ", "pause ", "resume ", "stop ", "next ", "previous "
+    static const struct {
+        const char *text;
+        uint32_t minimum, maximum;
+    } actions[] = {
+        {"set ", 1, CLOCK_TIMER_MAX_SECONDS}, {"start ", 1, CLOCK_TIMER_MAX_SECONDS},
+        {"cancel ", 0, 0}, {"play ", 0, 0}, {"pause ", 0, 0}, {"resume ", 0, 0},
+        {"stop ", 0, 0}, {"next ", 0, 0}, {"previous ", 0, 0},
+        {"volume_local ", 0, 30}, {"volume_bt ", 0, 30}, {"language ", 0, 1},
+        {"audio_manual ", 0, 1}, {"audio_hourly ", 0, 1},
+        {"audio_timer ", 0, 1}, {"audio_alarm ", 0, 1},
+        {"light_mode ", 0, 2}, {"light_day ", 0, 100}, {"light_night ", 0, 100}
     };
-    unsigned i = player ? PHONE_PLAYER_PLAY : PHONE_TIMER_SET;
-    unsigned limit = player ? sizeof(actions) / sizeof(actions[0]) : PHONE_PLAYER_PLAY;
+    _Static_assert(sizeof(actions) / sizeof(actions[0]) == PHONE_ACTION_COUNT, "Missing phone action");
+    unsigned i = first;
     for (; i < limit; ++i) {
-        size_t length = strlen(actions[i]);
-        if (strncmp(p, actions[i], length) == 0) {
+        size_t length = strlen(actions[i].text);
+        if (strncmp(p, actions[i].text, length) == 0) {
             request.action = (phone_action_t)i;
             p += length;
             break;
         }
     }
     if (i == limit) return PHONE_INVALID;
-    if (!read_number(&p, &request.seconds) || *p ||
-        (player || request.action == PHONE_TIMER_CANCEL ? request.seconds != 0 :
-         request.seconds == 0 || request.seconds > CLOCK_TIMER_MAX_SECONDS))
+    if (!read_number(&p, &request.value) || *p ||
+        request.value < actions[i].minimum || request.value > actions[i].maximum)
         return PHONE_INVALID;
 
     if (epoch != access->epoch) return PHONE_BUSY;
     if (request.id == access->last.id)
         return request.nonce == access->last.nonce && request.action == access->last.action &&
-               request.seconds == access->last.seconds ? PHONE_OK : PHONE_BUSY;
+               request.value == access->last.value ? PHONE_OK : PHONE_BUSY;
     if (request.id != access->last.id + 1u ||
         (access->last.id && access->result == PHONE_COMMAND_PENDING)) return PHONE_BUSY;
     access->last = request;
@@ -168,9 +176,13 @@ static phone_reply_t accept_command(phone_access_t *access, const char *body,
 }
 
 phone_reply_t phone_access_timer(phone_access_t *access, const char *body, uint8_t scope, bool home_peer) {
-    return accept_command(access, body, scope, home_peer, false);
+    return accept_command(access, body, scope, home_peer, PHONE_TIMER_SET, PHONE_PLAYER_PLAY);
 }
 
 phone_reply_t phone_access_player(phone_access_t *access, const char *body, uint8_t scope, bool home_peer) {
-    return accept_command(access, body, scope, home_peer, true);
+    return accept_command(access, body, scope, home_peer, PHONE_PLAYER_PLAY, PHONE_SET_VOLUME_LOCAL);
+}
+
+phone_reply_t phone_access_settings(phone_access_t *access, const char *body, uint8_t scope, bool home_peer) {
+    return accept_command(access, body, scope, home_peer, PHONE_SET_VOLUME_LOCAL, PHONE_ACTION_COUNT);
 }

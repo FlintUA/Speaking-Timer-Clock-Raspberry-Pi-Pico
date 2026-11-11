@@ -44,6 +44,53 @@
     <button type="button" data-action="previous">Previous</button>
     <button type="button" data-action="next">Next</button>
   </div>
+  <form id="settings-controls" hidden>
+    <p>Settings</p>
+    <p>Apply each setting separately. LOCAL and Bluetooth have independent volume levels.</p>
+    <div>
+      <label>LOCAL volume <input name="volume_local" type="number" min="0" max="30" required></label>
+      <button type="button" data-setting="volume_local">Apply</button>
+    </div>
+    <div>
+      <label>Bluetooth volume <input name="volume_bt" type="number" min="0" max="30" required></label>
+      <button type="button" data-setting="volume_bt">Apply</button>
+    </div>
+    <div>
+      <label>Language <select name="language"><option value="0">Russian</option><option value="1">German</option></select></label>
+      <button type="button" data-setting="language">Apply</button>
+    </div>
+    <div>
+      <label>Manual speech / music <select name="audio_manual"><option value="0">LOCAL</option><option value="1">Bluetooth preferred</option></select></label>
+      <button type="button" data-setting="audio_manual">Apply</button>
+    </div>
+    <div>
+      <label>Hourly speech <select name="audio_hourly"><option value="0">LOCAL</option><option value="1">Bluetooth preferred</option></select></label>
+      <button type="button" data-setting="audio_hourly">Apply</button>
+    </div>
+    <div>
+      <label>Timer audio <select name="audio_timer"><option value="0">LOCAL</option><option value="1">Bluetooth preferred</option></select></label>
+      <button type="button" data-setting="audio_timer">Apply</button>
+    </div>
+    <div>
+      <label>Alarm audio <select name="audio_alarm"><option value="0">LOCAL</option><option value="1">Bluetooth preferred</option></select></label>
+      <button type="button" data-setting="audio_alarm">Apply</button>
+    </div>
+    <div>
+      <label>Display light <select name="light_mode"><option value="0">Off</option><option value="1">On</option><option value="2">Auto</option></select></label>
+      <button type="button" data-setting="light_mode">Apply</button>
+    </div>
+    <div>
+      <label>Day brightness % <input name="light_day" type="number" min="0" max="100" step="5" required></label>
+      <button type="button" data-setting="light_day">Apply</button>
+    </div>
+    <div>
+      <label>Night brightness % <input name="light_night" type="number" min="0" max="100" step="5" required></label>
+      <button type="button" data-setting="light_night">Apply</button>
+    </div>
+    <p>Bluetooth preferences fall back to LOCAL when the speaker is unavailable. Auto light uses night brightness from 22:00 to 07:00.</p>
+    <p>Close settings on the clock to apply browser changes. Stop playback before changing language or audio outputs.</p>
+    <p id="save-status" role="status"></p>
+  </form>
   <p id="feedback" role="status"></p>
 </main>
 <script>
@@ -54,6 +101,12 @@
   const controls = document.getElementById("controls");
   const playerControls = document.getElementById("player-controls");
   const playerPlay = document.getElementById("player-play");
+  const settingsControls = document.getElementById("settings-controls");
+  const settingFields = Object.fromEntries(
+    Array.from(settingsControls.querySelectorAll("input, select"), field => [field.name, field])
+  );
+  const dirtySettings = new Set();
+  const saveStatus = document.getElementById("save-status");
   const minutes = document.getElementById("minutes");
   const seconds = document.getElementById("seconds");
   const feedback = document.getElementById("feedback");
@@ -78,6 +131,7 @@
     pairForm.hidden = !live || allowed || Boolean(token && checkedEpoch !== live.epoch);
     controls.hidden = !allowed;
     playerControls.hidden = !allowed;
+    settingsControls.hidden = !allowed;
     logout.hidden = !paired;
     logout.disabled = busy || Boolean(pending);
     for (const button of controls.querySelectorAll("button")) {
@@ -99,6 +153,15 @@
     for (const button of playerControls.querySelectorAll("button")) {
       button.disabled = busy || Boolean(pending) || !live ||
         !playerActions[button.dataset.action];
+    }
+    const preferences = live?.settings;
+    for (const field of Object.values(settingFields)) {
+      const needsIdle = field.name === "language" || field.name.startsWith("audio_");
+      field.disabled = busy || Boolean(pending) || !preferences || preferences.editing ||
+        (needsIdle && !preferences.idle) || (field.name === "volume_bt" && !preferences.bt_supported);
+    }
+    for (const button of settingsControls.querySelectorAll("button")) {
+      button.disabled = settingFields[button.dataset.setting].disabled;
     }
   }
   async function post(path, body) {
@@ -173,6 +236,19 @@
     const action = event.target.dataset.action;
     if (action) await sendCommand("player", action, 0);
   });
+  settingsControls.addEventListener("submit", event => event.preventDefault());
+  function settingEdited(event) {
+    if (event.target.name in settingFields) dirtySettings.add(event.target.name);
+  }
+  settingsControls.addEventListener("input", settingEdited);
+  settingsControls.addEventListener("change", settingEdited);
+  settingsControls.addEventListener("click", async event => {
+    const setting = event.target.dataset.setting;
+    const field = settingFields[setting];
+    if (!field || field.disabled || !field.reportValidity()) return;
+    const value = Number(field.value);
+    if (Number.isInteger(value)) await sendCommand("settings", setting, value);
+  });
   async function sendCommand(target, action, value) {
     if (busy || pending || !live) return;
     const credential = live.home_trusted ? "-" : checkedEpoch === live.epoch ? token : null;
@@ -185,7 +261,7 @@
     try {
       const response = await post("/" + target, [credential, epoch, id, nonce, action, value].join(" "));
       if (response.ok) {
-        pending = {id, epoch, nonce, target, until: Date.now() + 5000};
+        pending = {id, epoch, nonce, target, action, until: Date.now() + 5000};
         feedback.textContent = "Waiting for the clock…";
       } else if (response.status === 403) {
         if (credential !== "-") remember(null);
@@ -227,8 +303,14 @@
         (data.track ? " · Track " + data.track + "/" + data.track_count + " · " + data.player_mode : "");
       labels.output.textContent = data.output;
       if (pending && data.epoch === pending.epoch && data.command_id === pending.id &&
-          data.command_nonce === pending.nonce && data.command_result !== "pending") {
-        if (pending.target === "player") {
+          data.command_nonce === pending.nonce && data.command_result !== "pending" &&
+          (pending.target !== "settings" || data.command_result === "blocked" ||
+            data.settings?.snapshot_id >= pending.id)) {
+        if (pending.target === "settings") {
+          feedback.textContent = data.command_result === "applied" ? "Setting applied." :
+            "Setting not applied. Close the clock editors; stop audio before changing language or outputs.";
+          if (data.command_result === "applied") dirtySettings.delete(pending.action);
+        } else if (pending.target === "player") {
           feedback.textContent = data.command_result === "applied" ? "Player command accepted." :
             "Player busy or sound off. Close settings and check the timer or alarm.";
         } else {
@@ -245,9 +327,22 @@
         minutes.value = Math.floor(data.timer_seconds / 60);
         seconds.value = data.timer_seconds % 60;
       }
+      if (data.settings) {
+        for (const [name, field] of Object.entries(settingFields)) {
+          if (!dirtySettings.has(name) && document.activeElement !== field)
+            field.value = String(data.settings[name]);
+        }
+        const saving = {
+          saved: "Settings saved.",
+          pending: "Changes applied. Saving when the clock is idle.",
+          retry: "Save pending after an error. The clock will retry when idle."
+        };
+        saveStatus.textContent = saving[data.settings.saving] || "Checking saved settings…";
+      }
     } catch {
       live = null;
       labels.connection.textContent = "Connection lost. Reconnecting…";
+      saveStatus.textContent = "Saved state unavailable while disconnected.";
       for (const key of ["time", "timer", "player", "output"]) labels[key].textContent = "—";
     } finally {
       if (pending && Date.now() >= pending.until) {
