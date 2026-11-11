@@ -1198,7 +1198,8 @@ static bool settings_equal(const clock_settings_t *a, const clock_settings_t *b)
     for (unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i) {
         const birthday_t *x=&a->birthdays[i], *y=&b->birthdays[i];
         if (x->enabled!=y->enabled || x->month!=y->month || x->day!=y->day ||
-            x->hour!=y->hour || x->minute!=y->minute || x->last_year!=y->last_year) return false;
+            x->hour!=y->hour || x->minute!=y->minute || x->last_year!=y->last_year ||
+            x->birth_year!=y->birth_year) return false;
     }
     return true;
 }
@@ -2134,8 +2135,11 @@ static phone_command_result_t service_phone_schedule(const phone_command_t *requ
         }
     } else {
         if (phone_birthday_revision(&birthdays[slot]) != request->expected) return PHONE_COMMAND_CONFLICT;
-        if (phone_birthday_revision(&birthdays[slot]) != phone_birthday_revision(&request->birthday))
-            birthday_apply(slot, request->birthday);
+        birthday_t draft = request->birthday;
+        if (!request->birthday_year_supplied) draft.birth_year = birthdays[slot].birth_year;
+        if (!birthday_valid(&draft)) return PHONE_COMMAND_BLOCKED;
+        if (phone_birthday_revision(&birthdays[slot]) != phone_birthday_revision(&draft))
+            birthday_apply(slot, draft);
     }
     return PHONE_COMMAND_APPLIED;
 }
@@ -2172,10 +2176,10 @@ static void service_phone_command(uint64_t now) {
 static void birthday_status(void) {
     for (unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i) {
         const birthday_t *b=&birthdays[i];
-        printf("[BIRTHDAY] %u enabled=%s date=%02u-%02u time=%02u:%02u last_year=%u pending=%s\n",
+        printf("[BIRTHDAY] %u enabled=%s date=%02u-%02u time=%02u:%02u last_year=%u pending=%s birth_year=%u\n",
             i+1,b->enabled?"ON":"OFF",(unsigned)b->day,(unsigned)b->month,
             (unsigned)b->hour,(unsigned)b->minute,(unsigned)b->last_year,
-            birthday_pending_mask&(1u<<i)?"YES":"NO");
+            birthday_pending_mask&(1u<<i)?"YES":"NO", (unsigned)b->birth_year);
     }
 }
 
@@ -2597,11 +2601,12 @@ static void menu_rotate(int direction, uint64_t now) {
         case MENU_BIRTHDAY_ENABLED: birthday_draft.enabled=!birthday_draft.enabled; break;
         case MENU_BIRTHDAY_MONTH:
             birthday_draft.month=wrap_u8(birthday_draft.month,1,12,direction);
-            if(birthday_draft.day>menu_month_days(2000,birthday_draft.month))
-                birthday_draft.day=menu_month_days(2000,birthday_draft.month);
+            if(birthday_draft.day>menu_month_days(birthday_draft.birth_year ? birthday_draft.birth_year : 2000,birthday_draft.month))
+                birthday_draft.day=menu_month_days(birthday_draft.birth_year ? birthday_draft.birth_year : 2000,birthday_draft.month);
             break;
         case MENU_BIRTHDAY_DAY:
-            birthday_draft.day=wrap_u8(birthday_draft.day,1,menu_month_days(2000,birthday_draft.month),direction);
+            birthday_draft.day=wrap_u8(birthday_draft.day,1,menu_month_days(
+                birthday_draft.birth_year ? birthday_draft.birth_year : 2000,birthday_draft.month),direction);
             break;
         case MENU_BIRTHDAY_HOUR: birthday_draft.hour=wrap_u8(birthday_draft.hour,0,23,direction); break;
         case MENU_BIRTHDAY_MINUTE: birthday_draft.minute=wrap_u8(birthday_draft.minute,0,59,direction); break;
@@ -3852,8 +3857,9 @@ static void handle_command(char *line) {
             puts("[BIRTHDAY] Usage: birthday-set N DD MM HH MM on|off");
         } else if (menu_state!=MENU_CLOSED) puts("[BIRTHDAY] Close settings before USB configuration");
         else {
-            birthday_t draft={.enabled=strcmp(action,"on")==0,.day=(uint8_t)day,.month=(uint8_t)month,
-                .hour=(uint8_t)hour,.minute=(uint8_t)minute};
+            birthday_t draft=birthdays[n-1];
+            draft.enabled=strcmp(action,"on")==0; draft.day=(uint8_t)day; draft.month=(uint8_t)month;
+            draft.hour=(uint8_t)hour; draft.minute=(uint8_t)minute;
             if (!birthday_valid(&draft)) puts("[BIRTHDAY] Invalid date/time");
             else birthday_apply(n-1,draft);
         }

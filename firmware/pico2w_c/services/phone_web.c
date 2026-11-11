@@ -332,10 +332,10 @@ static int schedule_json(char *buffer, size_t capacity) {
     for (unsigned i = 0; i < CLOCK_BIRTHDAY_COUNT; ++i) {
         const birthday_t *birthday = &published.birthdays[i];
         int length = snprintf(buffer + used, capacity - used,
-            "%s{\"enabled\":%s,\"month\":%u,\"day\":%u,\"hour\":%u,\"minute\":%u,\"revision\":%" PRIu32 "}",
+            "%s{\"enabled\":%s,\"month\":%u,\"day\":%u,\"hour\":%u,\"minute\":%u,\"birth_year\":%u,\"revision\":%" PRIu64 "}",
             i ? "," : "],\"birthdays\":[", birthday->enabled ? "true" : "false",
             (unsigned)birthday->month, (unsigned)birthday->day, (unsigned)birthday->hour,
-            (unsigned)birthday->minute, phone_birthday_revision(birthday));
+            (unsigned)birthday->minute, (unsigned)birthday->birth_year, phone_birthday_revision(birthday));
         if (length < 0 || (size_t)length >= capacity - used) return -1;
         used += (size_t)length;
     }

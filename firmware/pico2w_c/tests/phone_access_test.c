@@ -201,11 +201,13 @@ int main(void) {
     assert(schedule.last.slot == 0 && schedule.last.birthday.month == 2 && schedule.last.birthday.day == 29);
     assert(schedule.last.birthday.last_year == 0);
     birthday_t birthday = schedule.last.birthday;
-    uint32_t revision = phone_birthday_revision(&birthday);
+    uint64_t revision = phone_birthday_revision(&birthday);
     birthday.last_year = 2026;
     assert(phone_birthday_revision(&birthday) == revision);
     birthday.minute++;
     assert(phone_birthday_revision(&birthday) != revision);
+    birthday.birth_year=2099;
+    assert(phone_birthday_revision(&birthday)>UINT32_MAX);
     alarm_entry_t alarm = {.enabled=true,.hour=7,.minute=30,.weekdays=31,.track=255,.sound=ALARM_SOUND_MUSIC};
     revision = phone_alarm_revision(&alarm);
     alarm.weekdays = 96;
@@ -214,5 +216,18 @@ int main(void) {
     assert(phone_access_birthday(&schedule, "- 40 2 11 set 1 0 1 2 29 7 0", PHONE_SCOPE_HOME, true) == PHONE_OK);
     assert(schedule.result == PHONE_COMMAND_CONFLICT);
     assert(phone_access_birthday(&schedule, "- 40 2 11 set 1 0 1 2 28 7 0", PHONE_SCOPE_HOME, true) == PHONE_BUSY);
+    schedule.result=PHONE_COMMAND_APPLIED;
+    assert(phone_access_birthday(&schedule,"- 40 3 12 set 1 0 1 12 10 7 0 1985",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(schedule.last.birthday.birth_year==1985 && schedule.last.birthday_year_supplied);
+    schedule.result=PHONE_COMMAND_APPLIED;
+    assert(phone_access_birthday(&schedule,"- 40 4 13 set 1 4163690497 1 2 29 7 0 1985",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_birthday(&schedule,"- 40 4 13 set 1 18446744073709551616 1 12 10 7 0",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_birthday(&schedule,"- 40 4 13 set 1 4163690497 1 12 10 7 0 10000",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_birthday(&schedule,"- 40 4 13 set 1 4401920001 1 12 10 7 0 0",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(schedule.last.expected==UINT64_C(4401920001));
+    assert(schedule.last.birthday.birth_year==0 && schedule.last.birthday_year_supplied);
+    schedule.result=PHONE_COMMAND_APPLIED;
+    assert(phone_access_birthday(&schedule,"- 40 5 14 set 1 4163690497 1 12 10 7 0",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(!schedule.last.birthday_year_supplied); // Legacy callers preserve stored metadata.
     return 0;
 }

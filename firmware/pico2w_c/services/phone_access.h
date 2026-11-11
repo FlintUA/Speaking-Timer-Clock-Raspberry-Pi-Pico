@@ -27,9 +27,10 @@ typedef struct {
     uint32_t id, nonce, value;
     phone_action_t action;
     uint8_t slot;
-    uint32_t expected;
+    uint64_t expected;
     alarm_entry_t alarm;
     birthday_t birthday;
+    bool birthday_year_supplied;
 } phone_command_t;
 
 typedef struct {
@@ -54,5 +55,5 @@ phone_reply_t phone_access_settings(phone_access_t *access, const char *body, ui
 phone_reply_t phone_access_alarm(phone_access_t *access, const char *body, uint8_t scope, bool home_peer);
 phone_reply_t phone_access_birthday(phone_access_t *access, const char *body, uint8_t scope, bool home_peer);
 uint32_t phone_alarm_revision(const alarm_entry_t *alarm);
-uint32_t phone_birthday_revision(const birthday_t *birthday);
+uint64_t phone_birthday_revision(const birthday_t *birthday);
 bool phone_access_same_origin(const char *header, size_t length, const char *address);

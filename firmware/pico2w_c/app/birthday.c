@@ -8,6 +8,10 @@ void birthday_defaults(birthday_t dates[CLOCK_BIRTHDAY_COUNT]) {
 
 bool birthday_valid(const birthday_t *date) {
     if (!date || (date->last_year && (date->last_year<2000 || date->last_year>2099))) return false;
+    if (date->birth_year && (date->birth_year < 1000u || date->birth_year > 9999u)) return false;
+    if (date->birth_year && date->month == 2u && date->day == 29u &&
+        (date->birth_year % 4u != 0u ||
+         (date->birth_year % 100u == 0u && date->birth_year % 400u != 0u))) return false;
     ds1302_datetime_t d={.year=2000,.month=date->month,.day=date->day,
         .hour=date->hour,.minute=date->minute};
     uint64_t wall;

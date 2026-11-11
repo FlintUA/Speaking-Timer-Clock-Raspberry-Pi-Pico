@@ -9,6 +9,7 @@ typedef struct {
     bool enabled;
     uint8_t month, day, hour, minute;
     uint16_t last_year; // Persisted: at most one occurrence per calendar year.
+    uint16_t birth_year; // 0=unknown; otherwise a four-digit year, independent of recurrence.
 } birthday_t;
 
 void birthday_defaults(birthday_t dates[CLOCK_BIRTHDAY_COUNT]);

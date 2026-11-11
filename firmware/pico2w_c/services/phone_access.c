@@ -127,26 +127,42 @@ uint32_t phone_alarm_revision(const alarm_entry_t *alarm) {
         ((uint32_t)alarm->track << 13) | ((uint32_t)alarm->weekdays << 21);
 }
 
-uint32_t phone_birthday_revision(const birthday_t *birthday) {
+uint64_t phone_birthday_revision(const birthday_t *birthday) {
     return (uint32_t)birthday->enabled | ((uint32_t)birthday->month << 1) |
         ((uint32_t)birthday->day << 5) | ((uint32_t)birthday->hour << 10) |
-        ((uint32_t)birthday->minute << 15);
+        ((uint32_t)birthday->minute << 15) | ((uint64_t)birthday->birth_year << 21);
+}
+
+static bool read_revision(const char **text, uint64_t *value) {
+    const char *p = *text;
+    if (*p < '0' || *p > '9') return false;
+    uint64_t number = 0;
+    do {
+        unsigned digit = (unsigned)(*p++ - '0');
+        if (number > (UINT64_MAX - digit) / 10u) return false;
+        number = number * 10u + digit;
+    } while (*p >= '0' && *p <= '9');
+    *text = p;
+    *value = number;
+    return true;
 }
 
 static bool read_schedule(const char *text, phone_command_t *request) {
     uint32_t fields[8] = {0};
     unsigned count = request->action == PHONE_SET_ALARM ? 8u : 7u;
-    for (unsigned i = 0; i < count; ++i) {
+    if (!read_number(&text, &fields[0]) || *text++ != ' ' ||
+        !read_revision(&text, &request->expected) || *text++ != ' ') return false;
+    for (unsigned i = 2; i < count; ++i) {
         if (!read_number(&text, &fields[i]) ||
-            (i + 1u == count ? *text != '\0' : *text++ != ' ')) return false;
+            (i + 1u < count && *text++ != ' ')) return false;
     }
     unsigned slots = request->action == PHONE_SET_ALARM ? CLOCK_ALARM_COUNT : CLOCK_BIRTHDAY_COUNT;
     if (fields[0] < 1u || fields[0] > slots || fields[2] > 1u) return false;
     for (unsigned i = 3; i < count; ++i)
         if (fields[i] > UINT8_MAX) return false;
     request->slot = (uint8_t)(fields[0] - 1u);
-    request->expected = fields[1];
     if (request->action == PHONE_SET_ALARM) {
+        if (*text || request->expected > UINT32_MAX) return false;
         request->alarm = (alarm_entry_t){.enabled = fields[2] != 0, .hour = (uint8_t)fields[3],
             .minute = (uint8_t)fields[4], .weekdays = (uint8_t)fields[5],
             .sound = (alarm_sound_t)fields[6], .track = (uint8_t)fields[7]};
@@ -154,6 +170,14 @@ static bool read_schedule(const char *text, phone_command_t *request) {
     }
     request->birthday = (birthday_t){.enabled = fields[2] != 0, .month = (uint8_t)fields[3],
         .day = (uint8_t)fields[4], .hour = (uint8_t)fields[5], .minute = (uint8_t)fields[6]};
+    if (*text == ' ') {
+        uint32_t year;
+        ++text;
+        if (!read_number(&text, &year) || year > 9999u) return false;
+        request->birthday.birth_year = (uint16_t)year;
+        request->birthday_year_supplied = true;
+    }
+    if (*text) return false;
     return birthday_valid(&request->birthday);
 }
 
@@ -210,6 +234,7 @@ static phone_reply_t accept_command(phone_access_t *access, const char *body,
         return request.nonce == access->last.nonce && request.action == access->last.action &&
                request.value == access->last.value && request.slot == access->last.slot &&
                request.expected == access->last.expected &&
+               request.birthday_year_supplied == access->last.birthday_year_supplied &&
                phone_alarm_revision(&request.alarm) == phone_alarm_revision(&access->last.alarm) &&
                phone_birthday_revision(&request.birthday) == phone_birthday_revision(&access->last.birthday) ?
                PHONE_OK : PHONE_BUSY;

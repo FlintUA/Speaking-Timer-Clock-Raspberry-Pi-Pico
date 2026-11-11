@@ -66,5 +66,5 @@ void settings_store_inspect(void);
 void settings_store_dump_tail(void);
 settings_store_result_t settings_store_load(clock_settings_t *out);
 // Writes occur only when requested by the application; load never migrates.
-// Writes with phone settings use v12; records without them still use v11.
+// Birth years use v13; settings without birth years retain v11/v12 encoding.
 settings_store_result_t settings_store_save(const clock_settings_t *settings);

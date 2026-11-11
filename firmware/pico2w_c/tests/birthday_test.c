@@ -46,6 +46,30 @@ int main(void) {
     assert(!birthday_claim(b,&now)); // No catch-up for a missed minute.
     uint64_t queued=UINT64_C(0xffffffff)-100;
     assert(!birthday_wait_expired(queued,queued+BIRTHDAY_WAIT_MS-1));
+    birthday_defaults(b);
+    b[0]=(birthday_t){.enabled=true,.month=12,.day=10,.hour=7,.birth_year=1985};
+    b[1]=b[0]; b[1].birth_year=0;
+    now=(ds1302_datetime_t){.year=2026,.month=12,.day=10,.hour=7};
+    assert(birthday_valid(&b[0]) && birthday_valid(&b[1]));
+    assert(birthday_claim(b,&now)==3);
+    b[0].birth_year=1986;
+    assert(!birthday_claim(b,&now)); // Metadata alone does not re-arm this year's event.
+    now.year++;
+    assert(birthday_claim(b,&now)==3); // Recurrence is independent of a known birth year.
+    b[0].birth_year=999;
+    assert(!birthday_valid(&b[0]));
+    b[0].birth_year=10000;
+    assert(!birthday_valid(&b[0]));
+    b[0].month=2; b[0].day=29; b[0].birth_year=1984;
+    assert(birthday_valid(&b[0]));
+    b[0].birth_year=1985;
+    assert(!birthday_valid(&b[0]));
+    b[0].birth_year=1900;
+    assert(!birthday_valid(&b[0]));
+    b[0].birth_year=2000;
+    assert(birthday_valid(&b[0]));
+    b[0].birth_year=0;
+    assert(birthday_valid(&b[0]));
     assert(birthday_wait_expired(queued,queued+BIRTHDAY_WAIT_MS));
     assert(birthday_wait_expired(queued,queued-1));
     return 0;

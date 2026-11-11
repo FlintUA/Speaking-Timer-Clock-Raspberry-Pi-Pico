@@ -247,7 +247,7 @@ int main(void) {
     strcpy(roundtrip.phone.browsers[0].token, "0123456789abcdef0123456789abcdef");
     assert(settings_store_save(&roundtrip) == SETTINGS_STORE_OK);
     memcpy(&latest, test_flash + SLOT1_OFFSET, sizeof(latest));
-    assert(latest.version == RECORD_VERSION && sector_owned(0) && sector_owned(1));
+    assert(latest.version == RECORD_V12 && sector_owned(0) && sector_owned(1));
     assert(settings_store_load(&off) == SETTINGS_STORE_OK);
     assert(!memcmp(&off.phone, &roundtrip.phone, sizeof(off.phone)));
     assert(off.volume == roundtrip.volume && off.birthdays[0].day == 29);
@@ -259,6 +259,33 @@ int main(void) {
     assert(settings_store_save(&off) == SETTINGS_STORE_OK);
     assert(settings_store_load(&roundtrip) == SETTINGS_STORE_OK);
     assert(!roundtrip.phone.browsers[0].scope && roundtrip.phone.home_trusted);
+    // Installed v12 records load without writing and receive an unknown birth year.
+    uint8_t old_slot[FLASH_SECTOR_SIZE];
+    memcpy(old_slot, test_flash + SLOT0_OFFSET, sizeof(old_slot));
+    assert(settings_store_load(&roundtrip)==SETTINGS_STORE_OK);
+    for (unsigned i=0; i<CLOCK_BIRTHDAY_COUNT; ++i) assert(roundtrip.birthdays[i].birth_year==0);
+    assert(!memcmp(old_slot, test_flash + SLOT0_OFFSET, sizeof(old_slot)));
+    roundtrip.birthdays[0].birth_year=1984; // Existing February 29 remains valid.
+    roundtrip.birthdays[1].birth_year=1985;
+    roundtrip.birthdays[0].last_year=2024;
+    assert(settings_store_save(&roundtrip)==SETTINGS_STORE_OK);
+    assert(settings_store_load(&off)==SETTINGS_STORE_OK);
+    assert(off.birthdays[0].birth_year==1984 && off.birthdays[1].birth_year==1985);
+    assert(off.birthdays[0].last_year==2024 && off.birthdays[2].birth_year==0);
+    assert(!memcmp(&off.phone,&roundtrip.phone,sizeof(off.phone)));
+    assert(!strcmp(off.wifi_password,roundtrip.wifi_password));
+    assert(off.alarms[0].weekdays==roundtrip.alarms[0].weekdays);
+    assert(off.volume==roundtrip.volume && off.bt_volume==roundtrip.bt_volume);
+    assert(off.display_light.mode==roundtrip.display_light.mode);
+    settings_record_current_t with_year;
+    memcpy(&with_year,test_flash+SLOT1_OFFSET,sizeof(with_year));
+    assert(with_year.version==RECORD_VERSION && sizeof(with_year)==512);
+    off.birthdays[0].birth_year=1985;
+    assert(settings_store_save(&off)==SETTINGS_STORE_UNSUPPORTED);
+    test_flash[SLOT1_OFFSET+offsetof(settings_record_current_t,birth_years)]^=1;
+    assert(settings_store_load(&off)==SETTINGS_STORE_OK);
+    assert(off.birthdays[0].birth_year==0 && off.phone.home_trusted);
+    assert(settings_store_save(&roundtrip)==SETTINGS_STORE_OCCUPIED);
     memset(test_flash,0xff,sizeof(test_flash));
     test_flash[SLOT0_OFFSET]=0x42;
     clock_settings_t cfg={.quiet_start=22,.quiet_end=7};
