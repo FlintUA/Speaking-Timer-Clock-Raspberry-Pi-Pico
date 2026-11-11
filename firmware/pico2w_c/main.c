@@ -1125,27 +1125,7 @@ static void timer_cancel_now(void) {
     timer_audio_cancel();
 }
 
-#ifdef CLOCK_ENABLE_PHONE_WEB
-static void service_phone_timer(uint64_t now) {
-    phone_timer_request_t request;
-    if (!phone_web_timer_pending(&request)) return;
-    bool applied = false;
-    if (request.action == PHONE_TIMER_CANCEL) {
-        if (timer.running) timer_cancel_now();
-        applied = true;
-    } else if (!timer.running && menu_state == MENU_CLOSED &&
-               alarm_ui_state == ALARM_UI_CLOSED && !music_ui_open) {
-        countdown_set_duration(&timer, request.seconds);
-        if (request.action == PHONE_TIMER_START) timer_start_now(now);
-        else {
-            timer_screen = true;
-            finished_screen_until_ms = 0;
-        }
-        applied = true;
-    }
-    phone_web_timer_complete(request.id, applied);
-}
-#endif
+
 
 
 static clock_settings_t settings_snapshot(void) {
@@ -1672,6 +1652,66 @@ static void music_ui_service(void) {
     music_ui_track=music_playlist_next(&music_playlist,true);
     music_ui_start();
 }
+
+#ifdef CLOCK_ENABLE_PHONE_WEB
+static bool service_phone_player(phone_action_t action) {
+    if (action == PHONE_PLAYER_STOP) {
+        music_ui_close("PHONE_STOP");
+        return true;
+    }
+    if (timer.running || alarm_active_index >= 0 || menu_state != MENU_CLOSED ||
+        alarm_ui_state != ALARM_UI_CLOSED || !sound_enabled) return false;
+    if (!music_ui_open) {
+        if (action != PHONE_PLAYER_PLAY) return false;
+#ifdef CLOCK_ENABLE_A2DP
+        if (bt_speech_running || bt_timer_running || bt_alarm_running || routed_test_pending ||
+            mp3_play_active() || mp3_probe_active() || sd_fat32_stream_active()) return false;
+#endif
+        music_ui_enter();
+        return music_ui_open && music_ui_pending;
+    }
+    switch (action) {
+        case PHONE_PLAYER_PLAY:
+            if (music_ui_paused) music_ui_toggle();
+            else if (!music_ui_playing && !music_ui_pending) music_ui_start();
+            return music_ui_playing || music_ui_pending;
+        case PHONE_PLAYER_PAUSE:
+            if (!music_ui_paused && music_ui_playing && !music_ui_pending) music_ui_toggle();
+            return music_ui_paused;
+        case PHONE_PLAYER_RESUME:
+            if (music_ui_paused) music_ui_toggle();
+            return music_ui_playing || music_ui_pending;
+        case PHONE_PLAYER_NEXT:
+        case PHONE_PLAYER_PREVIOUS:
+            music_ui_rotate(action == PHONE_PLAYER_NEXT ? 1 : -1);
+            return music_ui_pending;
+        default:
+            return false;
+    }
+}
+
+static void service_phone_command(uint64_t now) {
+    phone_command_t request;
+    if (!phone_web_command_pending(&request)) return;
+    bool applied = false;
+    if (request.action >= PHONE_PLAYER_PLAY) {
+        applied = service_phone_player(request.action);
+    } else if (request.action == PHONE_TIMER_CANCEL) {
+        if (timer.running) timer_cancel_now();
+        applied = true;
+    } else if (!timer.running && menu_state == MENU_CLOSED &&
+               alarm_ui_state == ALARM_UI_CLOSED && !music_ui_open) {
+        countdown_set_duration(&timer, request.seconds);
+        if (request.action == PHONE_TIMER_START) timer_start_now(now);
+        else {
+            timer_screen = true;
+            finished_screen_until_ms = 0;
+        }
+        applied = true;
+    }
+    phone_web_command_complete(request.id, applied);
+}
+#endif
 
 static void alarm_ui_open(uint64_t now) {
     if (timer.running || alarm_active_index >= 0 ||
@@ -4422,7 +4462,7 @@ int main(void) {
         uint64_t now = to_ms_since_boot(get_absolute_time());
 #ifdef CLOCK_ENABLE_PHONE_WEB
         if (phone_web_take_changes()) settings_mark_changed();
-        service_phone_timer(now);
+        service_phone_command(now);
 #endif
         countdown_service(&timer, now);
         // countdown_service clears timer.running at zero; the finish
@@ -4604,6 +4644,8 @@ int main(void) {
             phone_web_snapshot_t snapshot = {
                 .timer_seconds = timer.running ? countdown_remaining(&timer, now) : timer.duration_seconds,
                 .track = music_ui_open ? music_ui_track : 0,
+                .track_count = music_ui_open ? music_track_count : 0,
+                .player_mode = music_ui_open ? music_playlist_mode_name(music_playlist.mode) : "",
                 .timer_running = timer.running,
                 .bluetooth = volume_for_bluetooth(),
                 .player = !music_ui_open ? "Closed" : !sound_enabled ? "Muted" :

@@ -10,9 +10,11 @@ typedef struct {
     char time[9]; // HH:MM:SS, or empty when the RTC is unavailable.
     uint32_t timer_seconds;
     uint8_t track;
+    uint8_t track_count;
     bool timer_running;
     bool bluetooth;
     const char *player; // Static, firmware-defined state label.
+    const char *player_mode;
 } phone_web_snapshot_t;
 
 void phone_web_init(bool radio_ready);
@@ -32,5 +34,5 @@ bool phone_web_begin_pair(void);
 bool phone_web_pair_code(uint32_t *code);
 bool phone_web_pair_succeeded(void);
 void phone_web_revoke(void);
-bool phone_web_timer_pending(phone_timer_request_t *request);
-void phone_web_timer_complete(uint32_t id, bool applied);
+bool phone_web_command_pending(phone_command_t *request);
+void phone_web_command_complete(uint32_t id, bool applied);

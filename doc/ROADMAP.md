@@ -36,7 +36,7 @@ Phone control is being developed on `codex/phone-control`. Standalone direct and
 
 The remaining web-control work proceeds on the assembled hardware in this order:
 
-1. Add browser player transport controls for play, pause/resume, stop, next and previous track. Use the existing player logic and keep physical and browser controls consistent.
+1. Browser player transport controls for play, pause/resume, stop, next and previous track are implemented on this branch. They reuse the existing player and share the timer's command queue. Host and browser execution checks pass. Hardware acceptance is pending.
 2. Test player control in direct and home Wi-Fi modes, on LOCAL and Bluetooth outputs. Check sound continuity during page refreshes, timer/alarm priorities and recovery after the phone disconnects. Complete the outstanding browser Sign out, second-device access, home-trust disable and credential persistence checks alongside this stage.
 3. Add browser settings in small groups, starting with volume, audio output preferences, language and display brightness, followed by alarm and birthday editing. Reuse the existing validation and A/B autosave.
 4. Verify simultaneous use of the web interface and physical controls, repeated commands and network recovery. Finish the English user instructions, update hardware acceptance evidence and prepare the web-control release after user testing.

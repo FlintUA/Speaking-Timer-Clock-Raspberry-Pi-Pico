@@ -85,3 +85,27 @@ On 2026-11-10, the user confirmed that the earlier temporary pairing and browser
 On 2026-11-11, following installation of build `10c22e15f5e9-bt-mp3-wifi-phone`, the user confirmed access through the home network without repeated pairing and reconnection in direct mode without re-entering the Wi-Fi password. Browser Sign out, independent access from a second device, disabling home trust and persistence after a power cycle remain separate hardware acceptance checks.
 
 The connection status page stays open while a home join or retry is pending, supports the usual MINUS back action and resumes its normal timeout after connection. USB logs include each join attempt, result and elapsed time. Host tests cover joining while the phone menu is open, deferring NTP/RTC changes until idle, address acquisition and retry countdowns. On 2026-11-11, after installation of build `b37ec35760a0-bt-mp3-wifi-phone`, the user confirmed that the transition worked and the displayed progress made the waiting process clear. The exact transition duration was not measured.
+
+## Player control from the phone
+
+The browser uses the same music player as the physical controls. Access follows the existing remembered-browser or trusted-home rules.
+
+- **Play** opens and starts the player, or starts the selected track when stopped. If paused, the button becomes **Resume** and continues through the existing pause/resume path.
+- **Pause** pauses playback. Repeating a pause request cannot resume it.
+- **Next** and **Previous** use the existing playlist and history. They start the selected track, including when the previous track was paused.
+- **Stop** stops and closes the player, allowing the timer to start again. Sending Stop when the player is already closed leaves other clock audio running.
+- The live status shows the selected track, track count, playback mode and audio output. Physical button actions appear on the browser's next status refresh.
+
+Timer and player commands share one bounded queue in the main loop. The HTTP callbacks only validate and queue commands. The global sequence, per-request nonce and clock epoch prevent a retried Next or Play request from executing twice and reject conflicting concurrent commands. The existing timer POST format and `timer_*` status fields remain available. New clients use the shared `command_id`, `command_nonce` and `command_result` fields for completion feedback.
+
+Hardware acceptance is pending:
+
+1. Close settings and any timer or alarm. Open the page on the phone and select Play. Confirm music, the current track and the actual LOCAL or BT output.
+2. Pause and resume from the phone. Check that the physical TIMER button and browser controls can both operate the same playback state.
+3. Select Next and Previous. Check the track shown on the LCD and in the browser. The clock's current playlist mode governs track order.
+4. Select Stop and check that music ends and the player closes. Then start and cancel a short timer from the browser.
+5. Repeat in direct and home Wi-Fi modes and on both LOCAL and Bluetooth outputs. Refresh or close the browser during playback and check that music continues.
+6. Check that a scheduled alarm retains its existing priority. While a timer or alarm is active, player start and navigation commands must be refused. A player Stop request must not cancel timer or alarm audio.
+7. Use the page from two devices during playback and check for audio interruptions or repeated track changes. Complete the outstanding Sign out and remembered-access checks from the timer section.
+
+Host tests cover player authentication, action validation, shared timer/player sequencing and idempotent retries. A JavaScript execution check covers the browser's player buttons, pause/resume label, track status, a lost response after Next was applied and timer control after Stop.

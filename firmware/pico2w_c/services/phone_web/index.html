@@ -36,6 +36,14 @@
       <button type="button" data-action="cancel">Cancel timer</button>
     </div>
   </form>
+  <div id="player-controls" hidden>
+    <p>Music player</p>
+    <button type="button" data-action="play" id="player-play">Play</button>
+    <button type="button" data-action="pause">Pause</button>
+    <button type="button" data-action="stop">Stop</button>
+    <button type="button" data-action="previous">Previous</button>
+    <button type="button" data-action="next">Next</button>
+  </div>
   <p id="feedback" role="status"></p>
 </main>
 <script>
@@ -44,6 +52,8 @@
   );
   const pairForm = document.getElementById("pair");
   const controls = document.getElementById("controls");
+  const playerControls = document.getElementById("player-controls");
+  const playerPlay = document.getElementById("player-play");
   const minutes = document.getElementById("minutes");
   const seconds = document.getElementById("seconds");
   const feedback = document.getElementById("feedback");
@@ -67,11 +77,28 @@
     const allowed = Boolean(live && (live.home_trusted || paired));
     pairForm.hidden = !live || allowed || Boolean(token && checkedEpoch !== live.epoch);
     controls.hidden = !allowed;
+    playerControls.hidden = !allowed;
     logout.hidden = !paired;
     logout.disabled = busy || Boolean(pending);
     for (const button of controls.querySelectorAll("button")) {
       button.disabled = busy || Boolean(pending) || !live ||
-        (live.timer_running && button.dataset.action !== "cancel");
+        ((live.timer_running || live.player !== "Closed") && button.dataset.action !== "cancel");
+    }
+    playerPlay.dataset.action = live?.player === "Paused" ? "resume" : "play";
+    playerPlay.textContent = live?.player === "Paused" ? "Resume" : "Play";
+    const playerOpen = Boolean(live && live.player !== "Closed");
+    const canPlay = Boolean(live && !live.timer_running && live.player !== "Muted");
+    const playerActions = {
+      play: canPlay && live.player !== "Playing" && live.player !== "Waiting",
+      resume: canPlay && live.player === "Paused",
+      pause: canPlay && live.player === "Playing",
+      next: canPlay && playerOpen,
+      previous: canPlay && playerOpen,
+      stop: playerOpen
+    };
+    for (const button of playerControls.querySelectorAll("button")) {
+      button.disabled = busy || Boolean(pending) || !live ||
+        !playerActions[button.dataset.action];
     }
   }
   async function post(path, body) {
@@ -134,23 +161,31 @@
   controls.addEventListener("submit", event => event.preventDefault());
   controls.addEventListener("click", async event => {
     const action = event.target.dataset.action;
-    if (!action || busy || pending || !live) return;
-    const credential = live.home_trusted ? "-" : checkedEpoch === live.epoch ? token : null;
-    if (!credential) return;
+    if (!action) return;
     const durationSeconds = action === "cancel" ? 0 : Number(minutes.value) * 60 + Number(seconds.value);
     if (action !== "cancel" && (!controls.reportValidity() || durationSeconds < 1 || durationSeconds > 14400)) {
       feedback.textContent = "Enter a duration between one second and four hours.";
       return;
     }
-    const id = live.timer_request + 1;
+    await sendCommand("timer", action, durationSeconds);
+  });
+  playerControls.addEventListener("click", async event => {
+    const action = event.target.dataset.action;
+    if (action) await sendCommand("player", action, 0);
+  });
+  async function sendCommand(target, action, value) {
+    if (busy || pending || !live) return;
+    const credential = live.home_trusted ? "-" : checkedEpoch === live.epoch ? token : null;
+    if (!credential) return;
+    const id = live.command_id + 1;
     const epoch = live.epoch;
     const nonce = crypto.getRandomValues(new Uint32Array(1))[0] || 1;
     busy = true;
     updateControls();
     try {
-      const response = await post("/timer", [credential, epoch, id, nonce, action, durationSeconds].join(" "));
+      const response = await post("/" + target, [credential, epoch, id, nonce, action, value].join(" "));
       if (response.ok) {
-        pending = {id, epoch, nonce, until: Date.now() + 5000};
+        pending = {id, epoch, nonce, target, until: Date.now() + 5000};
         feedback.textContent = "Waiting for the clock…";
       } else if (response.status === 403) {
         if (credential !== "-") remember(null);
@@ -159,12 +194,12 @@
         feedback.textContent = "Command refused. Try again.";
       }
     } catch {
-      feedback.textContent = "Connection lost. Check the live timer before trying again.";
+      feedback.textContent = "Connection lost. Check the live status before trying again.";
     } finally {
       busy = false;
       updateControls();
     }
-  });
+  }
   function duration(seconds) {
     const parts = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60];
     return parts.map(value => String(value).padStart(2, "0")).join(":");
@@ -188,17 +223,23 @@
       labels.connection.textContent = data.home_trusted ? "Trusted home network" : "Live status";
       labels.time.textContent = data.time || "RTC unavailable";
       labels.timer.textContent = (data.timer_running ? "Running · " : "Set · ") + duration(data.timer_seconds);
-      labels.player.textContent = data.player + (data.track ? " · Track " + data.track : "");
+      labels.player.textContent = data.player +
+        (data.track ? " · Track " + data.track + "/" + data.track_count + " · " + data.player_mode : "");
       labels.output.textContent = data.output;
-      if (pending && data.epoch === pending.epoch && data.timer_request === pending.id &&
-          data.timer_nonce === pending.nonce && data.timer_result !== "pending") {
-        feedback.textContent = data.timer_result === "applied" ? "Timer updated." :
-          "Timer busy. Close settings or the player and check the countdown.";
-        if (data.timer_result === "applied") edited = false;
+      if (pending && data.epoch === pending.epoch && data.command_id === pending.id &&
+          data.command_nonce === pending.nonce && data.command_result !== "pending") {
+        if (pending.target === "player") {
+          feedback.textContent = data.command_result === "applied" ? "Player command accepted." :
+            "Player busy or sound off. Close settings and check the timer or alarm.";
+        } else {
+          feedback.textContent = data.command_result === "applied" ? "Timer updated." :
+            "Timer busy. Close settings or the player and check the countdown.";
+          if (data.command_result === "applied") edited = false;
+        }
         pending = null;
-      } else if (pending && (data.epoch !== pending.epoch || data.timer_request > pending.id)) {
+      } else if (pending && (data.epoch !== pending.epoch || data.command_id > pending.id)) {
         pending = null;
-        feedback.textContent = "Timer status changed. Check the countdown before trying again.";
+        feedback.textContent = "Status changed. Check the clock before trying again.";
       }
       if (!edited && !data.timer_running) {
         minutes.value = Math.floor(data.timer_seconds / 60);
@@ -211,7 +252,7 @@
     } finally {
       if (pending && Date.now() >= pending.until) {
         pending = null;
-        feedback.textContent = "No confirmation. Check the live timer before trying again.";
+        feedback.textContent = "No confirmation. Check the live status before trying again.";
       }
       updateControls();
       clearTimeout(deadline);
