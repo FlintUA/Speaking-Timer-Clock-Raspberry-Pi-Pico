@@ -122,7 +122,7 @@ Accepted values take effect in the main loop and use the existing settings autos
 
 The authenticated `/settings` endpoint shares the timer/player command sequence and retry handling. Only these settings enter the status snapshot. Wi-Fi passwords and browser keys are excluded.
 
-Hardware acceptance is pending:
+Hardware acceptance checklist:
 
 1. Change LOCAL volume and verify the built-in speaker and left encoder. Change Bluetooth volume separately and confirm that the LOCAL value stays unchanged. Repeat with Bluetooth playback.
 2. Change language while idle and request the next spoken time. Restore the preferred language.
@@ -133,3 +133,5 @@ Hardware acceptance is pending:
 7. Wait for Settings saved, restart, and verify the accepted values. Repeat basic settings control in direct and home Wi-Fi modes.
 
 Host checks cover authorization, setting ranges, rejected actions on the wrong endpoint and shared command retries. A JavaScript execution check covers independent fields, unapplied edits, updates from physical controls, save feedback, editor/idle guards and continued timer/player control.
+
+On 2026-11-11, after installation of build `aa20a9cc4962-bt-mp3-wifi-phone`, the user confirmed that the implemented settings functionality worked correctly. This accepts the functional workflow. The report did not separately enumerate every network/output combination, the power-cycle persistence check or the individual guard scenarios above. Full AUTO day/night transition coverage remains deferred.
