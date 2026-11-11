@@ -40,3 +40,7 @@ endforeach()
 add_test(NAME git_version COMMAND "${CMAKE_COMMAND}"
     "-DSOURCE_DIR=${CMAKE_CURRENT_LIST_DIR}/.."
     -P "${CMAKE_CURRENT_LIST_DIR}/git_version_test.cmake")
+find_program(NODE_EXECUTABLE node)
+if(NODE_EXECUTABLE)
+    add_test(NAME phone_sliders COMMAND "${NODE_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/phone_sliders_test.js")
+endif()

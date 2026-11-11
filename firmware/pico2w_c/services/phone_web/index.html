@@ -20,11 +20,15 @@
   input, select, button { font: inherit; min-width: 0; min-height: 2.75rem; }
   input:not([type=checkbox]), select { width: 100%; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: .25rem; background: #fff; color: var(--ink); }
   input[type=checkbox] { width: 1.2rem; height: 1.2rem; min-height: 0; margin: 0; accent-color: var(--accent); }
+  input[type=range] { padding: 0; border: 0; accent-color: var(--accent); cursor: pointer; }
+  .slider-title { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+  output { font-variant-numeric: tabular-nums; color: var(--accent); }
   button { padding: .5rem .8rem; border: 1px solid var(--accent); border-radius: .25rem; background: #fff; color: var(--accent); cursor: pointer; }
   button:disabled { opacity: .5; cursor: default; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   .weekdays { display: grid; grid-template-columns: repeat(auto-fit, minmax(4.5rem, 1fr)); gap: .75rem; padding: .4rem 0; }
-  #settings-controls > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .7rem; }
+  #settings-controls > div { display: grid; align-items: end; gap: .7rem; }
+  #settings-controls > div:not(.slider-setting) { grid-template-columns: minmax(0, 1fr) auto; }
   #controls > div, #player-controls { display: flex; flex-wrap: wrap; gap: .5rem; }
   #player-controls { padding-top: 1.25rem; border-top: 1px solid var(--line); }
   #player-controls h2 { flex-basis: 100%; }
@@ -65,14 +69,14 @@
   </div>
   <form id="settings-controls" hidden>
     <h2>Settings</h2>
-    <p>Apply each setting separately. LOCAL and Bluetooth have independent volume levels.</p>
-    <div>
-      <label>LOCAL volume <input name="volume_local" type="number" min="0" max="30" required></label>
-      <button type="button" data-setting="volume_local">Apply</button>
+    <p>Volume and brightness apply as you move the sliders. LOCAL and Bluetooth have independent levels.</p>
+    <div class="slider-setting">
+      <label><span class="slider-title">LOCAL volume <output id="value-volume_local" for="volume-local">0 / 30</output></span>
+        <input id="volume-local" name="volume_local" type="range" min="0" max="30" step="1"></label>
     </div>
-    <div>
-      <label>Bluetooth volume <input name="volume_bt" type="number" min="0" max="30" required></label>
-      <button type="button" data-setting="volume_bt">Apply</button>
+    <div class="slider-setting">
+      <label><span class="slider-title">Bluetooth volume <output id="value-volume_bt" for="volume-bt">0 / 30</output></span>
+        <input id="volume-bt" name="volume_bt" type="range" min="0" max="30" step="1"></label>
     </div>
     <div>
       <label>Language <select name="language"><option value="0">Russian</option><option value="1">German</option></select></label>
@@ -98,13 +102,13 @@
       <label>Display light <select name="light_mode"><option value="0">Off</option><option value="1">On</option><option value="2">Auto</option></select></label>
       <button type="button" data-setting="light_mode">Apply</button>
     </div>
-    <div>
-      <label>Day brightness % <input name="light_day" type="number" min="0" max="100" step="5" required></label>
-      <button type="button" data-setting="light_day">Apply</button>
+    <div class="slider-setting">
+      <label><span class="slider-title">Day brightness <output id="value-light_day" for="light-day">0%</output></span>
+        <input id="light-day" name="light_day" type="range" min="0" max="100" step="1"></label>
     </div>
-    <div>
-      <label>Night brightness % <input name="light_night" type="number" min="0" max="100" step="5" required></label>
-      <button type="button" data-setting="light_night">Apply</button>
+    <div class="slider-setting">
+      <label><span class="slider-title">Night brightness <output id="value-light_night" for="light-night">0%</output></span>
+        <input id="light-night" name="light_night" type="range" min="0" max="100" step="1"></label>
     </div>
     <p>Bluetooth preferences fall back to LOCAL when the speaker is unavailable. Auto light uses night brightness from 22:00 to 07:00.</p>
     <p>Close settings on the clock to apply browser changes. Stop playback before changing language or audio outputs.</p>
@@ -158,6 +162,10 @@
     Array.from(settingsControls.querySelectorAll("input, select"), field => [field.name, field])
   );
   const dirtySettings = new Set();
+  const sliderChanges = new Map();
+  const activeSliders = new Set();
+  let sliderTimer = null, lastSliderSend = 0, sliderNeedsStatus = false;
+  let statusTimer = null, statusRunning = false;
   const saveStatus = document.getElementById("save-status");
   const scheduleEditors = ["alarm", "birthday"].map(kind => {
     const form = document.getElementById(kind + "-controls");
@@ -177,6 +185,11 @@
   function remember(value) {
     token = value;
     checkedEpoch = value && live ? live.epoch : null;
+    if (!value) {
+      sliderChanges.clear();
+      for (const field of Object.values(settingFields))
+        if (field.type === "range") dirtySettings.delete(field.name);
+    }
     try {
       if (value) localStorage.setItem(storageKey, value);
       else localStorage.removeItem(storageKey);
@@ -214,7 +227,7 @@
     const preferences = live?.settings;
     for (const field of Object.values(settingFields)) {
       const needsIdle = field.name === "language" || field.name.startsWith("audio_");
-      field.disabled = busy || Boolean(pending) || !preferences || preferences.editing ||
+      field.disabled = (field.type !== "range" && (busy || Boolean(pending))) || !preferences || preferences.editing ||
         (needsIdle && !preferences.idle) || (field.name === "volume_bt" && !preferences.bt_supported);
     }
     for (const button of settingsControls.querySelectorAll("button")) {
@@ -302,10 +315,61 @@
   });
   settingsControls.addEventListener("submit", event => event.preventDefault());
   function settingEdited(event) {
-    if (event.target.name in settingFields) dirtySettings.add(event.target.name);
+    const field = event.target;
+    if (!(field.name in settingFields) || field.disabled) return;
+    dirtySettings.add(field.name);
+    if (field.type === "range") {
+      sliderChanges.set(field.name, Number(field.value));
+      showSliderValue(field);
+      scheduleSliders();
+    }
+  }
+  function showSliderValue(field) {
+    document.getElementById("value-" + field.name).textContent =
+      field.value + (field.max === "30" ? " / 30" : "%");
+  }
+  function scheduleSliders() {
+    clearTimeout(sliderTimer);
+    if (!sliderChanges.size || busy || pending || sliderNeedsStatus || !live?.settings ||
+        live.settings.editing || live.command_result === "pending") return;
+    const delay = Math.max(0, 200 - (Date.now() - lastSliderSend));
+    sliderTimer = setTimeout(flushSliders, delay);
+  }
+  async function flushSliders() {
+    if (busy || pending || sliderNeedsStatus || !live?.settings || live.settings.editing) return;
+    const credential = live.home_trusted || (token && checkedEpoch === live.epoch);
+    if (!credential) return;
+    for (const [name, value] of sliderChanges) {
+      if (name === "volume_bt" && !live.settings.bt_supported) continue;
+      if (live.settings[name] === value && live.settings.snapshot_id >= live.command_id) {
+        sliderChanges.delete(name);
+        dirtySettings.delete(name);
+        continue;
+      }
+      lastSliderSend = Date.now();
+      sliderChanges.delete(name);
+      sliderChanges.set(name, value);
+      await sendCommand("settings", name, value);
+      break;
+    }
+  }
+  function pollStatusSoon(delay = 100) {
+    if (statusRunning) return;
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(update, delay);
   }
   settingsControls.addEventListener("input", settingEdited);
   settingsControls.addEventListener("change", settingEdited);
+  settingsControls.addEventListener("pointerdown", event => {
+    if (event.target.type === "range") activeSliders.add(event.target.name);
+  });
+  function releaseSliders() {
+    activeSliders.clear();
+    scheduleSliders();
+  }
+  document.addEventListener("pointerup", releaseSliders);
+  document.addEventListener("pointercancel", releaseSliders);
+  document.addEventListener("visibilitychange", releaseSliders);
   settingsControls.addEventListener("click", async event => {
     const setting = event.target.dataset.setting;
     const field = settingFields[setting];
@@ -407,6 +471,7 @@
     if (busy || pending || !live) return;
     const credential = live.home_trusted ? "-" : checkedEpoch === live.epoch ? token : null;
     if (!credential) return;
+    const slider = target === "settings" && settingFields[action]?.type === "range";
     const id = live.command_id + 1;
     const epoch = live.epoch;
     const nonce = crypto.getRandomValues(new Uint32Array(1))[0] || 1;
@@ -415,19 +480,28 @@
     try {
       const response = await post("/" + target, [credential, epoch, id, nonce, action, value].join(" "));
       if (response.ok) {
-        pending = {id, epoch, nonce, target, action, editor, until: Date.now() + 5000};
-        feedback.textContent = "Waiting for the clock…";
+        pending = {id, epoch, nonce, target, action, value, slider, editor, until: Date.now() + 5000};
+        feedback.textContent = slider ? "Adjusting…" : "Waiting for the clock…";
       } else if (response.status === 403) {
         if (credential !== "-") remember(null);
+        if (slider) {
+          sliderChanges.clear();
+          for (const field of Object.values(settingFields))
+            if (field.type === "range") dirtySettings.delete(field.name);
+        }
         feedback.textContent = "Access ended. Check Phone Control on the clock.";
       } else {
         feedback.textContent = "Command refused. Try again.";
       }
+      if (slider && !response.ok) sliderNeedsStatus = true;
     } catch {
+      if (slider) sliderNeedsStatus = true;
       feedback.textContent = "Connection lost. Check the live status before trying again.";
     } finally {
       busy = false;
       updateControls();
+      pollStatusSoon();
+      scheduleSliders();
     }
   }
   function duration(seconds) {
@@ -435,6 +509,10 @@
     return parts.map(value => String(value).padStart(2, "0")).join(":");
   }
   async function update() {
+    if (statusRunning) return;
+    statusRunning = true;
+    clearTimeout(statusTimer);
+    const refreshingSliders = sliderNeedsStatus;
     const request = new AbortController();
     const deadline = setTimeout(() => request.abort(), 3500);
     try {
@@ -442,6 +520,7 @@
       if (!response.ok) throw new Error("Status unavailable");
       const data = await response.json();
       live = data;
+      if (refreshingSliders) sliderNeedsStatus = false;
       if (token && checkedEpoch !== data.epoch && !busy) {
         const candidate = token;
         const check = await post("/access", candidate);
@@ -468,7 +547,11 @@
         } else if (pending.target === "settings") {
           feedback.textContent = data.command_result === "applied" ? "Setting applied." :
             "Setting not applied. Close the clock editors; stop audio before changing language or outputs.";
-          if (data.command_result === "applied") dirtySettings.delete(pending.action);
+          if (data.command_result === "applied" &&
+              (!pending.slider || sliderChanges.get(pending.action) === pending.value)) {
+            dirtySettings.delete(pending.action);
+            if (pending.slider) sliderChanges.delete(pending.action);
+          }
         } else if (pending.target === "player") {
           feedback.textContent = data.command_result === "applied" ? "Player command accepted." :
             "Player busy or sound off. Close settings and check the timer or alarm.";
@@ -488,15 +571,18 @@
       }
       if (data.settings) {
         for (const [name, field] of Object.entries(settingFields)) {
-          if (!dirtySettings.has(name) && document.activeElement !== field)
+          if (!dirtySettings.has(name) && !activeSliders.has(name) &&
+              (field.type === "range" || document.activeElement !== field))
             field.value = String(data.settings[name]);
+          if (field.type === "range") showSliderValue(field);
         }
         const saving = {
           saved: "Settings saved.",
           pending: "Changes applied. Saving when the clock is idle.",
           retry: "Save pending after an error. The clock will retry when idle."
         };
-        saveStatus.textContent = saving[data.settings.saving] || "Checking saved settings…";
+        saveStatus.textContent = sliderChanges.size ? "Applying slider changes…" :
+          saving[data.settings.saving] || "Checking saved settings…";
       }
       for (const editor of scheduleEditors) refreshSchedule(editor, data);
     } catch {
@@ -511,7 +597,9 @@
       }
       updateControls();
       clearTimeout(deadline);
-      setTimeout(update, 1000);
+      statusRunning = false;
+      pollStatusSoon(pending || sliderNeedsStatus ? 100 : 1000);
+      scheduleSliders();
     }
   }
   updateControls();
