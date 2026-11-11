@@ -4435,6 +4435,12 @@ int main(void) {
         }
         uint32_t menu_timeout_ms = SETTINGS_MENU_TIMEOUT_MS;
 #ifdef CLOCK_ENABLE_PHONE_WEB
+        if (menu_state == MENU_PHONE_WEB && phone_menu_page == 0u && !phone_web_direct()) {
+            network_home_status_t connection = network_time_home_status(now);
+            if (connection.state == NETWORK_HOME_WAIT_IDLE || connection.state == NETWORK_HOME_CONNECTING ||
+                connection.state == NETWORK_HOME_ADDRESS || connection.state == NETWORK_HOME_RETRY)
+                menu_last_input_ms = now;
+        }
         if (menu_state == MENU_PHONE_WEB && phone_menu_page == PHONE_PASSWORD_PAGE)
             menu_timeout_ms = PHONE_PASSWORD_TIMEOUT_MS;
         else if (menu_state == MENU_PHONE_PAIR_CODE)
@@ -4525,16 +4531,22 @@ int main(void) {
         static uint64_t network_next_ms;
         if (now >= network_next_ms) {
             network_next_ms=now+250;
-            bool idle=!timer.running && alarm_active_index<0 &&
-                menu_state==MENU_CLOSED && alarm_ui_state==ALARM_UI_CLOSED &&
+            bool network_idle=!timer.running && alarm_active_index<0 &&
+                alarm_ui_state==ALARM_UI_CLOSED &&
                 !music_ui_open && audio_queue_idle(&audio_queue) && !dfplayer_busy() &&
                 !mp3_play_active() && !mp3_probe_active() && !sd_fat32_stream_active();
 #ifdef CLOCK_ENABLE_A2DP
-            idle=idle && !bt_speech_running && !bt_timer_running &&
+            network_idle=network_idle && !bt_speech_running && !bt_timer_running &&
                  !bt_alarm_running && !routed_test_pending && !clock_a2dp_scan_active();
 #endif
+            bool idle = network_idle && menu_state == MENU_CLOSED;
+            bool join_allowed = idle;
+#ifdef CLOCK_ENABLE_PHONE_WEB
+            join_allowed = network_idle && (menu_state == MENU_CLOSED || menu_state == MENU_PHONE_WEB ||
+                menu_state == MENU_PHONE_PAIR_CODE || menu_state == MENU_PHONE_CONFIRM);
+#endif
             ds1302_datetime_t local, old;
-            if (network_time_service(now,idle,&local)) {
+            if (network_time_service(now,idle,join_allowed,&local)) {
                 uint64_t previous=0, corrected=0;
                 bool have_old=ds1302_read_datetime(&old) && clock_datetime_to_utc(&old,&previous);
                 clock_datetime_to_utc(&local,&corrected);
@@ -4711,7 +4723,34 @@ int main(void) {
             const char *ip = phone_web_address();
             if (phone_menu_page == 0u) {
                 snprintf(top, sizeof(top), "%s Wi-Fi", direct ? "Direct" : "Home");
-                snprintf(bottom, sizeof(bottom), "%s", *ip ? ip : "No address");
+                network_home_status_t connection = network_time_home_status(now);
+                unsigned long seconds = connection.seconds > 9999u ? 9999u : connection.seconds;
+                if (direct) {
+                    snprintf(bottom, sizeof(bottom), "%s", *ip ? ip : "Starting...");
+                } else switch (connection.state) {
+                    case NETWORK_HOME_READY:
+                        snprintf(top, sizeof(top), "Home Wi-Fi ready");
+                        snprintf(bottom, sizeof(bottom), "%s", *ip ? ip : "Getting address");
+                        break;
+                    case NETWORK_HOME_CONNECTING:
+                        snprintf(bottom, sizeof(bottom), "Connecting %lus", seconds);
+                        break;
+                    case NETWORK_HOME_ADDRESS:
+                        snprintf(bottom, sizeof(bottom), "Getting IP %lus", seconds);
+                        break;
+                    case NETWORK_HOME_RETRY:
+                        snprintf(bottom, sizeof(bottom), "Retry in %lus", seconds);
+                        break;
+                    case NETWORK_HOME_WAIT_IDLE:
+                        snprintf(bottom, sizeof(bottom), "Wait until idle");
+                        break;
+                    case NETWORK_HOME_UNCONFIGURED:
+                        snprintf(bottom, sizeof(bottom), "Set home Wi-Fi");
+                        break;
+                    default:
+                        snprintf(bottom, sizeof(bottom), "Radio offline");
+                        break;
+                }
             } else if (phone_menu_page == 1u) {
                 snprintf(top, sizeof(top), "%s", direct ? "Return to home?" : "Start direct?");
                 snprintf(bottom, sizeof(bottom), "TIMER=OK");

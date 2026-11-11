@@ -2,6 +2,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "clock_datetime.h"
+typedef enum {
+    NETWORK_HOME_OFFLINE, NETWORK_HOME_UNCONFIGURED, NETWORK_HOME_SUSPENDED,
+    NETWORK_HOME_WAIT_IDLE, NETWORK_HOME_CONNECTING, NETWORK_HOME_ADDRESS,
+    NETWORK_HOME_RETRY, NETWORK_HOME_READY
+} network_home_state_t;
+typedef struct {
+    network_home_state_t state;
+    uint32_t seconds;
+} network_home_status_t;
+network_home_status_t network_time_home_status(uint64_t now_ms);
 void network_time_init(bool radio_ready);
 void network_time_configure(const char *ssid, const char *password);
 void network_time_request(void);
@@ -10,6 +20,6 @@ void network_time_status(void);
 void network_time_suspend_home(bool suspended);
 #endif
 // Network callbacks only stage time. RTC updates are returned to the idle main loop.
-bool network_time_service(uint64_t now_ms, bool idle, ds1302_datetime_t *local);
+bool network_time_service(uint64_t now_ms, bool idle, bool join_allowed, ds1302_datetime_t *local);
 void network_time_applied(bool success);
 bool network_time_is_dst_change(void);

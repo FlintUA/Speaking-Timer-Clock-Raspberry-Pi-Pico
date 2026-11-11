@@ -15,6 +15,8 @@ static uint64_t sample_epoch, sample_ms, anchor_epoch, anchor_ms;
 static uint64_t last_sync_ms;
 static uint64_t next_apply;
 static unsigned join_failures;
+static unsigned join_attempts;
+static int last_link = CYW43_LINK_DOWN;
 static int applied_offset;
 static ip_addr_t server;
 static struct udp_pcb *pcb;
@@ -65,6 +67,7 @@ void network_time_configure(const char *ssid, const char *password) {
     snprintf(ssid_value,sizeof(ssid_value),"%s",ssid?ssid:"");
     snprintf(password_value,sizeof(password_value),"%s",password?password:"");
     configured=ssid_value[0]!=0; joining=false; next_join=0; join_failures=0;
+    join_attempts=0; last_link=CYW43_LINK_DOWN;
     if (ready) {
         cyw43_arch_lwip_begin();
         waiting=false; received=false;
@@ -82,6 +85,8 @@ void network_time_suspend_home(bool suspended) {
     joining = false;
     next_join = 0;
     join_failures = 0;
+    join_attempts = 0;
+    last_link = CYW43_LINK_DOWN;
     request_now = true;
     cyw43_arch_lwip_begin();
     waiting = false;
@@ -91,12 +96,28 @@ void network_time_suspend_home(bool suspended) {
     cyw43_arch_lwip_end();
 }
 #endif
+network_home_status_t network_time_home_status(uint64_t now) {
+    network_home_status_t status = {0};
+    if (!ready) status.state = NETWORK_HOME_OFFLINE;
+    else if (!configured) status.state = NETWORK_HOME_UNCONFIGURED;
+    else if (home_suspended) status.state = NETWORK_HOME_SUSPENDED;
+    else if (last_link == CYW43_LINK_UP) status.state = NETWORK_HOME_READY;
+    else if (joining) {
+        status.state = last_link == CYW43_LINK_JOIN || last_link == CYW43_LINK_NOIP ?
+            NETWORK_HOME_ADDRESS : NETWORK_HOME_CONNECTING;
+        status.seconds = (uint32_t)((now - join_started) / 1000u);
+    } else if (now < next_join) {
+        status.state = NETWORK_HOME_RETRY;
+        status.seconds = (uint32_t)((next_join - now + 999u) / 1000u);
+    } else status.state = NETWORK_HOME_WAIT_IDLE;
+    return status;
+}
 void network_time_status(void) {
     printf("[NTP] zone=Europe/Berlin configured=%s radio=%s synced=%s offset=%d last_sync_age=%llus\n",
         configured?"YES":"NO",ready?"READY":"OFFLINE",anchor_valid?"YES":"NO",
         applied_offset,(unsigned long long)(anchor_valid?(now_ms()-last_sync_ms)/1000:0));
 }
-bool network_time_service(uint64_t now, bool idle, ds1302_datetime_t *local) {
+bool network_time_service(uint64_t now, bool idle, bool join_allowed, ds1302_datetime_t *local) {
     if (!ready) return false;
     bool fresh=false, timed_out=false;
     cyw43_arch_lwip_begin();
@@ -111,21 +132,30 @@ bool network_time_service(uint64_t now, bool idle, ds1302_datetime_t *local) {
     if (timed_out) puts("[NTP] Request timed out; RTC remains active");
     if (configured && !home_suspended) {
         int link=cyw43_tcpip_link_status(&cyw43_state,CYW43_ITF_STA);
+        last_link=link;
         if (link!=CYW43_LINK_UP) {
             if (joining && (now-join_started>=15000 || link<0)) {
                 joining=false; ++join_failures;
                 next_join=now+(join_failures<3?10000:60000);
-                puts("[WIFI] Join unavailable; retry scheduled, RTC remains active");
+                printf("[WIFI] Join attempt=%u failed link=%d elapsed=%llums; retry in %llus\n",
+                    join_attempts, link, (unsigned long long)(now-join_started),
+                    (unsigned long long)((next_join-now)/1000u));
             }
-            if (!joining && idle && now>=next_join) {
+            if (!joining && join_allowed && now>=next_join) {
                 uint32_t auth=password_value[0]?CYW43_AUTH_WPA2_AES_PSK:CYW43_AUTH_OPEN;
                 int rc=cyw43_arch_wifi_connect_async(ssid_value,password_value,auth);
                 joining=rc==0; join_started=now;
                 next_join=now+60000;
-                puts(joining?"[WIFI] Connecting asynchronously":"[WIFI] Join rejected; retry later");
+                ++join_attempts;
+                printf("[WIFI] Join attempt=%u started status=%d%s\n", join_attempts, rc,
+                    joining ? "" : "; retry in 60s");
             }
         } else {
-            if (joining) { joining=false; join_failures=0; puts("[WIFI] Connected"); }
+            if (joining) {
+                joining=false; join_failures=0;
+                printf("[WIFI] Connected attempt=%u elapsed=%llums; IPv4 ready\n",
+                    join_attempts, (unsigned long long)(now-join_started));
+            }
             cyw43_arch_lwip_begin();
             if (!waiting && !dns_pending && idle && (request_now || now>=next_ntp)) {
                 request_now=false; waiting=true; deadline=now+10000; next_ntp=now+60000;
