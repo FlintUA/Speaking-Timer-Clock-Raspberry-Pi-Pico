@@ -10,15 +10,15 @@ cmake --build build/host-tests --config Debug
 ctest --test-dir build/host-tests -C Debug --output-on-failure
 ```
 
-GitHub CI runs this suite on Windows and Linux.
+GitHub CI is configured to run this suite on Windows and Linux for pushes to main, pull requests and manual dispatch. A push to `codex/phone-control` alone does not trigger that workflow; local passing tests are not a claim of a branch CI run.
 
 If a local Windows/MSVC build misses a changed header (for example due to localized include diagnostics), use a fresh build directory or cmake --build build/host-tests --clean-first before rerunning CTest. The three-minute snooze change was verified with a fresh local build after an incremental cache retained an old object. GitHub CI uses fresh checkouts.
 
-The thirteen suites cover:
+The current branch defines fifteen host checks (fourteen compiled C executables plus the CMake Git-version check). If Node.js is available at configuration, CMake also registers `phone_sliders`, for sixteen checks in total. Node.js is optional and adds no npm dependencies; inspect the CTest list to verify whether that check is included. The fifteen non-browser checks cover:
 - Alarm validity, weekday filtering, leap/calendar boundaries, simultaneous slots, duplicate suppression and independent monotonic snooze deadlines/cancellation.
 - Calendar conversion, leap days, Europe/Berlin transitions, NTP era rollover, invalid headers and mismatched request nonces.
 - MAC parsing, unique combined catalogs and preservation of useful saved names.
-- Settings v1-v10 decoding and migration to v11, including v8-v10 A/B-slot fixtures, alarm weekdays, birthday dates and handled years, Wi-Fi fields, saved speakers and volume/output preferences. Coverage includes display-light defaults, OFF/ON/AUTO and the 07:00/22:00 transitions, invalid settings with valid CRC, A/B fallback, failed writes and refusal to erase unknown sectors. Simulated Flash erase/program is restricted to clock A/B slots.
+- Settings v1-v13 decoding, older-format compatibility and v12/v13 migration, including alarm weekdays, optional birth years and handled years, phone settings, Wi-Fi fields, saved speakers and volume/output preferences. Coverage includes display-light defaults, OFF/ON/AUTO and the 07:00/22:00 transitions, invalid settings with valid CRC, A/B fallback, failed writes and refusal to erase unknown sectors. Simulated Flash erase/program is restricted to clock A/B slots.
 - Git-derived versions: no tags, exact lightweight and annotated tags, commits after a tag, tracked changes, unrelated tags and source archives.
 - Precise timer draft/confirmation/cancellation, field wrapping and four-hour limit, accelerated minute selection and monotonic one-shot countdown completion.
 - Music modes, repeat-one versus explicit Next, backward/forward history, bounded history retention, single-track libraries and shuffle cycle/boundary protection for 2, 7, 8, 78 and 255 tracks.
@@ -28,6 +28,10 @@ The thirteen suites cover:
 - Bluetooth connection policy: chosen peer matching, old-peer rejection after switching, OFF during/after scan, repeated stale callback decisions, retry guards for active/connecting/switching states and malformed addresses. Flash roundtrip of the existing OFF marker preserves known devices, network, birthday/alarm settings and independent volumes. Real BTstack event timing and incoming-paging behavior require hardware acceptance.
 - Music sleep presets, deadline replacement/cancellation, rounded remaining minutes, exact expiry and a deadline crossing 32-bit milliseconds.
 - LCD cursor commands decoded from mocked PCF8574 writes: correct row/column and underline/blink/off controls, no repeated I2C traffic for unchanged focus, restoration after text repaint, bounds and failure handling. These do not validate the appearance of a physical LCD.
+- Phone access and commands: pairing lifetime/attempt limits, scoped remembered keys, logout, home trust, same-origin validation, shared sequence/nonces and retries, timer/player/settings/schedule validation and stale-record revisions.
+- Mocked network-time integration: asynchronous joining while Phone Control is open, idle deferral of NTP/RTC changes, address acquisition, timeout and retry countdowns. This does not reproduce real radio timing.
+
+The optional `phone_sliders` check executes the production page script with a minimal DOM/network model. It covers in-flight edits, latest-value delivery, independent sliders, lost replies, a failed status request, command-ID conflicts, physical encoder updates, Apply-only language edits and editor guards. It does not render a browser or validate physical audio/brightness. Prior manual JavaScript checks for other browser workflows are described in the phone evidence; they are not additional registered CTest suites.
 
 ## Firmware builds
 
@@ -44,6 +48,20 @@ powershell -ExecutionPolicy Bypass -File .\build-clock-bt.ps1 -Mp3 -NoWifi
 ```
 
 The script supports -BuildDirectory for an ASCII build path and -HelixPath for an existing external decoder checkout. It records the Git revision and marks tracked uncommitted changes as dirty. Release builds must have a clean source revision.
+
+Experimental web profile on `codex/phone-control`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build-clock-bt.ps1 -Mp3 -PhoneWeb -BuildDirectory C:\pico_clock_compile\phone-clock
+```
+
+`-PhoneWeb` requires Wi-Fi. Build-only and separately approved installation are described in the [main README](../README.md#experimental-phone-control-profile). Keep the exact UF2 and sidecar together; `update-pico.ps1` has no `-PhoneWeb` parameter. Detailed phone acceptance is in the [web checklist](../experiments/phone_control_ap/README.md#remaining-web-release-acceptance).
+
+## Current web verification baseline
+
+Source `499e78c` passed all sixteen checks with Node.js present. The web and ordinary Bluetooth/MP3/Wi-Fi profiles built successfully with identified, clean source build IDs. UF2 structure, RP2350 family, the E10 marker and image bounds below clock settings were checked. A real 390-pixel browser preview showed four sliders without horizontal overflow. These are automated/desktop checks, not sound-quality measurements.
+
+The approved COM8 installation verified build `499e78c94a0c-bt-mp3-wifi-phone`, Flash guard OK, unchanged valid v12 slot sequences 134/135 and NTP synchronization. Five alarm and five birthday row checksums matched before and after installation. HTTP returned four range inputs and the current saved settings. The user subsequently reported that everything worked. This accepts the slider workflow broadly; the remaining access, power-cycle, optional-year, concurrency and network/output scenarios remain in the phone checklist. See [hardware evidence](HARDWARE_TEST_EVIDENCE.md#phone-control-acceptance-through-build-499e78c).
 
 ## Automatic firmware version
 

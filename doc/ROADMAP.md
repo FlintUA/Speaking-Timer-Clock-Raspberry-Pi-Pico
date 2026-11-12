@@ -1,6 +1,6 @@
 # Current roadmap
 
-This is the authoritative roadmap for the C firmware on main. Earlier MicroPython plans and migration logs are historical; unchecked boxes in those files are not the current task list.
+This is the authoritative roadmap for the C firmware. It distinguishes the stable main baseline from experimental work on `codex/phone-control`. Status reviewed on 2026-11-12 against source revision `499e78c` and user reports. Earlier MicroPython plans and migration logs are historical; unchecked boxes in those files are not the current task list.
 
 ## Release baseline
 
@@ -34,12 +34,22 @@ Wi-Fi access-point loss and recovery on the assembled clock is deferred at the u
 
 Phone control is being developed on `codex/phone-control`. Standalone direct and home Wi-Fi prototypes, integrated live status and browser timer control have passed user testing. The user also confirmed home access without repeated pairing, direct Wi-Fi reconnection without re-entering the password, and the LCD connection-progress screen. These experimental results are separate from the stable main release. See the [phone control instructions and evidence](../experiments/phone_control_ap/README.md).
 
-The remaining web-control work proceeds on the assembled hardware in this order:
+Implemented and broadly user-accepted web functionality:
 
-1. Browser player transport controls for play, pause/resume, stop, next and previous track are implemented on this branch. They reuse the existing player and share the timer's command queue. Host and browser execution checks pass. On 2026-11-11, the user accepted the functional workflow on build `44ca0814caac-bt-mp3-wifi-phone` without observed problems. Extended coverage remains in the next item.
-2. Test player control in direct and home Wi-Fi modes, on LOCAL and Bluetooth outputs. Check sound continuity during page refreshes, timer/alarm priorities and recovery after the phone disconnects. Complete the outstanding browser Sign out, second-device access, home-trust disable and credential persistence checks alongside this stage.
-3. The first browser settings group is implemented on this branch, with independent volume levels, audio output preferences, language and display brightness. It reuses the existing setters, validation and A/B autosave. Host and browser execution checks pass. On 2026-11-11, the user accepted it on build `aa20a9cc4962-bt-mp3-wifi-phone` and subsequently confirmed the general five-alarm/five-birthday editor workflow on build `3d87e9900de5-bt-mp3-wifi-phone`. A follow-up adds a single birthday date field with an optional birth year, v13 storage and mobile field alignment. Its host and browser checks pass; hardware acceptance is pending. Detailed coverage remains in the phone control acceptance checklist.
-4. Verify simultaneous use of the web interface and physical controls, repeated commands and network recovery. Finish the English user instructions, update hardware acceptance evidence and prepare the web-control release after user testing.
+- Player Play/Pause/Resume/Stop/Next/Previous, accepted on build `44ca0814caac-bt-mp3-wifi-phone`.
+- Independent LOCAL/BT volume, four audio output preferences, language and display-light mode/levels, accepted on build `aa20a9cc4962-bt-mp3-wifi-phone`.
+- Five alarm and five birthday editors, accepted on build `3d87e9900de5-bt-mp3-wifi-phone`.
+- Single birthday date field, optional birth year and mobile form alignment on build `d51dd7adf5b8-bt-mp3-wifi-phone`; the user reported the revised interface generally satisfactory before requesting sliders. This is broad acceptance, not explicit v13 save/restart coverage.
+- Immediate volume and brightness sliders on build `499e78c94a0c-bt-mp3-wifi-phone`; the user reported that everything worked after installation. Sixteen host checks passed with Node.js available, including the production slider-script regression. COM8 verified the build, unchanged alarm/birthday records, valid Flash slots and synchronized NTP; read-only HTTP checks found all four sliders. These checks do not replace the remaining hardware scenarios.
+
+Remaining work, in order:
+
+1. Documentation reconciliation is completed for source revision `499e78c`: current profile/build instructions, storage compatibility, menu numbering and acceptance boundaries are aligned. Historical release notes remain historical.
+2. Complete focused hardware checks: two browsers, Sign out/revocation and home-trust disable; remembered access and optional birth years after save/restart; simultaneous physical/browser edits and conflicts; rapid commands and network recovery; sound continuity through refresh/phone disconnect; timer/alarm priorities. Repeat the core workflow in direct/home modes on LOCAL/BT outputs. Follow the [acceptance checklist](../experiments/phone_control_ap/README.md#remaining-web-release-acceptance).
+3. Improve the phone interface presentation and navigation after functionality acceptance. Basic field alignment and sliders are already present; the final visual design is not complete.
+4. Finish user-tested release evidence, build identified artifacts and prepare a separate web-control release. No merge into main or stable web release is implied by functional acceptance.
+
+The first web release does not require browser controls for playlist mode/sleep, Bluetooth discovery/connection, quiet hours, half-hour/exact-hour options or spoken date/next-alarm requests. These are still available through their existing physical/USB paths where implemented. Additional browser controls require a later scope decision. One-time reminders remain excluded.
 
 Control restoration stage 1 is implemented. Hardware logs confirm accelerated selection, LOCAL timer start/finish/cancel and GP28 entry/back; remaining precise-field and player-mute checks are in TESTING.md. The user also confirmed timer routing to the selected Bluetooth speaker after changing its independent output preference.
 

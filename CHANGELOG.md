@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased - codex/phone-control
+
+Experimental work after stable v1.0.0; no stable web-control release is claimed.
+
+- Added the optional local HTTP profile, direct WPA2 access-point and home-network modes, live status, LCD connection progress and a 50-second direct-password screen. Browser control requires neither a cloud service nor Internet access.
+- Added remembered browser authorization without an inactivity timeout, four scoped browser entries, browser Sign out, physical revocation/key rotation and optional home-subnet trust. Direct mode still requires browser pairing; home trust is off by default.
+- Added browser timer and player transport controls, independent LOCAL/BT volume, language, four audio preferences, display-light mode and day/night brightness. HTTP callbacks queue validated commands for the main loop; sequence/nonces and epoch protect retries.
+- Added five alarm and five annual birthday editors, stale-record conflict detection and Reload. Birthday dates accept `DD.MM` or `DD.MM.YYYY`; known birth years are optional metadata and do not change annual recurrence. No one-time reminders were added.
+- Added v12 phone settings and v13 optional birth-year storage within unchanged A/B sectors. This branch's ordinary and offline profiles read/preserve v1-v13. Stable v1.0.0 cannot read v12/v13 records; see [rollback](doc/NETWORK_TIME.md#settings-compatibility-and-rollback).
+- Replaced volume/brightness Apply controls with live sliders. Latest values survive in-flight edits, retry/status failures and command-ID conflicts. Physical encoder changes appear after pending edits are confirmed. Existing deferred autosave is retained.
+- General access, timer, player, settings and schedule workflows are user-accepted. Revised date/mobile layout and immediate sliders are broadly accepted through build `499e78c`. Sixteen local checks passed with Node.js; identified web/ordinary profiles built and COM8/HTTP verification passed. Detailed acceptance and release preparation remain in the [roadmap](doc/ROADMAP.md).
+
+The entries below describe historical release development. Intermediate menu counts and pending statuses reflect their original stages; current behavior and acceptance are in the roadmap, controls and hardware evidence.
+
 ## 1.0.0
 
 First stable source release for Pico 2 W. See the [release notes](doc/releases/v1.0.0.md) for local build instructions, validation and known follow-up checks.

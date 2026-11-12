@@ -1,6 +1,6 @@
 # Pico 2 W -> Google Nest Audio Bluetooth A2DP experiment
 
-This experiment belongs to the main Speaking Timer-Clock project but is intentionally isolated from the production MicroPython firmware in `source/v3`.
+This experiment belongs to the main Speaking Timer-Clock project. It was originally isolated from the then-production MicroPython firmware in `source/v3`, which is now historical. The current integrated clock is [firmware/pico2w_c](../../firmware/pico2w_c/README.md); this directory retains the standalone test and A2DP integration generator. Baseline results below describe the experiment and do not replace current clock acceptance.
 
 ## Verified baseline
 

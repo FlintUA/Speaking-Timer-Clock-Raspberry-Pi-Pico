@@ -65,9 +65,27 @@ References: [German federal time-change FAQ](https://www.bundeswirtschaftsminist
 
 To build the previous Bluetooth-only radio profile, pass -NoWifi to build-clock-bt.ps1 or update-pico.ps1. The network credentials are preserved opaquely in that profile.
 
+## Experimental phone-control network modes
+
+The optional `-PhoneWeb` build on `codex/phone-control` serves the same local HTTP interface in either home STA mode or direct WPA2 AP mode. It requires Wi-Fi and does not run both modes concurrently. Home mode uses the saved network and NTP service; direct mode provides its own network at `192.168.4.1` and does not provide Internet access or fetch NTP. RTC-based clock operation continues. Returning home resumes asynchronous joining and normal NTP handling. The physical Phone Control screen shows join/address/retry progress and may remain open while joining; applying an NTP sample still waits until idle.
+
+The integrated direct password is generated once and reused after a successful settings save, unlike the standalone AP prototype's per-boot password. Browser authorization is separate from the Wi-Fi key. The browser can remember pairing without an inactivity timeout; optional home trust permits unpaired clients on the home subnet. See [phone access and revocation](../experiments/phone_control_ap/README.md#timer-control-from-the-phone). Numeric HTTP addresses are used; no cloud service or Internet connection is required for browser control.
+
 ## Settings compatibility and rollback
 
-Current main writes Flash v11 without moving sectors. It adds display-light settings and retains alarm weekday masks, annual birthday dates and handled years, network, output, volume and speaker settings. Formats v1-v10 remain readable. Alarms from v1-v8 default to Daily, birthdays from v1-v9 default to disabled, and display illumination defaults to OFF when loading v1-v10. Loading alone does not migrate records. Settings changes and newly claimed birthday occurrences write v11 through deferred autosave. An explicit save writes immediately when the existing safety checks allow it. The 348-byte record still occupies two programmed pages in each clock sector. Once both A/B slots contain v11, earlier firmware can only read a legacy record if one exists. Use a current `-NoWifi` build for a network-free fallback that understands v11. Snooze and waiting birthday delivery are RAM-only.
+Stable main/v1.0.0 writes Flash v11 without moving sectors. It adds display-light settings and retains alarm weekday masks, annual birthday dates and handled years, network, output, volume and speaker settings. Formats v1-v10 remain readable. Alarms from v1-v8 default to Daily, birthdays from v1-v9 default to disabled, and display illumination defaults to OFF when loading v1-v10. Loading alone does not migrate records. Settings changes and newly claimed birthday occurrences write v11 through deferred autosave. An explicit save writes immediately when the existing safety checks allow it. The 348-byte record still occupies two programmed pages in each clock sector. Once both A/B slots contain v11, earlier firmware can only read a legacy record if one exists. A `-NoWifi` build at v1.0.0 understands v11, but not the development formats below. Snooze and waiting birthday delivery are RAM-only.
+
+The `codex/phone-control` branch reads v1-v13 and chooses a write format from the actual settings:
+
+| Format | Selection and content | Record bytes |
+| --- | --- | --- |
+| v11 | Phone settings are blank and all birth years are unknown; stable baseline fields | 348 |
+| v12 | Phone settings are present, with all birth years unknown; adds direct key, four scoped browser entries and home trust | 504 |
+| v13 | At least one birth year is known; retains phone fields and adds five optional birth years | 512 |
+
+All formats stay within two programmed 256-byte pages of one existing A/B sector. v1-v12 load with unknown birth years. Loading alone never writes or migrates Flash. Both the ordinary profile and `-NoWifi` built from this branch read v12/v13 and preserve phone fields and known birth years even without the web server.
+
+Stable v1.0.0 cannot read v12/v13. Once both slots use a newer format, reverting to that release can load an older legacy record or defaults rather than current settings. Record intended settings before rollback and use a compatible build from this branch for a non-web/offline fallback. Do not equate disabling the web profile with reverting the source to v1.0.0. Snoozes and pending birthday playback remain RAM-only in every profile.
 
 ## Hardware acceptance status
 

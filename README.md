@@ -4,6 +4,8 @@ The main project is C / Pico SDK firmware for **Pico 2 W (RP2350)**. MicroPython
 
 Current stable release: **[1.0.0](https://github.com/FlintUA/Speaking-Timer-Clock-Raspberry-Pi-Pico/releases/tag/v1.0.0)**. See the [release notes](doc/releases/v1.0.0.md), [current roadmap](doc/ROADMAP.md) and [verification instructions](doc/TESTING.md).
 
+This checkout's `codex/phone-control` branch adds experimental browser control. It has not replaced the stable release. The optional web profile supports direct Wi-Fi or the home network, live status, timer/player controls, settings, five alarms and five annual birthdays with optional birth years. See [phone setup, controls and acceptance](experiments/phone_control_ap/README.md). The ordinary profile does not serve the web interface.
+
 Firmware versions are derived automatically from local Git release tags. About shows the tag version with + for later changes; USB version includes the commit metadata. See [version rules](doc/TESTING.md#automatic-firmware-version), including tag fetching and archive fallback.
 
 The clock uses an I2C LCD1602, DS1302 RTC, DFPlayer Mini, two rotary encoders and five additional buttons. For Bluetooth playback, Pico reads MP3 files from a separate SPI1 microSD card, decodes them with Helix and sends SBC audio to a Bluetooth Classic A2DP speaker.
@@ -19,7 +21,7 @@ The clock uses an I2C LCD1602, DS1302 RTC, DFPlayer Mini, two rotary encoders an
 - Bluetooth discovery, selection by name/MAC, automatic SSP pairing, up to four known devices and direct connection to the saved MAC.
 - Optional Wi-Fi/NTP correction with Europe/Berlin CET/CEST and offline RTC fallback.
 - Five annual birthday dates with menu/USB editing and the existing melody; user-accepted configuration/save, with timed/audio coverage tracked in TESTING.md. One-time reminders are excluded.
-- Flash settings v11 reads formats v1-v10 and stores display-light settings, birthday dates and handled years, alarm weekday masks and Wi-Fi provisioning. Alarm music tracks up to 255 are supported. BTstack stores pairing keys separately. See [migration and rollback](doc/NETWORK_TIME.md#settings-compatibility-and-rollback).
+- Stable v1.0.0 uses Flash settings v11. This development branch reads v1-v13 and writes v11, v12 or v13 according to the saved fields: v12 adds remembered browser access, direct Wi-Fi password and home trust; v13 adds known birth years. Sector boundaries are unchanged. Both profiles on this branch preserve these fields. Alarm music tracks up to 255 are supported. BTstack stores pairing keys separately. See [migration and rollback](doc/NETWORK_TIME.md#settings-compatibility-and-rollback).
 - External LCD illumination on GP6 supports OFF, ON and AUTO with independent day and night brightness. See [settings](doc/CONTROLS_AND_MODES.md#settings).
 - Read-only FAT32 and MP3 access on the SPI microSD card.
 
@@ -54,6 +56,25 @@ powershell -ExecutionPolicy Bypass -File .\update-pico.ps1 -Build -Bluetooth -Mp
 ```
 
 The default port is COM8; use `-Port COM7` to select another port. Software BOOTSEL entry requires firmware that already supports bootsel arm/confirm; the first installation requires manual BOOTSEL entry. The updater checks Flash and alarm responses after flashing, but does not test sound quality or pairing.
+
+### Experimental phone-control profile
+
+Use the existing `codex/phone-control` branch with a clean working tree. Build the web profile separately; the updater has no `-PhoneWeb` parameter:
+
+```powershell
+git fetch origin --tags
+git switch codex/phone-control
+git pull --ff-only
+powershell -ExecutionPolicy Bypass -File .\build-clock-bt.ps1 -Mp3 -PhoneWeb -BuildDirectory C:\pico_clock_compile\phone-clock
+```
+
+Building does not flash the board. After reviewing the build and approving installation, close serial monitors and install that exact artifact:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\update-pico.ps1 -Port COM8 -Uf2 C:\pico_clock_compile\phone-clock\speaking_clock_c.uf2
+```
+
+Keep the generated build-ID sidecar with the UF2. Do not use the ordinary `-Build -Bluetooth -Mp3` update command to install the web profile: it configures the ordinary profile. A web build requires Wi-Fi, so `-PhoneWeb -NoWifi` is rejected. Before reverting to stable v1.0.0, read the settings compatibility notes; it cannot read v12/v13 records.
 
 Run `version` to see the firmware version and source build ID. Keep the generated `speaking_clock_c.build-id.txt` beside its UF2; the updater uses it to verify the installed source revision.
 
@@ -103,6 +124,7 @@ Supported: Classic A2DP Sink/SBC. BLE-only, HFP and Google Cast are not supporte
 | [doc/history](doc/history/) | Previous READMEs and development history |
 | [source/v3](source/v3/) | Historical MicroPython firmware |
 | [experiments/bluetooth_a2dp_nest](experiments/bluetooth_a2dp_nest/) | BTstack A2DP integration generator |
+| [experiments/phone_control_ap](experiments/phone_control_ap/) | Phone-control instructions, acceptance evidence and standalone network prototypes |
 | [schematic](schematic/) | Original Pico schematic |
 | [sound](sound/) | Audio assets |
 | [Documentation conventions](doc/DOCUMENTATION.md) | English-only documentation policy |

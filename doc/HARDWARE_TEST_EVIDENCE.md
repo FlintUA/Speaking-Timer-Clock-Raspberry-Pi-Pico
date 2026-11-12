@@ -2,6 +2,26 @@
 
 This summary covers the assembled Pico 2 W clock on COM8. Each section identifies its evidence source: direct COM8 verification, user tests or reconstructed historical project records. Software-only results and remaining physical checks are stated separately.
 
+## Phone-control acceptance through build 499e78c
+
+Documentation reconciled on 2026-11-12. These results belong to the experimental `codex/phone-control` branch, not stable v1.0.0.
+
+| Build | Evidence |
+| --- | --- |
+| `10c22e15f5e9-bt-mp3-wifi-phone` | User confirmed home access without repeated pairing and direct reconnection without re-entering the Wi-Fi password. |
+| `b37ec35760a0-bt-mp3-wifi-phone` | User accepted the LCD progress indication when returning from direct to home mode. Exact transition duration was not measured. |
+| `44ca0814caac-bt-mp3-wifi-phone` | User accepted browser player transport controls without observed problems. |
+| `aa20a9cc4962-bt-mp3-wifi-phone` | User accepted browser settings. |
+| `3d87e9900de5-bt-mp3-wifi-phone` | User accepted the general five-alarm/five-birthday editors and requested a single birthday date field. |
+| `d51dd7adf5b8-bt-mp3-wifi-phone` | User found revised dates/mobile fields generally satisfactory, then requested volume/brightness sliders. This does not individually confirm known-year Flash persistence. |
+| `499e78c94a0c-bt-mp3-wifi-phone` | User reported that everything worked after the four live sliders were installed. This is broad functional acceptance. |
+
+For the last installation, the candidate UF2 was 1,722,880 bytes with SHA-256 `55A42206341DDD2B1E72ED8F94FA31A22B39BAE42A02BD5FF8F65B6D6F49F8AF`. The updater verified `1.0.0+22.g499e78c` and the exact build ID on COM8. SD/FAT32 and LCD initialized. Post-install diagnostics reported Flash guard OK, valid v12 A/B sequences 134/135, timer/alarm/player idle, no pending save, home network address present and NTP synchronized in Europe/Berlin. Bluetooth was inactive during this automated verification; it is not a BT playback test.
+
+Pre/post serial checksums matched for all five alarm and five birthday rows. No browser setting command was sent during the automated check. Read-only HTTP returned four range inputs and saved levels LOCAL 12, BT 11, day 100%, night 100%. This confirms the served UI and unchanged existing configuration, not persistence of a newly edited birth year or slider value through another power cycle.
+
+All sixteen host checks passed with Node.js available, and both web and ordinary profiles built. The production-script slider regression covers network/retry/conflict cases in simulation; a real mobile-width browser preview had no horizontal overflow. Remaining device acceptance includes two browsers/revocation, same-record conflicts, optional-year save/restart, sliders after save/restart and the explicit direct/home by LOCAL/BT combinations. See the [remaining checklist](../experiments/phone_control_ap/README.md#remaining-web-release-acceptance). Router outage, full AUTO light transitions and the intermittent Bluetooth double sound remain deferred.
+
 ## External LCD illumination acceptance
 
 Build ab06727 (1.0.0-rc.1+25.gab06727) was installed with separate approval. On first boot with the existing v10 records, COM8 reported `mode=OFF day=100% night=20% applied=0%`. Pre/post snapshots matched for all five alarms, all five birthdays, audio output preferences, both volume levels and the Bluetooth catalog and selected speaker. The Flash guard was OK, Portable resumed A2DP and NTP synchronized.

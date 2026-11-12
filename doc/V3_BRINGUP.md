@@ -1,5 +1,7 @@
 # Speaking Timer-Clock v3 - first hardware bring-up
 
+Historical MicroPython bring-up instructions. Current C firmware, build profiles and wiring are documented in the [main README](../README.md) and [Pico 2 W pin map](HARDWARE_PICO2W.md). The incomplete stages below describe that earlier prototype.
+
 This build is intentionally smaller than the final v3. Its purpose is to validate the new architecture on the already proven hardware before adding alarms, RTC editing/correction, music and the complete settings menu.
 
 ## Files

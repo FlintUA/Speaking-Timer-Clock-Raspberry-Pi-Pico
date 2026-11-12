@@ -39,7 +39,7 @@ Turn the timer encoder to choose an item or value. SETTINGS or the timer encoder
 
 A hardware blinking character cursor marks the first character of the value being edited. The LCD controller generates the blink without periodic host commands; this is a blinking character cell rather than a blinking underline. It moves between hours/minutes/seconds or day/month/year, and marks the current scalar value in other editors. In the custom weekday editor it marks ON/OFF beside the day name. The same cue is used in the precise timer and alarm editors. Lists, About, music, ringing/snooze and ordinary clock screens hide the cursor; save, cancel and timeout also remove it. The user accepted the earlier steady underline mode; the subsequent hardware blinking mode was also accepted by the user in build 755f55b.
 
-The settings menu has eleven items, in this order:
+The ordinary profile has eleven settings items, in this order:
 
 1. Language
 2. Time
@@ -52,6 +52,8 @@ The settings menu has eleven items, in this order:
 9. Birthdays
 10. Display Light
 11. About
+
+The experimental web profile inserts **Phone Control (11)** before **About (12)**. Phone Control shows the current address, switches between home and direct Wi-Fi, starts browser pairing, toggles home trust, forgets paired browsers and rotates the direct Wi-Fi key. The direct password screen lasts 50 seconds; the pairing code lasts 60 seconds. Home connection progress remains visible while a join/retry is pending. See [phone instructions](../experiments/phone_control_ap/README.md) for access scope, persistence and controls. The ordinary profile has no Phone Control item or web server.
 
 Display Light controls the external LCD LED. OFF switches it off. ON uses Day Brightness at all times. AUTO uses Night Brightness from 22:00 through 06:59 and Day Brightness from 07:00 through 21:59, based on local RTC time. AUTO uses the night level when the RTC is unavailable. The light schedule is independent of audio Quiet mode and mute.
 
@@ -102,6 +104,8 @@ birthday-pending-clear
 birthday-set uses slot/day/month/hour/minute/on-or-off and rejects invalid dates. birthday-test queues a RAM-only playback test using normal quiet/priority/expiry rules, even for a disabled slot; it does not change the saved date or handled year. It refuses to replace an already waiting occurrence. birthday-pending-clear discards waiting notifications without resetting saved years. BOOTSEL refuses while a birthday notification is waiting. No test command generates a saved date automatically.
 
 Flash v10 adds five dates and their handled years; v1-v9 load with all birthday slots disabled. The user broadly accepted the feature in build 7964939; COM8 confirms configured dates saved as v10. Timed firing, output-specific melody, expiry and repeat-suppression/reboot cases remain focused coverage checks.
+
+On this development branch, the browser also accepts `DD.MM` with an unknown birth year or `DD.MM.YYYY` with a known year (1000..9999). Both recur annually by day/month; the birth year is metadata and does not change recurrence. A known year must form a valid calendar date, including leap-day validation. Physical and USB date edits preserve a known birth year; clearing it is available in the browser. Changing only the birth year retains the handled event year. Known birth years require v13 storage; see [compatibility](NETWORK_TIME.md#settings-compatibility-and-rollback).
 
 ## Alarms
 

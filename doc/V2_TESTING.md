@@ -1,5 +1,7 @@
 # Speaking Timer-Clock v2 - bring-up and test plan
 
+Historical MicroPython test plan. It is not the current C firmware acceptance checklist; use [TESTING.md](TESTING.md) and the [current roadmap](ROADMAP.md).
+
 This document is for the `fix/working-v2` branch. The original `source/speaking_timer_clock.py` is intentionally preserved as the legacy version.
 
 ## Goal

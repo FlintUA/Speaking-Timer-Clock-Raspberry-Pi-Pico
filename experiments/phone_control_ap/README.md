@@ -1,4 +1,18 @@
-# Phone control Wi-Fi prototypes
+# Phone control: integrated firmware and Wi-Fi prototypes
+
+Current development branch: `codex/phone-control`. Stable v1.0.0 does not include the browser interface. The integrated profile runs the clock, Bluetooth, MP3 and optional NTP alongside local HTTP control. The standalone targets described below are earlier network experiments and replace the clock application when installed.
+
+## Current integrated workflow
+
+1. From the repository root, build `build-clock-bt.ps1 -Mp3 -PhoneWeb`, optionally using `-BuildDirectory C:\pico_clock_compile\phone-clock`. This builds only; `-NoWifi` cannot be combined with `-PhoneWeb`.
+2. Install the selected UF2 with `update-pico.ps1 -Port COM8 -Uf2 <absolute-UF2-path>` after approving the build. Keep its `.build-id.txt` sidecar alongside it. The updater has no `-PhoneWeb` switch; `-Build -Bluetooth -Mp3` rebuilds the ordinary profile instead.
+3. Use the existing home Wi-Fi setup or provision it with the root `configure-wifi.ps1`. Open **Settings -> Phone Control (11)** on the clock and browse to its numeric HTTP address. **About is item 12** in this profile.
+4. For direct operation without a router or Internet, select **Start direct?**, join **SpeakingClock** with the displayed key and open `http://192.168.4.1/`. Direct and home are alternative modes. Returning home disconnects the direct network; reconnect the phone to the home network and use the home address.
+5. Pair the browser once in each mode where needed, or enable home trust for code-free control from the home subnet. Close physical settings before issuing control commands. Access rules and remaining checks are detailed below.
+
+Current page functions: live clock/timer/player/output status; timer Set/Start/Cancel; player Play/Pause/Resume/Stop/Previous/Next; independent LOCAL/BT volume and day/night brightness sliders; language, audio preferences and light mode; five alarm and five annual birthday editors. It does not offer browser playlist-mode/sleep controls, Bluetooth device management, quiet-hour/half-hour/exact-hour settings, manual time/date or spoken-information requests.
+
+## Standalone prototype scope
 
 The two standalone Pico 2 W targets serve the same static page with the Pico SDK's lwIP HTTP server. CMake embeds one HTML source in both images. The AP target leases an address to the phone. The STA target obtains its address from the home router.
 
@@ -76,6 +90,8 @@ On build `6eec0ace9b26-bt-mp3-wifi-phone`, the user confirmed switching to direc
 
 The clock remembers up to four browser and network-mode combinations. Pairing is scoped to the clock address in that browser and to home or direct mode on the clock. Remembered access has no inactivity timeout. Browser private mode or clearing website data can remove the browser's copy. Phone settings use the existing A/B autosave, so a change takes effect immediately in RAM and survives a restart after a successful save. Keep a compatible settings backup when rolling back to older firmware. This branch's regular build reads both v12 phone settings and v13 optional birth years.
 
+Pairing the same browser in home and direct modes uses separate entries. Trusted-home access needs no paired entry. When all four entries are occupied, new pairing is refused rather than evicting another browser; use Sign out from an existing paired browser or Forget browsers on the clock to free entries. Clearing browser data alone does not remove the corresponding key from the clock.
+
 Home trust is off by default, resets when the configured home Wi-Fi credentials change, and applies only to clients on the clock's home IPv4 subnet. Any client on that subnet can control the clock while home trust is enabled. Signing out from a paired browser removes its key. To stop code-free control, switch home trust off on the clock. The firmware serves local HTTP. Keep it on a trusted network and do not expose it to the Internet.
 
 The controller requires matching Host and Origin headers for commands. The command sequence and nonce prevent a repeat or a concurrent request from silently starting the timer twice. Host tests cover code expiry, retry limits, access scope, logout, origin checking, concurrent commands and v11 to v12 settings compatibility.
@@ -134,7 +150,9 @@ Hardware acceptance checklist:
 
 Host checks cover authorization, setting ranges, rejected actions on the wrong endpoint and shared command retries. A JavaScript execution check covers independent fields, unapplied edits, updates from physical controls, save feedback, editor/idle guards and continued timer/player control.
 
-The `phone_sliders` browser-script regression test runs with Node.js when available in the host-test environment. It checks updates during an in-flight request, final-value delivery, multiple sliders, a lost response, a temporary status failure, command-ID conflicts and updates from the physical encoder. Hardware acceptance of immediate slider control is pending.
+The `phone_sliders` browser-script regression test runs with Node.js when available in the host-test environment. It checks updates during an in-flight request, final-value delivery, multiple sliders, a lost response, a temporary status failure, command-ID conflicts and updates from the physical encoder.
+
+After installation of build `499e78c94a0c-bt-mp3-wifi-phone`, the user reported that everything worked following the requested slider checks. This accepts the immediate-slider workflow broadly. The report does not individually establish every output/network combination, both brightness schedules or persistence after a later slider change. COM8 verified the exact build, valid v12 A/B slots and NTP synchronization. Alarm and birthday row checksums matched before/after installation. Read-only HTTP checks found four sliders and settings marked saved; no automated control action was sent to the device during this verification.
 
 On 2026-11-11, after installation of build `aa20a9cc4962-bt-mp3-wifi-phone`, the user confirmed that the implemented settings functionality worked correctly. This accepts the functional workflow. The report did not separately enumerate every network/output combination, the power-cycle persistence check or the individual guard scenarios above. Full AUTO day/night transition coverage remains deferred.
 
@@ -150,7 +168,7 @@ A lossless revision of the editable fields accompanies each request. If a physic
 
 The authenticated `/alarm` and `/birthday` endpoints share the existing command sequence. Read-only status includes the five records of each kind. Calendar validation, access checks and the matching Host/Origin requirement also apply to these endpoints. Scheduling uses the clock's Europe/Berlin time; browser time zone settings do not change the entered hours.
 
-Hardware acceptance is pending:
+Detailed hardware acceptance checklist (the general workflow is user-accepted; the scenarios below are not all individually closed):
 
 1. Choose an unused alarm slot, configure a future time, weekdays, enabled state and Signal. Apply, then compare the physical alarm editor. Check its scheduled operation.
 2. Test Daily, Mon-Fri, Sat-Sun and custom days. At least one day is required. Select Music with a known existing folder 08 track and check that the track is retained.
@@ -162,4 +180,20 @@ Hardware acceptance is pending:
 
 Native checks cover malformed or out-of-range records, slot boundaries, weekday masks, 1..255 tracks, calendar validation, access rules and retry handling. A JavaScript execution check covers preset/custom days, conflicts, Reload, draft preservation, slot isolation, a lost reply after applying, calendar messages and the timer. A format check parses the maximum-length status response with five alarms and five birthdays and verifies its buffer limit. The web profile uses a 16 KiB lwIP heap to accommodate the larger responses and TCP copies; the regular profile retains 8 KiB.
 
-On 2026-11-11, the user confirmed the general editors worked on build `3d87e9900de5-bt-mp3-wifi-phone` and requested a single birthday date field with an optional stored birth year. The revised date entry and mobile field alignment await hardware acceptance. Native tests cover known/unknown-year recurrence, leap-year validation, year-only edits and v12 to v13 storage migration. The browser check covers adding and clearing the optional year. A 390-pixel mobile preview was inspected for field alignment and horizontal overflow.
+On 2026-11-11, the user confirmed the general editors worked on build `3d87e9900de5-bt-mp3-wifi-phone` and requested a single birthday date field with an optional stored birth year. After build `d51dd7adf5b8-bt-mp3-wifi-phone`, the user reported that the result was generally satisfactory and requested sliders for volume/brightness. This broadly accepts revised date entry and mobile alignment; adding/removing a known year and retaining it through a v13 save/restart were not individually reported. Native tests cover known/unknown-year recurrence, leap-year validation, year-only edits and v12 to v13 storage migration. The browser check covers adding and clearing the optional year. A 390-pixel mobile preview was inspected for field alignment and horizontal overflow.
+
+## Remaining web-release acceptance
+
+Use existing configured records carefully and restore any deliberately changed test values. A broad user acceptance report closes the functional workflow, not every combination in this checklist.
+
+| Area | Remaining focused check |
+| --- | --- |
+| Access | Two independent browsers; Sign out removes only that browser's paired key; Forget browsers revokes paired keys. Home trust still grants subnet access until switched off. |
+| Trust and persistence | Disable home trust and require pairing again; save/restart retains intended paired access and direct key; signed-out keys stay revoked after save/restart. |
+| Physical controls | Browser reflects encoder changes after slider release; an unsent draft survives polling; editing the same alarm/birthday elsewhere produces a conflict and Reload retrieves the current record. |
+| Sliders and storage | Rapid moves and final zero on each output; independent LOCAL/BT levels; wait for Settings saved and verify restart retention. A non-active day/night level need not change the current PWM duty. |
+| Optional birth year | Add, clear and restore a known year; save/restart preserves it; recurrence remains annual; malformed/leap-day dates are refused as appropriate. |
+| Playback and priorities | Refresh/close the page or disconnect the phone during music; timer/alarm priority and guarded commands remain correct. |
+| Network/output coverage | Repeat core controls in home/direct modes on LOCAL/BT; recover after a phone disconnect and mode switch. Router outage testing remains deferred. |
+
+The remaining product stages are interface presentation/navigation and release preparation, after focused acceptance. Stable main has not been replaced and no stable web release has been published as part of these checks.

@@ -1,6 +1,6 @@
 # Pico 2 W clock C firmware
 
-Release candidate: 1.0.0-rc.1. Current controls are documented in [CONTROLS_AND_MODES.md](../../doc/CONTROLS_AND_MODES.md), with network provisioning in [NETWORK_TIME.md](../../doc/NETWORK_TIME.md). See [TESTING.md](../../doc/TESTING.md) for native tests and release acceptance.
+Stable baseline: v1.0.0. This checkout's `codex/phone-control` branch develops the optional browser-control profile; it is not a new stable release. Current controls are documented in [CONTROLS_AND_MODES.md](../../doc/CONTROLS_AND_MODES.md), with network provisioning and rollback in [NETWORK_TIME.md](../../doc/NETWORK_TIME.md). See [TESTING.md](../../doc/TESTING.md) for host tests and release acceptance, and [phone control](../../experiments/phone_control_ap/README.md) for browser setup and checks.
 
 This is the current project firmware. See the [main README](../../README.md) for build dependencies and updates, and the [current pin map](../../doc/HARDWARE_PICO2W.md) for wiring.
 
@@ -25,7 +25,7 @@ SETTINGS opens the menu, the timer encoder selects an item, SETTINGS or the time
 
 ## Storage
 
-Clock Flash A/B occupies sectors -6/-5 from the end of Flash. Legacy sector -4 is read for migration. BTstack uses -3/-2, and the final sector is reserved. CRC-protected v11 records add display-light settings while retaining alarm weekdays, annual birthdays, saved speakers and Wi-Fi credentials. Formats v1-v10 remain readable, and v11 still uses two pages in each existing clock sector. Loading does not rewrite Flash. BTstack stores pairing keys separately. Use a current `-NoWifi` build for a fallback that supports v11.
+Clock Flash A/B occupies sectors -6/-5 from the end of Flash. Legacy sector -4 is read for migration. BTstack uses -3/-2, and the final sector is reserved. This branch reads CRC-protected v1-v13 records. Writes select v11 (348 bytes) with blank phone settings and no known birth years, v12 (504 bytes) with phone settings and no known birth years, or v13 (512 bytes) when any birth year is known. All use two programmed pages in the existing clock sector. Loading does not rewrite Flash. Ordinary and `-NoWifi` builds from this branch preserve phone settings and known birth years. Stable v1.0.0 cannot read v12/v13; see rollback instructions before reverting. BTstack stores pairing keys separately.
 
 A device is added only after an active A2DP stream with a matching MAC. Builds without Bluetooth preserve these fields when saving other settings. SPI SD access is read-only.
 
@@ -34,3 +34,5 @@ A device is added only after an active A2DP stream with a matching MAC. Builds w
 The previous accumulated README is in the [development history](../../doc/history/PICO2W_C_DEVELOPMENT.md). Its early wiring and descriptions of incomplete stages are historical.
 
 CMake flags CLOCK_ENABLE_A2DP, CLOCK_ENABLE_MP3 and CLOCK_ENABLE_WIFI are explicit options. The standard build script enables A2DP/Wi-Fi and adds MP3 with -Mp3; -NoWifi preserves a Bluetooth-only fallback. External LCD illumination on GP6 uses the Pico SDK hardware PWM library in every build. Classic A2DP/SBC with automatic SSP confirmation is supported; legacy PIN pairing is not. Helix is checked out separately at the revision documented in the main README.
+
+`CLOCK_ENABLE_PHONE_WEB` defaults to OFF. `build-clock-bt.ps1 -Mp3 -PhoneWeb` enables the integrated local HTTP server and appends `-phone` to the build ID. It requires Wi-Fi and the pico-examples DHCP server. The web profile uses a 16 KiB lwIP heap; the ordinary profile uses 8 KiB. Only the web profile adds Phone Control before About in the physical settings menu. Both home and direct modes serve the same embedded page; switching selects one network mode at a time.
