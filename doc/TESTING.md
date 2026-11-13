@@ -239,6 +239,10 @@ After separate installation approval, verify the legacy defaults before editing.
 
 See [RANDOM_EVENT_MUSIC.md](RANDOM_EVENT_MUSIC.md) for exact behavior and device steps. Twenty-one tests pass after a clean host rebuild (needed after extending the snooze structure). New `music_catalog` and `sd_catalog` tests exercise sparse numeric IDs, exclusion/deduplication, singleton/no-repeat choice, scanning beyond the old print limit, read failure and corrupt chain handling. Expanded access/browser/Flash tests cover random modes, collision-free revision bits and v16 configuration round-trip with previous data retained. A one-off harness compiles real main-loop handlers and verifies stable occurrence choices through snooze, timer preemption and BT-to-LOCAL fallback. Both profiles build. Actual cards, physical timing, persistence on hardware and four-client load remain unverified.
 
-## Optional timer pre-warning (installation pending)
+## Optional timer pre-warning (user acceptance pending)
 
 All 22 tests pass after clean host rebuild. See [TIMER_PREWARNING.md](TIMER_PREWARNING.md) for exact scheduler, owner/transport harness, v17 migration/corruption and browser/parser coverage, plus the pending physical test sequence. The numeric asset 19/001.mp3 was inspected locally: 11,612 bytes, 0.197333 seconds, 48 kHz mono; asset bytes were not changed. Begin device acceptance with 15-20 seconds so timer-start speech does not consume the warning window. Neither hardware cadence nor v17 power-cycle persistence is claimed from software checks.
+
+## Scalar autosave, mobile checkbox and LOCAL warning fix (installation pending)
+
+See [WEB_SCALAR_SETTINGS.md](WEB_SCALAR_SETTINGS.md) for the control audit and pending phone/audio checks. Expanded production-JS tests exercise select/checkbox/number auto-commit, rapid replacements, lost responses, refusal rollback without later replay and timer Start guards. Real Chrome fixtures at 360/412/960 pixels with default and enlarged text verify native toggling/saving, no overflow, a stable 20px box and retained record confirmation; the old enlarged-text fixture shrinks to zero at 360. Actual warning-owner code passes simulated delayed BUSY onset/completion and prior cadence/zero/cancellation checks. All 22 registered checks and both builds pass. Actual phone operation and acoustic improvement remain unconfirmed.

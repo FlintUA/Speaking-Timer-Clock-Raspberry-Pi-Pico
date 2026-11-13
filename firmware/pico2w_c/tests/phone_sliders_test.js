@@ -23,8 +23,7 @@ function createForm(id) {
     addEventListener(type, handler) { this.handlers[type] = handler; },
     querySelectorAll(selector) {
       if (selector === '[name="days"]') return days;
-      if (id === "settings-controls" && selector === "button")
-        return inputs.filter(field => field.type !== "range").map(field => ({dataset: {setting: field.name}}));
+      if (id === "settings-controls" && selector === "button") return [];
       return inputs;
     }
   };
@@ -54,7 +53,7 @@ const state = {
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const posts = [], writes = [];
 const controlCalls = [];
-let nextControlResult = null;
+let nextControlResult = null, nextSettingsResult = null;
 let lastBody = "", dropResponses = 0, rejectOnce = false, failStatusReads = 0;
 const quickButtons = ["sound", "say_time", "say_date", "next_alarm"].map((action,index) => {
   const button=getElementById(["sound-toggle","say-time","say-date","say-next-alarm"][index]);
@@ -93,7 +92,10 @@ const context = vm.createContext({
       state.command_id = Number(fields[2]);
       state.command_nonce = Number(fields[3]);
       state.command_result = "applied";
-      if (url === "/settings") preferences[fields[4]] = Number(fields[5]);
+      if (url === "/settings") {
+        if(nextSettingsResult) {state.command_result=nextSettingsResult;nextSettingsResult=null;}
+        else preferences[fields[4]] = Number(fields[5]);
+      }
       if (url === "/player" && ["test_track", "test_stop"].includes(fields[4])) {
         state.player_test = fields[4] === "test_track";
         state.player = state.player_test ? "Playing" : "Closed";
@@ -143,10 +145,10 @@ function move(name, value, type = "input") {
 async function settled() {
   const deadline = Date.now() + 4000;
   while (Date.now() < deadline) {
-    if (vm.runInContext("!busy && !pending && sliderChanges.size === 0", context)) return;
+    if (vm.runInContext("!busy && !pending && settingChanges.size === 0", context)) return;
     await wait(25);
   }
-  throw new Error("Latest slider values were not confirmed");
+  throw new Error("Latest settings were not confirmed");
 }
 
 (async () => {
@@ -194,8 +196,8 @@ async function settled() {
   const count = posts.length;
   move("language", 1);
   await wait(250);
-  assert.equal(posts.length, count); // Other settings still require Apply.
-  await form.handlers.click({target: {dataset: {setting: "language"}}});
+  assert.equal(posts.length, count); // Text/select input is committed by change, not intermediate input.
+  form.handlers.change({target: form.elements.language, type:"change"});
   await settled();
   assert.equal(preferences.language, 1);
   preferences.editing = true;
@@ -439,26 +441,26 @@ async function settled() {
   assert.equal(voiceField.checked,true);
   voiceField.checked=false;
   form.handlers.change({target:voiceField,type:"change"});
-  await form.handlers.click({target:{dataset:{setting:"timer_voice"}}});await settled();
+  await settled();
   assert.equal(preferences.timer_voice,0);
   assert(posts.at(-1).endsWith("timer_voice 0"));
   move("timer_sound",2,"change");
-  await form.handlers.click({target:{dataset:{setting:"timer_sound"}}});await settled();
+  await settled();
   assert.equal(preferences.timer_sound,2);
   move("timer_track",255,"change");
-  await form.handlers.click({target:{dataset:{setting:"timer_track"}}});await settled();
+  await settled();
   assert.equal(preferences.timer_track,255);
   const warningField=form.elements.timer_warning;
   assert.equal(warningField.checked,false);
   warningField.checked=true;form.handlers.change({target:warningField,type:"change"});
-  await form.handlers.click({target:{dataset:{setting:"timer_warning"}}});await settled();
+  await settled();
   assert.equal(preferences.timer_warning,1);assert(posts.at(-1).endsWith("timer_warning 1"));
   const randomField=form.elements.timer_random;
   randomField.checked=true;form.handlers.change({target:randomField,type:"change"});
-  await form.handlers.click({target:{dataset:{setting:"timer_random"}}});await settled();
+  await settled();
   assert.equal(preferences.timer_random,1);assert(form.elements.timer_track.disabled);
   randomField.checked=false;form.handlers.change({target:randomField,type:"change"});
-  await form.handlers.click({target:{dataset:{setting:"timer_random"}}});await settled();
+  await settled();
   assert.equal(preferences.timer_random,0);assert(!form.elements.timer_track.disabled);
   const randomAlarmForm=getElementById("alarm-controls");
   randomAlarmForm.elements.sound.value="2";
@@ -474,10 +476,38 @@ async function settled() {
   delete preferences.timer_sound;delete preferences.timer_voice;delete preferences.timer_track;delete preferences.timer_random;delete preferences.timer_warning;
   await update();
   assert(voiceField.disabled && form.elements.timer_sound.disabled && form.elements.timer_track.disabled && warningField.disabled);
+  // All scalar settings save without Apply, use retries and discard refused intents.
+  preferences.timer_warning=0;preferences.timer_voice=1;preferences.timer_random=0;
+  preferences.timer_sound=0;preferences.timer_track=1;preferences.idle=true;
+  await update();
+  assert(!/data-setting=/.test(html));
+  assert(html.includes("Apply alarm") && html.includes("Apply birthday"));
+  warningField.checked=true;form.handlers.change({target:warningField,type:"change"});
+  assert(timerButtons[1].disabled); // Do not start a timer with an unconfirmed warning edit.
+  await wait(220);
+  warningField.checked=false;form.handlers.change({target:warningField,type:"change"});
+  await settled();assert.equal(preferences.timer_warning,0);assert.equal(warningField.checked,false);
+  dropResponses=2;
+  warningField.checked=true;form.handlers.change({target:warningField,type:"change"});
+  await settled();assert.equal(preferences.timer_warning,1);
+  nextSettingsResult="blocked";
+  warningField.checked=false;form.handlers.change({target:warningField,type:"change"});
+  await settled();assert.equal(preferences.timer_warning,1);assert.equal(warningField.checked,true);
+  const refusedCount=posts.length;await wait(400);assert.equal(posts.length,refusedCount);
+  preferences.idle=false;await update();assert(warningField.disabled);
+  preferences.idle=true;await update();
+  const trackField=form.elements.timer_track;
+  move("timer_track",2,"change");await wait(220);
+  document.activeElement=trackField;trackField.value="";trackField.reportValidity=()=>false;
+  form.handlers.input({target:trackField,type:"input"});await wait(600);
+  assert.equal(preferences.timer_track,2);assert.equal(trackField.value,"");assert(timerButtons[1].disabled);
+  trackField.reportValidity=()=>true;trackField.value="3";
+  form.handlers.change({target:trackField,type:"change"});document.activeElement=null;
+  await settled();assert.equal(preferences.timer_track,3);assert(!timerButtons[1].disabled);
   console.log("phone_sliders_test: PASS");
 })().catch(error => {
   console.error(error);
   process.exitCode = 1;
 }).finally(() => {
-  vm.runInContext("clearTimeout(statusTimer); clearTimeout(sliderTimer);", context);
+  vm.runInContext("clearTimeout(statusTimer); clearTimeout(settingTimer);", context);
 });

@@ -155,6 +155,10 @@ The development branch adds an independent completion-message checkbox and None 
 
 Timer music can use a saved random flag independently of its message. Each alarm slot 1-5 now selects Signal / fixed Music / random Music. One actual numeric folder-08 file is selected per event, retained on snooze and output fallback, and redrawn for the next occurrence. A missing catalog falls back to signal. Mirror folder 08 on both cards. See [controls, file catalog, v16 compatibility and tests](doc/RANDOM_EVENT_MUSIC.md). Approved installation and read-only startup/catalog/settings checks passed on November 13 as `1.0.0+28.g36286e9`; hardware acceptance is pending.
 
-## Optional five-second timer warning (installation pending)
+## Optional five-second timer warning (user acceptance pending)
 
-A separate saved checkbox enables single beeps at 5, 4, 3, 2 and 1 seconds. Default OFF; Sound OFF suppresses it. Warning audio uses 19/001.mp3 and timer routing, does not queue late ticks or delay zero, and leaves message/music choices independent. The physical Timer sound editor adds the warning page before its existing fields. See [timing, busy skips, v17 compatibility and tests](doc/TIMER_PREWARNING.md). Software checks pass; actual cadence and persistence await hardware acceptance.
+A separate saved checkbox enables single beeps at 5, 4, 3, 2 and 1 seconds. Default OFF; Sound OFF suppresses it. Warning audio uses 19/001.mp3 and timer routing, does not queue late ticks or delay zero, and leaves message/music choices independent. The physical Timer sound editor adds the warning page before its existing fields. See [timing, busy skips, v17 compatibility and tests](doc/TIMER_PREWARNING.md). Software checks pass. Approved installation and read-only USB/HTTP/settings checks passed on November 13 as `1.0.0+29.g90b047a`; actual cadence and v17 persistence await hardware acceptance.
+
+## Automatic settings and mobile checkbox fix (installation pending)
+
+Simple Settings controls now apply automatically; Apply remains for complete alarm/birthday records. Nonshrinking checkboxes and wrapping labels fix the narrow-screen/larger-text issue. LOCAL timer-warning playback waits for natural BUSY completion with a longer bounded startup allowance, without changing audio files or saved volumes. See [behavior, evidence and pending device checks](doc/WEB_SCALAR_SETTINGS.md).

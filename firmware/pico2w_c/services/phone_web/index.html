@@ -16,10 +16,11 @@
   form > p, form > h2, form > div { grid-column: 1 / -1; margin: 0; }
   form > p { color: var(--muted); font-size: .9rem; }
   label { display: grid; gap: .3rem; min-width: 0; }
-  label.toggle, .weekdays label { display: flex; align-items: center; gap: .45rem; white-space: nowrap; }
+  label.toggle, .weekdays label { display: flex; align-items: center; gap: .65rem; }
+  label.toggle { white-space: normal; min-height: 2.75rem; cursor: pointer; }
   input, select, button { font: inherit; min-width: 0; min-height: 2.75rem; }
   input:not([type=checkbox]), select { width: 100%; padding: .5rem .6rem; border: 1px solid var(--line); border-radius: .25rem; background: #fff; color: var(--ink); }
-  input[type=checkbox] { width: 1.2rem; height: 1.2rem; min-height: 0; margin: 0; accent-color: var(--accent); }
+  input[type=checkbox] { flex: 0 0 1.25rem; min-width: 1.25rem; width: 1.25rem; height: 1.25rem; min-height: 0; margin: 0; accent-color: var(--accent); }
   input[type=range] { padding: 0; border: 0; accent-color: var(--accent); cursor: pointer; }
   .slider-title { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
   output { font-variant-numeric: tabular-nums; color: var(--accent); }
@@ -28,7 +29,7 @@
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   .weekdays { display: grid; grid-template-columns: repeat(auto-fit, minmax(4.5rem, 1fr)); gap: .75rem; padding: .4rem 0; }
   #settings-controls > div { display: grid; align-items: end; gap: .7rem; }
-  #settings-controls > div:not(.slider-setting) { grid-template-columns: minmax(0, 1fr) auto; }
+  #settings-controls > div { grid-template-columns: minmax(0, 1fr); }
   #controls > div { display: flex; flex-wrap: wrap; gap: .5rem; }
   #controls .timer-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; width: 100%; max-width: 25rem; margin: .5rem auto; }
   .timer-column { min-width: 0; text-align: center; }
@@ -125,7 +126,7 @@
   </div>
   <form id="settings-controls" hidden>
     <h2>Settings</h2>
-    <p>Volume and brightness apply as you move the sliders. LOCAL and Bluetooth have independent levels.</p>
+    <p>Settings apply automatically. Volume and brightness update as you move the sliders; track numbers apply when you finish editing. LOCAL and Bluetooth have independent levels.</p>
     <div class="slider-setting">
       <label><span class="slider-title">LOCAL volume <output id="value-volume_local" for="volume-local">0 / 30</output></span>
         <input id="volume-local" name="volume_local" type="range" min="0" max="30" step="1"></label>
@@ -136,27 +137,21 @@
     </div>
     <div>
       <label>Language <select name="language"><option value="0">Russian</option><option value="1">German</option></select></label>
-      <button type="button" data-setting="language">Apply</button>
     </div>
     <div>
       <label>Manual speech / music <select name="audio_manual"><option value="0">LOCAL</option><option value="1">Bluetooth preferred</option></select></label>
-      <button type="button" data-setting="audio_manual">Apply</button>
     </div>
     <div>
       <label>Hourly speech <select name="audio_hourly"><option value="0">LOCAL</option><option value="1">Bluetooth preferred</option></select></label>
-      <button type="button" data-setting="audio_hourly">Apply</button>
     </div>
     <div>
       <label>Timer audio <select name="audio_timer"><option value="0">LOCAL</option><option value="1">Bluetooth preferred</option></select></label>
-      <button type="button" data-setting="audio_timer">Apply</button>
     </div>
     <div>
       <label>Alarm audio <select name="audio_alarm"><option value="0">LOCAL</option><option value="1">Bluetooth preferred</option></select></label>
-      <button type="button" data-setting="audio_alarm">Apply</button>
     </div>
     <div>
       <label>Display light <select name="light_mode"><option value="0">Off</option><option value="1">On</option><option value="2">Auto</option></select></label>
-      <button type="button" data-setting="light_mode">Apply</button>
     </div>
     <div class="slider-setting">
       <label><span class="slider-title">Day brightness <output id="value-light_day" for="light-day">0%</output></span>
@@ -168,27 +163,22 @@
     </div>
     <div>
       <label class="toggle"><input name="timer_warning" type="checkbox" value="1">Beep during the last 5 seconds</label>
-      <button type="button" data-setting="timer_warning">Apply</button>
     </div>
     <div>
       <label class="toggle"><input name="timer_voice" type="checkbox" value="1">Timer completion message</label>
-      <button type="button" data-setting="timer_voice">Apply</button>
     </div>
     <div>
       <label>Timer finish sound <select name="timer_sound"><option value="2">None</option><option value="0">Signal</option><option value="1">Music</option></select></label>
-      <button type="button" data-setting="timer_sound">Apply</button>
     </div>
     <div>
       <label class="toggle"><input name="timer_random" type="checkbox" value="1">Random timer music track</label>
-      <button type="button" data-setting="timer_random">Apply</button>
     </div>
     <div>
       <label>Timer music track <input name="timer_track" type="number" min="1" max="255" step="1" value="1" required></label>
-      <button type="button" data-setting="timer_track">Apply</button>
     </div>
-    <p>Choose the message independently from None, Signal or one music file in folder 08. Message only, sound only and silent completion are supported. Apply your choices before starting the timer. Random mode chooses one existing SPI-card folder-08 file per event. Mirror those files on the DFPlayer card. Snoozed alarms reuse their chosen track. The optional last-five-second warning uses single beeps, follows timer output and respects Sound off. Busy or late ticks are skipped; completion is never held behind them. The German completion message is not yet available. Timer output uses its separate audio preference.</p>
+    <p>Choose the message independently from None, Signal or one music file in folder 08. Message only, sound only and silent completion are supported. Finish changing your choices before starting the timer. Random mode chooses one existing SPI-card folder-08 file per event. Mirror those files on the DFPlayer card. Snoozed alarms reuse their chosen track. The optional last-five-second warning uses single beeps, follows timer output and respects Sound off. Busy or late ticks are skipped; completion is never held behind them. The German completion message is not yet available. Timer output uses its separate audio preference.</p>
     <p>Bluetooth preferences fall back to LOCAL when the speaker is unavailable. Auto light uses night brightness from 22:00 to 07:00.</p>
-    <p>Close settings on the clock to apply browser changes. Stop playback before changing language or audio outputs.</p>
+    <p>Close settings on the clock to change these options. Stop playback or the timer before changing language, audio outputs or timer options.</p>
     <p id="save-status" role="status"></p>
   </form>
   <form id="alarm-controls" hidden>
@@ -335,9 +325,9 @@
     Array.from(settingsControls.querySelectorAll("input, select"), field => [field.name, field])
   );
   const dirtySettings = new Set();
-  const sliderChanges = new Map();
+  const settingChanges = new Map();
   const activeSliders = new Set();
-  let sliderTimer = null, lastSliderSend = 0, sliderNeedsStatus = false;
+  let settingTimer = null, lastSettingSend = 0, settingsNeedStatus = false;
   let statusTimer = null, statusRunning = false;
   const saveStatus = document.getElementById("save-status");
   const scheduleEditors = ["alarm", "birthday"].map(kind => {
@@ -422,9 +412,8 @@
     token = value;
     checkedEpoch = value && live ? live.epoch : null;
     if (!value) {
-      sliderChanges.clear();
-      for (const field of Object.values(settingFields))
-        if (field.type === "range") dirtySettings.delete(field.name);
+      settingChanges.clear();
+      dirtySettings.clear();
     }
     try {
       if (value) localStorage.setItem(storageKey, value);
@@ -469,9 +458,12 @@
       "No ringing alarm or snoozed repeats. Saved alarm schedules stay enabled.";
     logout.hidden = !paired;
     logout.disabled = busy || Boolean(pending);
+    const idleChanges = Array.from(new Set([...settingChanges.keys(), ...dirtySettings])).some(name =>
+      name === "language" || name.startsWith("audio_") || name.startsWith("timer_"));
     for (const button of controls.querySelectorAll("button")) {
       const action = button.dataset.action;
       button.disabled = busy || Boolean(pending) || !live ||
+        (idleChanges && (action === "set" || action === "start")) ||
         (action === "stop_sound" ? !live?.overview?.timer_sound_id :
           (live.timer_running || live.player !== "Closed") && action !== "cancel");
     }
@@ -495,14 +487,11 @@
     const preferences = live?.settings;
     for (const field of Object.values(settingFields)) {
       const needsIdle = field.name === "language" || field.name.startsWith("audio_") || field.name.startsWith("timer_");
-      field.disabled = (field.type !== "range" && (busy || Boolean(pending))) || !preferences || preferences.editing ||
+      field.disabled = !preferences || preferences.editing ||
         (needsIdle && !preferences.idle) || (field.name === "volume_bt" && !preferences.bt_supported) ||
         (field.name.startsWith("timer_") && preferences?.[field.name] == null);
     }
     if (settingFields.timer_track && preferences?.timer_random) settingFields.timer_track.disabled = true;
-    for (const button of settingsControls.querySelectorAll("button")) {
-      button.disabled = settingFields[button.dataset.setting].disabled;
-    }
     for (const editor of scheduleEditors) {
       editor.form.hidden = !allowed;
       for (const field of editor.form.querySelectorAll("input, select, button")) {
@@ -617,37 +606,47 @@
     const field = event.target;
     if (!(field.name in settingFields) || field.disabled) return;
     dirtySettings.add(field.name);
-    if (field.type === "range") {
-      sliderChanges.set(field.name, Number(field.value));
-      showSliderValue(field);
-      scheduleSliders();
-    }
+    updateControls();
+    if (field.type === "range") showSliderValue(field);
+    if (field.type !== "range" && event.type !== "change") return;
+    if (!field.reportValidity()) return;
+    const value = field.type === "checkbox" ? Number(field.checked) : Number(field.value);
+    if (!Number.isInteger(value)) return;
+    settingChanges.set(field.name, value);
+    updateControls();
+    scheduleSettings();
   }
   function showSliderValue(field) {
     document.getElementById("value-" + field.name).textContent =
       field.value + (field.max === "30" ? " / 30" : "%");
   }
-  function scheduleSliders() {
-    clearTimeout(sliderTimer);
-    if (!sliderChanges.size || busy || pending || sliderNeedsStatus || !live?.settings ||
+  function scheduleSettings() {
+    clearTimeout(settingTimer);
+    if (!settingChanges.size || busy || pending || settingsNeedStatus || !live?.settings ||
         live.settings.editing || live.command_result === "pending") return;
-    const delay = Math.max(0, 200 - (Date.now() - lastSliderSend));
-    sliderTimer = setTimeout(flushSliders, delay);
+    const delay = Math.max(0, 200 - (Date.now() - lastSettingSend));
+    settingTimer = setTimeout(flushSettings, delay);
   }
-  async function flushSliders() {
-    if (busy || pending || sliderNeedsStatus || !live?.settings || live.settings.editing) return;
+  async function flushSettings() {
+    if (busy || pending || settingsNeedStatus || !live?.settings || live.settings.editing) return;
     const credential = live.home_trusted || (token && checkedEpoch === live.epoch);
     if (!credential) return;
-    for (const [name, value] of sliderChanges) {
-      if (name === "volume_bt" && !live.settings.bt_supported) continue;
+    for (const [name, value] of settingChanges) {
+      const requiresIdle = name === "language" || name.startsWith("audio_") || name.startsWith("timer_");
+      if ((requiresIdle && !live.settings.idle) ||
+          name === "volume_bt" && !live.settings.bt_supported) {
+        settingChanges.delete(name); dirtySettings.delete(name);
+        feedback.textContent = "Setting not changed: the clock is busy. Try again when idle.";
+        continue;
+      }
       if (live.settings[name] === value && live.settings.snapshot_id >= live.command_id) {
-        sliderChanges.delete(name);
+        settingChanges.delete(name);
         dirtySettings.delete(name);
         continue;
       }
-      lastSliderSend = Date.now();
-      sliderChanges.delete(name);
-      sliderChanges.set(name, value);
+      lastSettingSend = Date.now();
+      settingChanges.delete(name);
+      settingChanges.set(name, value);
       await sendCommand("settings", name, value);
       break;
     }
@@ -664,18 +663,11 @@
   });
   function releaseSliders() {
     activeSliders.clear();
-    scheduleSliders();
+    scheduleSettings();
   }
   document.addEventListener("pointerup", releaseSliders);
   document.addEventListener("pointercancel", releaseSliders);
   document.addEventListener("visibilitychange", releaseSliders);
-  settingsControls.addEventListener("click", async event => {
-    const setting = event.target.dataset.setting;
-    const field = settingFields[setting];
-    if (!field || field.disabled || !field.reportValidity()) return;
-    const value = field.type === "checkbox" ? Number(field.checked) : Number(field.value);
-    if (Number.isInteger(value)) await sendCommand("settings", setting, value);
-  });
   function refreshSchedule(editor, data) {
     const records = editor.kind === "alarm" ? data.alarms : data.birthdays;
     const slot = Number(editor.fields.slot.value) - 1;
@@ -781,7 +773,7 @@
     if (busy || pending || !live) return;
     const credential = live.home_trusted ? "-" : checkedEpoch === live.epoch ? token : null;
     if (!credential) return;
-    const slider = target === "settings" && settingFields[action]?.type === "range";
+    const queuedSetting = target === "settings" && settingChanges.has(action);
     const id = live.command_id + 1;
     const epoch = live.epoch;
     const nonce = crypto.getRandomValues(new Uint32Array(1))[0] || 1;
@@ -790,28 +782,27 @@
     try {
       const response = await post("/" + target, [credential, epoch, id, nonce, action, value].join(" "));
       if (response.ok) {
-        pending = {id, epoch, nonce, target, action, value, slider, editor, until: Date.now() + 5000};
-        feedback.textContent = slider ? "Adjusting…" : "Waiting for the clock…";
+        pending = {id, epoch, nonce, target, action, value, queuedSetting, editor, until: Date.now() + 5000};
+        feedback.textContent = queuedSetting ? "Adjusting…" : "Waiting for the clock…";
       } else if (response.status === 403) {
         if (credential !== "-") remember(null);
-        if (slider) {
-          sliderChanges.clear();
-          for (const field of Object.values(settingFields))
-            if (field.type === "range") dirtySettings.delete(field.name);
+        if (queuedSetting) {
+          settingChanges.clear();
+          dirtySettings.clear();
         }
         feedback.textContent = "Access ended. Check Phone Control on the clock.";
       } else {
         feedback.textContent = "Command refused. Try again.";
       }
-      if (slider && !response.ok) sliderNeedsStatus = true;
+      if (queuedSetting && !response.ok) settingsNeedStatus = true;
     } catch {
-      if (slider) sliderNeedsStatus = true;
+      if (queuedSetting) settingsNeedStatus = true;
       feedback.textContent = "Connection lost. Check the live status before trying again.";
     } finally {
       busy = false;
       updateControls();
       pollStatusSoon();
-      scheduleSliders();
+      scheduleSettings();
     }
   }
   function duration(seconds) {
@@ -822,7 +813,7 @@
     if (statusRunning) return;
     statusRunning = true;
     clearTimeout(statusTimer);
-    const refreshingSliders = sliderNeedsStatus;
+    const refreshingSliders = settingsNeedStatus;
     const request = new AbortController();
     const deadline = setTimeout(() => request.abort(), 3500);
     try {
@@ -832,7 +823,7 @@
       live = data;
       showAbout(data.firmware);
       showOverview(data.overview, data);
-      if (refreshingSliders) sliderNeedsStatus = false;
+      if (refreshingSliders) settingsNeedStatus = false;
       if (token && checkedEpoch !== data.epoch && !busy) {
         const candidate = token;
         const check = await post("/access", candidate);
@@ -858,11 +849,16 @@
           if (data.command_result === "applied") pending.editor.dirty = false;
         } else if (pending.target === "settings") {
           feedback.textContent = data.command_result === "applied" ? "Setting applied." :
-            "Setting not applied. Close the clock editors; stop audio before changing language or outputs.";
+            "Setting not changed. Close clock editors and stop the timer or audio, then try again.";
+          if (data.command_result !== "applied" && pending.queuedSetting && settingChanges.get(pending.action) === pending.value) {
+            settingChanges.delete(pending.action); dirtySettings.delete(pending.action);
+          }
           if (data.command_result === "applied" &&
-              (!pending.slider || sliderChanges.get(pending.action) === pending.value)) {
-            dirtySettings.delete(pending.action);
-            if (pending.slider) sliderChanges.delete(pending.action);
+              (!pending.queuedSetting || settingChanges.get(pending.action) === pending.value)) {
+            const field = settingFields[pending.action];
+            const draft = field?.type === "checkbox" ? Number(field.checked) : Number(field?.value);
+            if (!field || draft === pending.value) dirtySettings.delete(pending.action);
+            if (pending.queuedSetting) settingChanges.delete(pending.action);
           }
         } else if (pending.target === "control") {
           feedback.textContent = data.command_result === "applied" ?
@@ -897,7 +893,7 @@
       if (data.settings) {
         for (const [name, field] of Object.entries(settingFields)) {
           if (!dirtySettings.has(name) && !activeSliders.has(name) &&
-              (field.type === "range" || document.activeElement !== field)) {
+              ((field.type !== "number" && field.type !== "text") || document.activeElement !== field)) {
             if (field.type === "checkbox") field.checked = Boolean(data.settings[name]);
             else field.value = String(data.settings[name]);
           }
@@ -908,8 +904,8 @@
           pending: "Changes applied. Saving when the clock is idle.",
           retry: "Save pending after an error. The clock will retry when idle."
         };
-        saveStatus.textContent = sliderChanges.size ? "Applying slider changes…" :
-          saving[data.settings.saving] || "Checking saved settings…";
+        saveStatus.textContent = settingChanges.size ? "Applying settings…" :
+          dirtySettings.size ? "Finish editing a valid value to apply it." : saving[data.settings.saving] || "Checking saved settings…";
       }
       for (const editor of scheduleEditors) refreshSchedule(editor, data);
     } catch {
@@ -927,10 +923,10 @@
       updateControls();
       clearTimeout(deadline);
       statusRunning = false;
-      pollStatusSoon(pending || sliderNeedsStatus ? 100 :
+      pollStatusSoon(pending || settingsNeedStatus ? 100 :
         live?.overview?.timer_sound_id || live?.overview?.alarm?.active ||
         live?.timer_running && live.timer_seconds <= 5 ? 250 : 1000);
-      scheduleSliders();
+      scheduleSettings();
     }
   }
   updateControls();

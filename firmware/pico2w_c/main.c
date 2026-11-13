@@ -104,7 +104,8 @@ static int detect_lcd_address(void) {
 static countdown_t timer;
 static timer_warning_t timer_warning_schedule;
 static bool timer_warning_local, timer_warning_bt;
-static uint64_t timer_warning_until_ms;
+static uint64_t timer_warning_until_ms, timer_warning_local_sent_ms;
+static bool timer_warning_seen_busy;
 static void timer_warning_cancel(void);
 static timer_editor_t timer_editor;
 static timer_acceleration_t timer_acceleration;
@@ -651,6 +652,16 @@ static void timer_warning_cancel(void) {
 }
 
 static void timer_warning_service(uint64_t now) {
+    if(timer_warning_local) {
+        bool busy=dfplayer_busy();
+        if(busy && !timer_warning_seen_busy) {
+            timer_warning_seen_busy=true;
+            printf("[TIMER-WARN] LOCAL BUSY after=%llums\n",(unsigned long long)(now-timer_warning_local_sent_ms));
+        } else if(!busy && timer_warning_seen_busy) {
+            printf("[TIMER-WARN] LOCAL complete after=%llums\n",(unsigned long long)(now-timer_warning_local_sent_ms));
+            timer_warning_local=false;timer_warning_until_ms=0;
+        }
+    }
     if ((timer_warning_local || timer_warning_bt) &&
         (!timer.running || !sound_enabled || now>=timer_warning_until_ms)) timer_warning_cancel();
     uint8_t second=timer_warning_poll(&timer_warning_schedule,timer.running,timer.deadline_ms,
@@ -673,7 +684,10 @@ static void timer_warning_service(uint64_t now) {
 #endif
     if(!dfplayer_command_ready(now)) {puts("[TIMER-WARN] skipped=UART_BUSY");return;}
     dfplayer_play_folder_track(19u,1u,now);
-    timer_warning_local=true;timer_warning_until_ms=now+500u;
+    timer_warning_local=true;timer_warning_seen_busy=false;timer_warning_local_sent_ms=now;
+    // Allow DFPlayer startup + the full 197 ms file, rather than cutting at 500 ms.
+    // Still leave 150 ms before the next edge/zero for the paced UART pause.
+    timer_warning_until_ms=timer.deadline_ms-(uint64_t)(second-1u)*1000u-150u;
     printf("[TIMER-WARN] second=%u output=LOCAL\n",(unsigned)second);
 }
 
