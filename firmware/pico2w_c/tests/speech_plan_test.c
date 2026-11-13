@@ -49,5 +49,26 @@ int main(void) {
     q.head=15;
     assert(speech_enqueue_date(&q,SPEECH_RU,&date));
     assert(q.items[15].track==7 && q.items[0].track==8 && q.items[2].track==6);
+    for (unsigned lang=0;lang<2;++lang) {
+        for (unsigned voice=0;voice<2;++voice) for (unsigned sound=0;sound<3;++sound) {
+            audio_queue_init(&q);q.head=15;
+            assert(speech_enqueue_timer_finish_sound(&q,(speech_language_t)lang,voice!=0,(uint8_t)sound,255));
+            unsigned message=voice && !lang ? 1u:0u;
+            assert(q.size==message+(sound!=2));
+            if(message) assert(q.items[15].folder==7 && q.items[15].track==11);
+            if(sound!=2) {
+                audio_track_t t=q.items[(15+message)%AUDIO_QUEUE_CAPACITY];
+                assert(t.folder==(sound==1?8:7) && t.track==(sound==1?255:13));
+            }
+        }
+        audio_queue_init(&q);
+        speech_enqueue_timer_finish(&q,(speech_language_t)lang);
+        assert(q.size==(lang?1:2)); // Legacy defaults unchanged.
+    }
+    audio_queue_init(&q);q.size=15;
+    assert(!speech_enqueue_timer_finish_sound(&q,SPEECH_RU,true,1,1) && q.size==15);
+    assert(!speech_enqueue_timer_finish_sound(&q,SPEECH_RU,false,3,1) && q.size==15);
+    assert(!speech_enqueue_timer_finish_sound(&q,SPEECH_RU,false,1,0) && q.size==15);
+    assert(!speech_enqueue_timer_finish_sound(NULL,SPEECH_RU,true,0,1));
     return 0;
 }

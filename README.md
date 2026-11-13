@@ -137,10 +137,16 @@ Supported: Classic A2DP Sink/SBC. BLE-only, HFP and Google Cast are not supporte
 
 Project: [GPL-3.0](LICENSE). External Helix sources are not included; the wrapper and core retain their GPL/RPSL/RCSL terms. Firmware distribution must also account for Pico SDK and BTstack licenses.
 
-## Countdown completion audio (fix; installation pending)
+## Countdown completion audio (fix; generally accepted)
+
+Installed with separate approval on November 13 as `1.0.0+26.g3717033`. Startup, read-only USB/HTTP and settings-preservation checks passed; the user subsequently confirmed that the fix works correctly. This is general acceptance, without separate timing measurements or output-specific coverage.
 
 Countdown timers and scheduled alarms are separate. Alarm Stop/Snooze actions do not apply to countdown completion. Cancel timer cancels a running countdown. The new **Stop timer sound** action stops only the currently owned completion announcement, without a cancellation phrase or changing saved schedules/levels. It is enabled while that announcement is active; no manual page refresh is required. The status shows **Finished - announcement playing**. Actual on-page punctuation may use a separator dot.
 
 The `/timer` action `stop_sound <timer_sound_id>` uses the existing credential/epoch/id/nonce envelope and a nonzero ID from `overview.timer_sound_id`. Ended or superseded events are refused; another alarm, player or later timer event cannot be stopped by an old ID. The owner is cleared when audio completes, is replaced/appended by another owner, or is interrupted by mute/priority. Bluetooth-to-LOCAL fallback retains the same event ID. No Flash-format change or save is introduced.
 
-The page requests status every 250 ms during the last five countdown seconds and while completion audio or a scheduled alarm is active, versus the usual 1 second (plus response time). This improves observation latency; it does not guarantee immediate response under radio/decoder load. Controls remain state-based. If completion has already ended, Stop timer sound is disabled. Hardware timing and the reported page jump remain unverified; the page contains no full-page reload operation.
+The page requests status every 250 ms during the last five countdown seconds and while completion audio or a scheduled alarm is active, versus the usual 1 second (plus response time). This improves observation latency; it does not guarantee immediate response under radio/decoder load. Controls remain state-based. If completion has already ended, Stop timer sound is disabled. The user reported correct operation after installation. End-to-end latency was not measured and the earlier page-jump cause was not isolated; the page contains no full-page reload operation.
+
+## Configurable timer completion (installation pending)
+
+The development branch adds an independent completion-message checkbox and None / Signal / Music sound choice, plus a folder-08 track number. Message only, sound only and silent completion are supported. Settings are available on the clock, in the browser and over USB, with deferred save and v1-v14 migration defaults. Start/cancel phrases, independent volumes and output routing stay unchanged. See [timer completion choices](experiments/phone_control_ap/README.md#timer-completion-choices-installation-pending) for controls, missing German speech and v15 rollback compatibility. Hardware acceptance is pending.

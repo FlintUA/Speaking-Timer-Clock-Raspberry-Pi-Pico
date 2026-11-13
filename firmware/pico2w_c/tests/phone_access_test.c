@@ -301,6 +301,21 @@ int main(void) {
     assert(phone_access_timer(&finish,"- 88 1 9 stop_sound 17",PHONE_SCOPE_HOME,true)==PHONE_OK);
     assert(finish.result==PHONE_COMMAND_APPLIED);
     assert(phone_access_timer(&finish,"- 88 1 9 stop_sound 18",PHONE_SCOPE_HOME,true)==PHONE_BUSY);
+    phone_access_t timer_settings={0};phone_access_reset(&timer_settings,90);timer_settings.settings.home_trusted=1;
+    assert(phone_access_settings(&timer_settings,"- 90 1 9 timer_sound 3",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_settings(&timer_settings,"- 90 1 9 timer_voice 2",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_settings(&timer_settings,"- 90 1 9 timer_track 0",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_settings(&timer_settings,"- 90 1 9 timer_track 256",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_control(&timer_settings,"- 90 1 9 timer_voice 1",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_settings(&timer_settings,"- 90 1 9 timer_sound 2",PHONE_SCOPE_HOME,false)==PHONE_DENIED);
+    assert(phone_access_settings(&timer_settings,"- 90 1 9 timer_sound 2",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(timer_settings.last.action==PHONE_SET_TIMER_SOUND && timer_settings.last.value==2);
+    timer_settings.result=PHONE_COMMAND_APPLIED;
+    assert(phone_access_settings(&timer_settings,"- 90 2 10 timer_voice 0",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(timer_settings.last.action==PHONE_SET_TIMER_VOICE && !timer_settings.last.value);
+    timer_settings.result=PHONE_COMMAND_APPLIED;
+    assert(phone_access_settings(&timer_settings,"- 90 3 11 timer_track 255",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(timer_settings.last.action==PHONE_SET_TIMER_TRACK && timer_settings.last.value==255);
     const char *const live_actions[]={"alarm_stop","alarm_snooze","snooze_cancel"};
     for(unsigned i=0;i<3;++i) {
         phone_access_t live={0}; phone_access_reset(&live,77); live.settings.home_trusted=1;

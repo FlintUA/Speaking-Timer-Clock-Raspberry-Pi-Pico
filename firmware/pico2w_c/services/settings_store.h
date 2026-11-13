@@ -44,6 +44,9 @@ typedef struct {
     char wifi_password[65];
     birthday_t birthdays[CLOCK_BIRTHDAY_COUNT]; // v10; v1-v9 default disabled.
     display_light_t display_light; // v11; older records default to OFF.
+    uint8_t timer_sound; // v15: 0=signal, 1=music, 2=no extra sound.
+    uint8_t timer_voice; // Independent completion message 0/1, legacy default 1.
+    uint8_t timer_track; // 1..255, defaults to 1 for v1-v14.
     phone_settings_t phone; // v12; older records have home trust OFF and no credentials.
 } clock_settings_t;
 
@@ -66,5 +69,6 @@ void settings_store_inspect(void);
 void settings_store_dump_tail(void);
 settings_store_result_t settings_store_load(clock_settings_t *out);
 // Writes occur only when requested by the application; load never migrates.
-// Birth years use v13; settings without birth years retain v11/v12 encoding.
+// Nondefault timer message/sound/track uses v15; otherwise retain v11-v14 encoding.
+// A v15-aware build is required to read records saved with the timer extension.
 settings_store_result_t settings_store_save(const clock_settings_t *settings);

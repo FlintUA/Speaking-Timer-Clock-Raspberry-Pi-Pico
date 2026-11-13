@@ -12,7 +12,7 @@ function createForm(id) {
   const markup = html.split('id="' + id + '"')[1].split("</form>")[0];
   const inputs = Array.from(markup.matchAll(/<(?:input|select)\b[^>]*\bname="([^"]+)"/g), match => ({
     name: match[1], value: match[1] === "slot" ? "1" : "", dataset: {}, checked: false,
-    type: sliderNames.includes(match[1]) ? "range" : "text",
+    type: sliderNames.includes(match[1]) ? "range" : match[1]==="timer_voice" ? "checkbox" : "text",
     max: match[1].startsWith("volume_") ? "30" : "100", reportValidity: () => true
   }));
   const fields = Object.fromEntries(inputs.filter(field => field.name !== "days").map(field => [field.name, field]));
@@ -39,7 +39,7 @@ function getElementById(id) {
 }
 
 const preferences = {
-  volume_local: 12, volume_bt: 11, language: 0, audio_manual: 1, audio_hourly: 1,
+  volume_local: 12, volume_bt: 11, language: 0, timer_voice:1,timer_sound:0,timer_track:1, audio_manual: 1, audio_hourly: 1,
   audio_timer: 1, audio_alarm: 1, light_mode: 1, light_day: 70, light_night: 20,
   editing: false, idle: true, bt_supported: true, saving: "saved", snapshot_id: 0
 };
@@ -433,6 +433,28 @@ async function settled() {
   delete state.overview.timer_sound_id;
   await update();
   assert.equal(timerButtons[3].disabled,true); // Older firmware.
+  preferences.idle=true;preferences.editing=false;state.timer_running=false;
+  await update();
+  const voiceField=form.elements.timer_voice;
+  assert.equal(voiceField.checked,true);
+  voiceField.checked=false;
+  form.handlers.change({target:voiceField,type:"change"});
+  await form.handlers.click({target:{dataset:{setting:"timer_voice"}}});await settled();
+  assert.equal(preferences.timer_voice,0);
+  assert(posts.at(-1).endsWith("timer_voice 0"));
+  move("timer_sound",2,"change");
+  await form.handlers.click({target:{dataset:{setting:"timer_sound"}}});await settled();
+  assert.equal(preferences.timer_sound,2);
+  move("timer_track",255,"change");
+  await form.handlers.click({target:{dataset:{setting:"timer_track"}}});await settled();
+  assert.equal(preferences.timer_track,255);
+  preferences.idle=false;state.timer_running=true;
+  await update();
+  assert(voiceField.disabled && form.elements.timer_sound.disabled && form.elements.timer_track.disabled);
+  preferences.idle=true;state.timer_running=false;
+  delete preferences.timer_sound;delete preferences.timer_voice;delete preferences.timer_track;
+  await update();
+  assert(voiceField.disabled && form.elements.timer_sound.disabled && form.elements.timer_track.disabled);
   console.log("phone_sliders_test: PASS");
 })().catch(error => {
   console.error(error);

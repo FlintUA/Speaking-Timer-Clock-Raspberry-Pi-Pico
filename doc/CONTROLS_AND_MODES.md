@@ -39,7 +39,7 @@ Turn the timer encoder to choose an item or value. SETTINGS or the timer encoder
 
 A hardware blinking character cursor marks the first character of the value being edited. The LCD controller generates the blink without periodic host commands; this is a blinking character cell rather than a blinking underline. It moves between hours/minutes/seconds or day/month/year, and marks the current scalar value in other editors. In the custom weekday editor it marks ON/OFF beside the day name. The same cue is used in the precise timer and alarm editors. Lists, About, music, ringing/snooze and ordinary clock screens hide the cursor; save, cancel and timeout also remove it. The user accepted the earlier steady underline mode; the subsequent hardware blinking mode was also accepted by the user in build 755f55b.
 
-The ordinary profile has eleven settings items, in this order:
+The ordinary profile has twelve settings items, in this order:
 
 1. Language
 2. Time
@@ -52,8 +52,9 @@ The ordinary profile has eleven settings items, in this order:
 9. Birthdays
 10. Display Light
 11. About
+12. Timer sound
 
-The experimental web profile inserts **Phone Control (11)** before **About (12)**. Phone Control shows the current address, switches between home and direct Wi-Fi, starts browser pairing, toggles home trust, forgets paired browsers and rotates the direct Wi-Fi key. The direct password screen lasts 50 seconds; the pairing code lasts 60 seconds. Home connection progress remains visible while a join/retry is pending. See [phone instructions](../experiments/phone_control_ap/README.md) for access scope, persistence and controls. The ordinary profile has no Phone Control item or web server.
+The experimental web profile inserts **Phone Control (11)** before **About (12)**; Timer sound becomes item 13. Phone Control shows the current address, switches between home and direct Wi-Fi, starts browser pairing, toggles home trust, forgets paired browsers and rotates the direct Wi-Fi key. The direct password screen lasts 50 seconds; the pairing code lasts 60 seconds. Home connection progress remains visible while a join/retry is pending. See [phone instructions](../experiments/phone_control_ap/README.md) for access scope, persistence and controls. The ordinary profile has no Phone Control item or web server.
 
 Display Light controls the external LCD LED. OFF switches it off. ON uses Day Brightness at all times. AUTO uses Night Brightness from 22:00 through 06:59 and Day Brightness from 07:00 through 21:59, based on local RTC time. AUTO uses the night level when the RTC is unavailable. The light schedule is independent of audio Quiet mode and mute.
 
@@ -165,10 +166,16 @@ See [network setup](NETWORK_TIME.md), [roadmap](ROADMAP.md) and [hardware eviden
 
 The experimental page adds Stop alarm, Snooze 3 min and Cancel snoozed repeats. Stop/snooze act only on the displayed ringing occurrence. Cancel removes sleeping/audio-waiting snoozed repeats, preserves saved alarm schedules and leaves any ringing alarm running. Commands use current occurrence/set IDs so stale pages cannot silently affect a later occurrence. Physical buttons retain their existing behavior. See [live alarm actions](../experiments/phone_control_ap/README.md#live-alarm-actions-substage-3-user-acceptance-pending).
 
-## Countdown completion audio (fix; installation pending)
+## Countdown completion audio (fix; generally accepted)
+
+Installed with separate approval on November 13 as `1.0.0+26.g3717033`. Startup, read-only USB/HTTP and settings-preservation checks passed; the user subsequently confirmed that the fix works correctly. This is general acceptance, without separate timing measurements or output-specific coverage.
 
 Countdown timers and scheduled alarms are separate. Alarm Stop/Snooze actions do not apply to countdown completion. Cancel timer cancels a running countdown. The new **Stop timer sound** action stops only the currently owned completion announcement, without a cancellation phrase or changing saved schedules/levels. It is enabled while that announcement is active; no manual page refresh is required. The status shows **Finished - announcement playing**. Actual on-page punctuation may use a separator dot.
 
 The `/timer` action `stop_sound <timer_sound_id>` uses the existing credential/epoch/id/nonce envelope and a nonzero ID from `overview.timer_sound_id`. Ended or superseded events are refused; another alarm, player or later timer event cannot be stopped by an old ID. The owner is cleared when audio completes, is replaced/appended by another owner, or is interrupted by mute/priority. Bluetooth-to-LOCAL fallback retains the same event ID. No Flash-format change or save is introduced.
 
-The page requests status every 250 ms during the last five countdown seconds and while completion audio or a scheduled alarm is active, versus the usual 1 second (plus response time). This improves observation latency; it does not guarantee immediate response under radio/decoder load. Controls remain state-based. If completion has already ended, Stop timer sound is disabled. Hardware timing and the reported page jump remain unverified; the page contains no full-page reload operation.
+The page requests status every 250 ms during the last five countdown seconds and while completion audio or a scheduled alarm is active, versus the usual 1 second (plus response time). This improves observation latency; it does not guarantee immediate response under radio/decoder load. Controls remain state-based. If completion has already ended, Stop timer sound is disabled. The user reported correct operation after installation. End-to-end latency was not measured and the earlier page-jump cause was not isolated; the page contains no full-page reload operation.
+
+## Timer completion message and sound (installation pending)
+
+Message ON/OFF is independent of extra sound NONE/SIGNAL/MUSIC. The default is the existing message plus signal. The Timer sound menu edits message, sound and, for MUSIC, folder-08 track 1-255; only final confirmation saves the whole draft. MINUS/timeouts discard unfinished edits. The browser exposes the message checkbox and separate sound/track selectors with Apply, and USB supports timer-voice on|off and timer-sound none|signal|music N. Changes require stopped countdown and idle audio. Start/cancel speech and timer output routing are unchanged. Stop timer sound interrupts the active completion regardless of which components were selected. See [full controls and storage compatibility](../experiments/phone_control_ap/README.md#timer-completion-choices-installation-pending). German completion speech is unavailable; message-only DE therefore has no playable audio until assets are supplied.

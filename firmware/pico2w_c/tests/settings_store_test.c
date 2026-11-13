@@ -72,6 +72,7 @@ int main(void) {
         clock_settings_t cfg;
         assert(settings_store_load(&cfg)==SETTINGS_STORE_OK);
         assert(cfg.language==1 && cfg.volume==18);
+        assert(cfg.timer_voice==1 && cfg.timer_sound==0 && cfg.timer_track==1);
         assert(cfg.bt_volume==(v>=6?12:16));
         assert(cfg.bt_known_count==(v>=7?1:0));
         assert(cfg.audio_manual_jbl==(v>=4?1:0) && cfg.audio_timer_jbl==(v>=4?1:0));
@@ -310,7 +311,7 @@ int main(void) {
     assert(settings_store_save(&off) == SETTINGS_STORE_OK);
     settings_record_v14_t v14;
     memcpy(&v14, test_flash + SLOT1_OFFSET, sizeof(v14));
-    assert(v14.prefix.version == RECORD_VERSION && sizeof(v14) == 616u);
+    assert(v14.prefix.version == RECORD_V14 && sizeof(v14) == 616u);
     assert(!memcmp(old_v13_slot, test_flash + SLOT0_OFFSET, sizeof(old_v13_slot)));
     clock_settings_t expanded;
     assert(settings_store_load(&expanded) == SETTINGS_STORE_OK);
@@ -323,9 +324,56 @@ int main(void) {
     assert(settings_store_load(&expanded) == SETTINGS_STORE_OK);
     assert(!expanded.birthdays[5].enabled && expanded.birthdays[0].birth_year == off.birthdays[0].birth_year);
     assert(settings_store_save(&off) == SETTINGS_STORE_OCCUPIED);
+    // v15 writes are conditional. v14 loads remain read-only and retain all data.
+    memset(test_flash,0xff,sizeof(test_flash));
+    assert(settings_store_save(&off)==SETTINGS_STORE_OK);
+    assert(settings_store_load(&expanded)==SETTINGS_STORE_OK);
+    assert(expanded.timer_voice==1 && expanded.timer_sound==0 && expanded.timer_track==1);
+    uint8_t before_timer[FLASH_SECTOR_SIZE];
+    memcpy(before_timer,test_flash+SLOT0_OFFSET,sizeof(before_timer));
+    off.timer_sound=1; off.timer_track=255; off.timer_voice=0;
+    fail_write=true;
+    assert(settings_store_save(&off)==SETTINGS_STORE_FLASH_ERROR);
+    fail_write=false;
+    assert(settings_store_load(&expanded)==SETTINGS_STORE_OK && expanded.timer_voice==1);
+    assert(settings_store_save(&off)==SETTINGS_STORE_OK);
+    settings_record_v15_t v15;
+    memcpy(&v15,test_flash+SLOT1_OFFSET,sizeof(v15));
+    assert(v15.prefix.prefix.version==RECORD_VERSION && sizeof(v15)==624);
+    assert(record_v15_valid(test_flash+SLOT1_OFFSET));
+    assert(!memcmp(before_timer,test_flash+SLOT0_OFFSET,sizeof(before_timer)));
+    assert(settings_store_load(&expanded)==SETTINGS_STORE_OK);
+    assert(expanded.timer_voice==0 && expanded.timer_sound==1 && expanded.timer_track==255);
+    assert(expanded.birthdays[5].birth_year==1984 && expanded.birthdays[14].enabled);
+    assert(!memcmp(&expanded.phone,&off.phone,sizeof(off.phone)));
+    assert(!memcmp(expanded.bt_known,off.bt_known,sizeof(off.bt_known)));
+    assert(!strcmp(expanded.wifi_password,off.wifi_password));
+    // Changing only message/sound selection round-trips, including fully silent.
+    expanded.timer_sound=2; expanded.timer_voice=1;
+    assert(settings_store_save(&expanded)==SETTINGS_STORE_OK);
+    assert(settings_store_load(&off)==SETTINGS_STORE_OK && off.timer_sound==2 && off.timer_voice==1);
+    off.timer_voice=0;
+    assert(settings_store_save(&off)==SETTINGS_STORE_OK);
+    assert(settings_store_load(&expanded)==SETTINGS_STORE_OK && expanded.timer_sound==2 && !expanded.timer_voice);
+    off.timer_voice=2;
+    assert(settings_store_save(&off)==SETTINGS_STORE_UNSUPPORTED);
+    off.timer_voice=0;off.timer_sound=3;
+    assert(settings_store_save(&off)==SETTINGS_STORE_UNSUPPORTED);
+    off.timer_sound=1;off.timer_track=0;
+    assert(settings_store_save(&off)==SETTINGS_STORE_UNSUPPORTED);
+    // Valid CRC cannot make an invalid timer mode into an owned record.
+    unsigned latest_timer; settings_record_current_t timer_prefix;
+    assert(newest_valid(&latest_timer,&timer_prefix));
+    uint32_t timer_offset=latest_timer ? SLOT1_OFFSET:SLOT0_OFFSET;
+    memcpy(&v15,test_flash+timer_offset,sizeof(v15));
+    v15.timer_sound=3;v15.crc32=record_crc_bytes(&v15,offsetof(settings_record_v15_t,crc32));
+    memcpy(test_flash+timer_offset,&v15,sizeof(v15));
+    assert(!sector_owned(latest_timer));
+    assert(settings_store_load(&off)==SETTINGS_STORE_OK); // Previous A/B version survives.
+    assert(settings_store_save(&off)==SETTINGS_STORE_OCCUPIED);
     memset(test_flash,0xff,sizeof(test_flash));
     test_flash[SLOT0_OFFSET]=0x42;
-    clock_settings_t cfg={.quiet_start=22,.quiet_end=7};
+    clock_settings_t cfg={.quiet_start=22,.quiet_end=7,.timer_track=1,.timer_voice=1};
     alarm_defaults(cfg.alarms);
     birthday_defaults(cfg.birthdays);
     assert(settings_store_save(&cfg)==SETTINGS_STORE_OCCUPIED);

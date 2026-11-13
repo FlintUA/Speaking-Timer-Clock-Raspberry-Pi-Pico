@@ -74,15 +74,18 @@ void speech_enqueue_timer_cancel(audio_queue_t *queue, speech_language_t languag
     audio_queue_enqueue(queue, speech_phrases_folder(language), 14u);
 }
 
+bool speech_enqueue_timer_finish_sound(audio_queue_t *queue, speech_language_t language,
+                                       bool voice, uint8_t sound, uint8_t track) {
+    bool message = voice && language != SPEECH_DE;
+    unsigned needed = (message ? 1u : 0u) + (sound != 2u ? 1u : 0u);
+    if (!queue || sound > 2u || !track || queue->size + needed > AUDIO_QUEUE_CAPACITY) return false;
+    // The DE completion phrase is absent on the current card; do not request
+    // missing files or substitute Russian speech. Selected signal/music remains.
+    if (message) audio_queue_enqueue(queue, speech_phrases_folder(language), 11u);
+    if (sound == 2u) return true;
+    return audio_queue_enqueue(queue, sound == 1u ? 8u : 7u, sound == 1u ? track : 13u);
+}
+
 void speech_enqueue_timer_finish(audio_queue_t *queue, speech_language_t language) {
-    if (language == SPEECH_DE) {
-        // sound/_sdcard/17 has no 011.mp3 or 013.mp3. Requests for these
-        // missing tracks play unrelated German messages on the user's DFPlayer.
-        // Use the confirmed language-neutral long signal from folder 07 only.
-        // A proper spoken DE completion phrase requires new SD-card audio.
-        audio_queue_enqueue(queue, 7u, 13u);
-        return;
-    }
-    audio_queue_enqueue(queue, speech_phrases_folder(language), 11u);
-    audio_queue_enqueue(queue, speech_phrases_folder(language), 13u);
+    (void)speech_enqueue_timer_finish_sound(queue, language, true, 0u, 1u);
 }

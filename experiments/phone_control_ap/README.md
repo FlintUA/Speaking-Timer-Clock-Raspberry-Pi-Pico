@@ -261,10 +261,36 @@ Stop ends the current occurrence. Snooze uses the existing three-minute monotoni
 
 Nineteen registered checks and both firmware profiles pass. Host checks cover stale same-slot occurrences, snooze-set changes, waiting transitions, authorization/endpoint/value validation, cached retries and browser controls/feedback. The real C HTTP serializer fits the 4,096-byte buffer with five alarms, fifteen birthdays, escaped Bluetooth names and boundary IDs/counters. These checks do not establish physical audio behavior or four-client timing. Approved installation and read-only USB/HTTP/settings verification passed on November 13 as `1.0.0+25.g97fd951`. User acceptance remains pending.
 
-## Countdown completion audio (fix; installation pending)
+## Countdown completion audio (fix; generally accepted)
+
+Installed with separate approval on November 13 as `1.0.0+26.g3717033`. Startup, read-only USB/HTTP and settings-preservation checks passed; the user subsequently confirmed that the fix works correctly. This is general acceptance, without separate timing measurements or output-specific coverage.
 
 Countdown timers and scheduled alarms are separate. Alarm Stop/Snooze actions do not apply to countdown completion. Cancel timer cancels a running countdown. The new **Stop timer sound** action stops only the currently owned completion announcement, without a cancellation phrase or changing saved schedules/levels. It is enabled while that announcement is active; no manual page refresh is required. The status shows **Finished - announcement playing**. Actual on-page punctuation may use a separator dot.
 
 The `/timer` action `stop_sound <timer_sound_id>` uses the existing credential/epoch/id/nonce envelope and a nonzero ID from `overview.timer_sound_id`. Ended or superseded events are refused; another alarm, player or later timer event cannot be stopped by an old ID. The owner is cleared when audio completes, is replaced/appended by another owner, or is interrupted by mute/priority. Bluetooth-to-LOCAL fallback retains the same event ID. No Flash-format change or save is introduced.
 
-The page requests status every 250 ms during the last five countdown seconds and while completion audio or a scheduled alarm is active, versus the usual 1 second (plus response time). This improves observation latency; it does not guarantee immediate response under radio/decoder load. Controls remain state-based. If completion has already ended, Stop timer sound is disabled. Hardware timing and the reported page jump remain unverified; the page contains no full-page reload operation.
+The page requests status every 250 ms during the last five countdown seconds and while completion audio or a scheduled alarm is active, versus the usual 1 second (plus response time). This improves observation latency; it does not guarantee immediate response under radio/decoder load. Controls remain state-based. If completion has already ended, Stop timer sound is disabled. The user reported correct operation after installation. End-to-end latency was not measured and the earlier page-jump cause was not isolated; the page contains no full-page reload operation.
+
+## Timer completion choices (installation pending)
+
+Completion message and extra sound are independent saved preferences:
+
+| Preference | Choices | Default |
+| --- | --- | --- |
+| Message | On / Off | On |
+| Extra sound | None / Signal / Music | Signal |
+| Music track | 1-255, one file in folder 08 | 1 |
+
+The message plays first when enabled and available, followed by the selected signal or a single music track. Message-only, signal-only, music-only and fully silent completion are valid; silent completion still updates the display/status. Signal and music are alternatives. Start/cancel phrases, the countdown range, separate output volumes and timer routing are unchanged. The existing Stop timer sound action applies to any nonempty completion plan. German completion speech is still missing on the current card; no Russian replacement or missing German track is requested. Selected signal/music still plays.
+
+On the clock, open Settings -> Timer sound (12 in the ordinary profile, 13 in the web profile). Choose Message ON/OFF, then NONE/SIGNAL/MUSIC, and a track for MUSIC. Confirm the last applicable field to save the whole draft. MINUS backs up or cancels; timeout discards uncommitted changes. Existing menu item numbers, including Phone Control and About, are unchanged.
+
+In the browser, use the Timer completion message checkbox and Timer finish sound / Timer music track controls under Settings. Apply each edited field before starting a countdown. These controls require idle audio, stopped timer/player and closed physical editors; volume/brightness retain their existing behavior. Settings use the normal deferred Flash autosave. Wait for Settings saved before power cycling.
+
+USB: `timer-sound` reports all three values; `timer-voice on|off`, `timer-sound none`, `timer-sound signal`, or `timer-sound music N` apply changes when idle. Browser `/settings` actions are `timer_voice 0|1`, `timer_sound 0|1|2` (Signal/Music/None), `timer_track 1..255`, with the existing authentication/epoch/id/nonce envelope. No preview or track seeking is added in this stage. The selected file must exist on the relevant audio card.
+
+### Storage compatibility
+
+The v15 record is 624 bytes (three Flash pages), extending the immutable v14 prefix without changing sectors or BTstack storage. Reads of v1-v14 do not write Flash and default to message ON, signal, track 1. Nondefault timer preferences require v15; default preferences retain the existing v11-v14 conditional encodings. All fifteen birthdays, birth years, Wi-Fi/browser credentials, Bluetooth devices and other settings are preserved. A rollback must use a v15-aware build to retain access to v15 records; an older build can ignore those records and refuse further saves. This is a settings-format compatibility requirement, not a change to the updater.
+
+Nineteen registered host tests and both firmware profiles pass. Device installation, actual card playback, selected combinations and power-cycle persistence remain pending user acceptance.

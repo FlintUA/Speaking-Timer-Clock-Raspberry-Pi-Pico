@@ -24,3 +24,7 @@ void speech_enqueue_timer_start(audio_queue_t *queue, speech_language_t language
                                 uint32_t duration_seconds);
 void speech_enqueue_timer_cancel(audio_queue_t *queue, speech_language_t language);
 void speech_enqueue_timer_finish(audio_queue_t *queue, speech_language_t language);
+
+// Optional completion speech plus 0=signal 07/013, 1=music 08/NNN, 2=no extra sound.
+bool speech_enqueue_timer_finish_sound(audio_queue_t *queue, speech_language_t language,
+                                       bool voice, uint8_t sound, uint8_t track);

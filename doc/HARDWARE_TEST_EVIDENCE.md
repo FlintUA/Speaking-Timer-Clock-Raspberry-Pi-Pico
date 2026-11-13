@@ -210,3 +210,17 @@ Read-only HTTP confirmed the three new alarm actions and runtime IDs: no active 
 ### Clarification after live alarm installation
 
 The user reported inactive alarm-action buttons while a short countdown completion announcement was playing, and an apparent page refresh/jump. On clarification, the tested event was a countdown timer, not a scheduled alarm. This does not validate or invalidate the separately installed scheduled-alarm Stop/Snooze actions, which remain pending physical acceptance. Inspection confirmed that the existing web Cancel timer did nothing after countdown.running became false. The page polls JSON and has no full-page reload operation; the cause of the apparent jump is not established. A separate completion-audio Stop fix is prepared but has not been installed. No device schedules were changed and no audible device commands were sent during this investigation.
+
+## Scheduled-alarm snooze/cancellation acceptance and timer fix installation
+
+On November 13, the user confirmed the scheduled alarm repeated after three minutes and that cancellation worked. This is user acceptance of those reported actions on the preceding installed `1.0.0+25.g97fd951`, not individual evidence for every output, concurrency case or stale-request scenario.
+
+With separate explicit approval, the countdown completion-audio fix from commit `3717033d06c48c6a82381372d03bc06f76f33847` was installed through COM8. Reviewed UF2: 1,777,664 bytes, SHA256 `DC4B326319887B1BC98C23AADEEA29505B0748707C43B178644B493F3024A5EC`. The updater reported SUCCESS; USB and HTTP identify clean version `1.0.0+26.g3717033`, build `3717033d06c4-bt-mp3-wifi-phone`. Flash guard was OK, image_end `0x100d8ea4`, and the two settings slots remained valid at sequences 170/171, schema v12.
+
+Five alarms, fifteen birthday records and ten persistent preferences match their immediately pre-install checksum `B418CC407F1AC737DDCB0129194A78C2A94E9212B847ECF6AAEBABAC65387BC4`. This checksum differs from earlier installations because the user changed settings during testing; it is not an installation-induced difference. The idle unsaved timer selection reset from five seconds to the default sixty seconds on restart. Home HTTP returned at `192.168.2.116` and Europe/Berlin NTP synchronized. Bluetooth remained OFF under the saved explicit-connect policy; no connection was initiated by the verification.
+
+Read-only HTTP confirmed Stop timer sound and timer_sound_id=0, with no active alarm or pending snoozes. No web control or audible test command was sent. COM8 was closed/released. User testing of the timer completion stop, observed latency and reported page jump remains pending.
+
+### Countdown completion stop: user acceptance
+
+After installation of `1.0.0+26.g3717033` and the requested countdown-stop check, the user confirmed that it works correctly. This closes general acceptance of the separate Stop timer sound fix. The report does not include measured response latency, individual LOCAL/Bluetooth runs, stale-request/concurrent-client testing or a separately isolated cause for the earlier page jump. Scheduled-alarm three-minute repeat and cancellation were separately accepted in the preceding report.
