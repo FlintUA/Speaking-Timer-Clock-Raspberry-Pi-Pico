@@ -37,6 +37,7 @@ static bool radio_ready;
 #endif
 #ifdef CLOCK_ENABLE_PHONE_WEB
 #include "phone_web.h"
+#include "phone_control.h"
 #endif
 #ifdef CLOCK_ENABLE_A2DP
 #include "pico/cyw43_arch.h"
@@ -301,6 +302,7 @@ static music_sleep_t music_sleep;
 // read music files present on the separate SPI1 FAT32 card.
 static bool music_ui_bluetooth;
 static bool music_ui_bt_started;
+static bool music_ui_audition;
 static uint8_t music_ui_track = 1u;
 static uint8_t music_track_count = 45u; // Used only if DFPlayer folder count query fails.
 static uint8_t alarm_track_count = 45u;
@@ -317,7 +319,8 @@ static uint8_t clock_mode; // 0=VOICE, 1=CHIME.
 static uint64_t mode_pressed_at_ms;
 static bool mode_press_active;
 static birthday_t birthdays[CLOCK_BIRTHDAY_COUNT], birthday_draft;
-static uint8_t birthday_index, birthday_pending_mask;
+static uint8_t birthday_index;
+static uint16_t birthday_pending_mask;
 static uint64_t birthday_queued_ms[CLOCK_BIRTHDAY_COUNT];
 static bool birthday_rtc_primed;
 static bool birthday_rtc_valid;
@@ -843,18 +846,19 @@ static void bt_speech_service(void) {
 
 // Use the same hour/minute file mapping as MicroPython enqueue_clock_time.
 // Never announce automatically: only on user command or MODE long press.
-static void announce_time(uint8_t hour, uint8_t minute) {
+typedef enum { INFO_STARTED, INFO_NO_RTC, INFO_NO_ALARM, INFO_BUSY } info_announce_result_t;
+static bool announce_time(uint8_t hour, uint8_t minute) {
     if (alarm_active_index >= 0) {
         puts("[SPEECH] blocked: alarm ringing");
-        return;
+        return false;
     }
     if (!sound_enabled) {
         puts("[SPEECH] skipped: sound OFF");
-        return;
+        return false;
     }
     if (hour > 23u || minute > 59u) {
         puts("[SPEECH] invalid time");
-        return;
+        return false;
     }
 #ifdef CLOCK_ENABLE_A2DP
     // Only manually requested speech uses the selected Bluetooth output.
@@ -864,12 +868,12 @@ static void announce_time(uint8_t hour, uint8_t minute) {
         audio_router_bluetooth_state(&audio_router, clock_a2dp_stream_active() &&
                                      clock_a2dp_current_rate() == 44100u);
         if (audio_router.effective == AUDIO_OUTPUT_BT_JBL) {
-            if (!bt_speech_start(hour, minute, false)) return;
+            if (!bt_speech_start(hour, minute, false)) return false;
         } else {
             puts("[BT-SPEECH] BT not ready; announcing via LOCAL");
             audio_queue_clear(&audio_queue, true);
             if (!speech_enqueue_time(&audio_queue, language, hour, minute,
-                                     exact_hour_phrase)) return;
+                                     exact_hour_phrase)) return false;
         }
     } else
 #endif
@@ -877,7 +881,7 @@ static void announce_time(uint8_t hour, uint8_t minute) {
         audio_queue_clear(&audio_queue, true);
         if (!speech_enqueue_time(&audio_queue, language, hour, minute, exact_hour_phrase)) {
             puts("[SPEECH] failed to queue time");
-            return;
+            return false;
         }
     }
     snprintf(speech_overlay_time, sizeof(speech_overlay_time), "%02u:%02u",
@@ -886,15 +890,16 @@ static void announce_time(uint8_t hour, uint8_t minute) {
     printf("[SPEECH] language=%s time=%s exact_hour=%s\n",
            speech_language_name(language), speech_overlay_time,
            exact_hour_phrase ? "ON" : "OFF");
+    return true;
 }
 
-static void announce_rtc_time(void) {
+static info_announce_result_t announce_rtc_time(void) {
     ds1302_datetime_t dt = {0};
     if (!ds1302_read_datetime(&dt)) {
         puts("[SPEECH] RTC unavailable; try say HH MM");
-        return;
+        return INFO_NO_RTC;
     }
-    announce_time(dt.hour, dt.minute);
+    return announce_time(dt.hour, dt.minute) ? INFO_STARTED : INFO_BUSY;
 }
 
 static bool announce_info_plan(const audio_queue_t *plan) {
@@ -919,12 +924,12 @@ static bool announce_info_plan(const audio_queue_t *plan) {
     return true;
 }
 
-static void announce_clock_info(bool nearest_alarm) {
+static info_announce_result_t announce_clock_info(bool nearest_alarm) {
     ds1302_datetime_t now_dt, date;
     uint64_t wall;
     if (!ds1302_read_datetime(&now_dt) || !clock_datetime_to_utc(&now_dt,&wall)) {
         puts("[INFO] RTC unavailable");
-        return;
+        return INFO_NO_RTC;
     }
     date=now_dt;
     uint64_t now_ms=to_ms_since_boot(get_absolute_time());
@@ -953,7 +958,7 @@ static void announce_clock_info(bool nearest_alarm) {
             snprintf(info_overlay_bottom,sizeof(info_overlay_bottom),"None enabled");
             info_overlay_until_ms=now_ms+4000u;
             puts("[INFO] NEXT ALARM: none enabled");
-            return;
+            return INFO_NO_ALARM;
         }
         snprintf(info_overlay_top,sizeof(info_overlay_top),"%s A%u %02u:%02u",
             snooze?"SNOOZE":"NEXT",(unsigned)slot+1u,(unsigned)date.hour,(unsigned)date.minute);
@@ -962,13 +967,13 @@ static void announce_clock_info(bool nearest_alarm) {
     snprintf(info_overlay_bottom,sizeof(info_overlay_bottom),"%02u.%02u.%04u",
         (unsigned)date.day,(unsigned)date.month,(unsigned)date.year);
     info_overlay_until_ms=now_ms+4000u;
-    if (!speech_enqueue_date(&plan,language,&date)) return;
-    if (nearest_alarm && !speech_enqueue_time(&plan,language,date.hour,date.minute,exact_hour_phrase)) return;
+    if (!speech_enqueue_date(&plan,language,&date)) return INFO_BUSY;
+    if (nearest_alarm && !speech_enqueue_time(&plan,language,date.hour,date.minute,exact_hour_phrase)) return INFO_BUSY;
     printf("[INFO] %s slot=%d date=%04u-%02u-%02u time=%02u:%02u%s\n",
         nearest_alarm?"NEXT_ALARM":"DATE",slot+1,(unsigned)date.year,(unsigned)date.month,
         (unsigned)date.day,(unsigned)date.hour,(unsigned)date.minute,snooze?" snooze":"");
     if (date.year<2023 || date.year>2029) puts("[INFO] No year recording; spoken year omitted, LCD keeps full year");
-    announce_info_plan(&plan);
+    return announce_info_plan(&plan) ? INFO_STARTED : INFO_BUSY;
 }
 
 static void alarm_pending_add(unsigned index, uint8_t hour,
@@ -1357,8 +1362,9 @@ static void change_volume(int direction) {
     set_output_volume(bluetooth, (uint8_t)requested);
 }
 
-static void toggle_sound(void) {
-    sound_enabled = !sound_enabled;
+static void set_sound(bool enabled) {
+    if (sound_enabled == enabled) return;
+    sound_enabled = enabled;
     volume_overlay_until_ms = to_ms_since_boot(get_absolute_time()) + VOLUME_OVERLAY_MS;
     if (!sound_enabled) {
         if (music_ui_open) music_ui_stop("SOUND_OFF");
@@ -1367,6 +1373,8 @@ static void toggle_sound(void) {
     }
     printf("[AUDIO] sound=%s\n", sound_enabled ? "ON" : "OFF");
 }
+
+static void toggle_sound(void) { set_sound(!sound_enabled); }
 
 static uint8_t menu_month_days(uint16_t y, uint8_t m) {
     static const uint8_t md[12] = {31,28,31,30,31,30,31,31,30,31,30,31};
@@ -1481,6 +1489,7 @@ static void music_ui_close(const char *reason) {
     if (!music_ui_open) return;
     music_ui_stop(reason);
     music_ui_open = false;
+    music_ui_audition = false;
     music_sleep=(music_sleep_t){0};
     mode_press_active=false;
     music_minus_pressed=false;
@@ -1559,6 +1568,7 @@ static void music_ui_toggle(void) {
 
 static void music_ui_rotate(int direction) {
     if (!music_ui_open || !direction) return;
+    music_ui_audition = false;
     music_ui_stop("TRACK_CHANGED");
     music_ui_track=direction>0 ? music_playlist_next(&music_playlist,false) :
                                music_playlist_previous(&music_playlist);
@@ -1590,6 +1600,7 @@ static void music_ui_enter(void) {
     music_ui_track=music_playlist.current;
     music_ui_pending=false;
     music_ui_open = true;
+    music_ui_audition = false;
     music_ui_playing = false;
     music_ui_paused = false;
     music_sleep=(music_sleep_t){0};
@@ -1651,18 +1662,44 @@ static void music_ui_service(void) {
         if (!audio_queue_idle(&audio_queue) || dfplayer_busy()) return;
     }
     music_ui_playing=false;
+    if (music_ui_audition) {
+        music_ui_close("TRACK_TEST_FINISHED");
+        return;
+    }
     music_ui_track=music_playlist_next(&music_playlist,true);
     music_ui_start();
 }
 
 #ifdef CLOCK_ENABLE_PHONE_WEB
-static bool service_phone_player(phone_action_t action) {
+static bool service_phone_player(phone_action_t action, uint32_t value) {
+    if (action == PHONE_PLAYER_TEST_STOP) {
+        if (music_ui_audition) music_ui_close("PHONE_TEST_STOP");
+        return true;
+    }
     if (action == PHONE_PLAYER_STOP) {
         music_ui_close("PHONE_STOP");
         return true;
     }
     if (timer.running || alarm_active_index >= 0 || menu_state != MENU_CLOSED ||
         alarm_ui_state != ALARM_UI_CLOSED || !sound_enabled) return false;
+    if (action == PHONE_PLAYER_TEST_TRACK) {
+        if (!music_ui_open) {
+#ifdef CLOCK_ENABLE_A2DP
+            if (bt_speech_running || bt_timer_running || bt_alarm_running || routed_test_pending ||
+                mp3_play_active() || mp3_probe_active() || sd_fat32_stream_active()) return false;
+#endif
+            music_ui_enter();
+        }
+        if (!music_ui_open) return false;
+        music_ui_stop("PHONE_TRACK_TEST");
+        music_ui_track = (uint8_t)value;
+        music_ui_audition = true;
+#ifdef CLOCK_ENABLE_A2DP
+        music_ui_bluetooth = alarm_audio_jbl_enabled && clock_a2dp_stream_active();
+#endif
+        music_ui_start();
+        return music_ui_pending;
+    }
     if (!music_ui_open) {
         if (action != PHONE_PLAYER_PLAY) return false;
 #ifdef CLOCK_ENABLE_A2DP
@@ -2067,6 +2104,40 @@ static void menu_audio_apply(unsigned index, bool jbl) {
 }
 
 #ifdef CLOCK_ENABLE_PHONE_WEB
+static void phone_snapshot_overview(phone_overview_t *view,
+                                    const ds1302_datetime_t *rtc, uint64_t now) {
+    uint8_t waiting = 0;
+    for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
+        if (deferred_alarms[i].pending) {
+            ++view->deferred_count;
+            if (deferred_alarms[i].snoozed) waiting |= (uint8_t)(1u << i);
+        }
+    }
+    phone_overview_calendar(view, rtc, alarms, alarm_snoozes, waiting, now);
+    view->active_alarm = alarm_active_index >= 0 ? (uint8_t)(alarm_active_index + 1) : 0;
+    view->sound_on = sound_enabled;
+    view->direct = phone_web_direct();
+    view->network = network_time_home_status(now);
+    view->ntp = network_time_reference_status(now);
+    view->bt_state = PHONE_BT_UNAVAILABLE;
+#ifdef CLOCK_ENABLE_A2DP
+    const char *target = clock_a2dp_target();
+    view->bt_state = clock_a2dp_scan_active() ? PHONE_BT_SCANNING :
+        clock_a2dp_stream_active() ? PHONE_BT_CONNECTED :
+        target[0] ? PHONE_BT_WAITING : PHONE_BT_OFF;
+    if (target[0] && view->bt_state != PHONE_BT_SCANNING) {
+        uint8_t mac[6] = {0};
+        bool address_valid = bt_address_parse(target, mac);
+        int known = address_valid ? bt_known_find(mac) : -1;
+        const char *name = known >= 0 && bt_name_usable(bt_known[known].name) ? bt_known[known].name :
+            address_valid && bt_pending_target_valid && memcmp(mac, bt_pending_target_addr, 6) == 0 &&
+            bt_name_usable(bt_pending_target_name) ? bt_pending_target_name :
+            known >= 0 ? "Saved speaker" : "Unknown device";
+        snprintf(view->bt_name, sizeof(view->bt_name), "%s", name);
+    }
+#endif
+}
+
 static bool phone_settings_idle(void) {
     bool idle = !timer.running && alarm_active_index < 0 && !music_ui_open &&
         menu_state == MENU_CLOSED && alarm_ui_state == ALARM_UI_CLOSED &&
@@ -2144,6 +2215,27 @@ static phone_command_result_t service_phone_schedule(const phone_command_t *requ
     return PHONE_COMMAND_APPLIED;
 }
 
+static phone_command_result_t service_phone_control(const phone_command_t *request) {
+    const phone_control_state_t state = {
+        .sound_on = sound_enabled, .alarm_active = alarm_active_index >= 0,
+        .timer_running = timer.running,
+        .editing = menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED,
+        .player_open = music_ui_open, .audio_busy = !phone_settings_idle()
+    };
+    phone_command_result_t guard = phone_control_guard(request->action, &state);
+    if (guard != PHONE_COMMAND_APPLIED) return guard;
+    if (request->action == PHONE_SOUND_SET) {
+        set_sound(request->value != 0);
+        return PHONE_COMMAND_APPLIED;
+    }
+    info_announce_result_t result = request->action == PHONE_SAY_TIME ? announce_rtc_time() :
+        announce_clock_info(request->action == PHONE_SAY_NEXT_ALARM);
+    if (result == INFO_STARTED) return PHONE_COMMAND_APPLIED;
+    if (result == INFO_NO_RTC) return PHONE_COMMAND_RTC_UNAVAILABLE;
+    if (result == INFO_NO_ALARM) return PHONE_COMMAND_NO_ALARM;
+    return PHONE_COMMAND_AUDIO_BUSY;
+}
+
 static void service_phone_command(uint64_t now) {
     phone_command_t request;
     if (!phone_web_command_pending(&request)) return;
@@ -2151,11 +2243,15 @@ static void service_phone_command(uint64_t now) {
         phone_web_command_complete(request.id, service_phone_schedule(&request));
         return;
     }
+    if (request.action >= PHONE_SOUND_SET) {
+        phone_web_command_complete(request.id, service_phone_control(&request));
+        return;
+    }
     bool applied = false;
     if (request.action >= PHONE_SET_VOLUME_LOCAL) {
         applied = service_phone_settings(&request);
     } else if (request.action >= PHONE_PLAYER_PLAY) {
-        applied = service_phone_player(request.action);
+        applied = service_phone_player(request.action, request.value);
     } else if (request.action == PHONE_TIMER_CANCEL) {
         if (timer.running) timer_cancel_now();
         applied = true;
@@ -2188,7 +2284,7 @@ static void birthday_apply(unsigned index, birthday_t draft) {
     bool changed=b->month!=draft.month || b->day!=draft.day || b->hour!=draft.hour || b->minute!=draft.minute;
     draft.last_year=changed?0:b->last_year;
     if (changed || b->enabled!=draft.enabled)
-        birthday_pending_mask&=(uint8_t)~(1u<<index);
+        birthday_pending_mask&=(uint16_t)~(1u<<index);
     *b=draft;
     settings_mark_changed();
     birthday_status();
@@ -2197,14 +2293,14 @@ static void birthday_apply(unsigned index, birthday_t draft) {
 static void birthday_observe(const ds1302_datetime_t *dt, uint64_t now) {
     birthday_now=*dt;
     birthday_rtc_valid=true;
-    uint8_t due=birthday_claim(birthdays,dt);
+    uint16_t due=birthday_claim(birthdays,dt);
     if (due) {
         settings_mark_changed();
         if (birthday_rtc_primed) {
             birthday_pending_mask|=due;
             for(unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i)
                 if(due&(1u<<i)) birthday_queued_ms[i]=now;
-            printf("[BIRTHDAY] due_mask=0x%02x; wait up to 30m for idle/non-quiet audio\n",due);
+            printf("[BIRTHDAY] due_mask=0x%04x; wait up to 30m for idle/non-quiet audio\n",due);
         } else puts("[BIRTHDAY] Boot minute consumed without replay");
     }
     birthday_rtc_primed=true;
@@ -2212,10 +2308,10 @@ static void birthday_observe(const ds1302_datetime_t *dt, uint64_t now) {
 
 static void birthday_service(uint64_t now) {
     for(unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i) {
-        uint8_t bit=(uint8_t)(1u<<i);
+        uint16_t bit=(uint16_t)(1u<<i);
         if (!(birthday_pending_mask&bit)) continue;
         if (birthday_wait_expired(birthday_queued_ms[i],now)) {
-            birthday_pending_mask&=(uint8_t)~bit;
+            birthday_pending_mask&=(uint16_t)~bit;
             printf("[BIRTHDAY] %u expired after 30m\n",i+1);
             continue;
         }
@@ -2230,7 +2326,7 @@ static void birthday_service(uint64_t now) {
         audio_queue_t plan={0};
         audio_queue_enqueue(&plan,7,0); // Existing language-neutral birthday melody.
         if (!announce_info_plan(&plan)) return;
-        birthday_pending_mask&=(uint8_t)~bit;
+        birthday_pending_mask&=(uint16_t)~bit;
         snprintf(info_overlay_top,sizeof(info_overlay_top),"BIRTHDAY %u",i+1);
         snprintf(info_overlay_bottom,sizeof(info_overlay_bottom),"%02u.%02u CELEBRATE",
             (unsigned)birthdays[i].day,(unsigned)birthdays[i].month);
@@ -3866,10 +3962,10 @@ static void handle_command(char *line) {
     } else if (strncmp(line,"birthday-test ",14)==0) {
         unsigned n; char extra;
         if(sscanf(line+14,"%u %c",&n,&extra)!=1 || n<1 || n>CLOCK_BIRTHDAY_COUNT)
-            puts("[BIRTHDAY] Usage: birthday-test 1..5 (RAM only; same quiet/priority rules)");
+            puts("[BIRTHDAY] Usage: birthday-test 1..15 (RAM only; same quiet/priority rules)");
         else if(birthday_pending_mask&(1u<<(n-1))) puts("[BIRTHDAY] Already pending; test refused");
         else {
-            birthday_pending_mask|=(uint8_t)(1u<<(n-1));
+            birthday_pending_mask|=(uint16_t)(1u<<(n-1));
             birthday_queued_ms[n-1]=now;
             puts("[BIRTHDAY] TEST queued in RAM; saved date/year unchanged");
         }
@@ -4194,8 +4290,8 @@ static void handle_command(char *line) {
         char *end = NULL;
         unsigned long requested = strtoul(arg, &end, 10);
         while (end && isspace((unsigned char)*end)) ++end;
-        if (!*arg || end == arg || !end || *end || errno == ERANGE || requested > 14400ul || requested < 1ul) {
-            puts("[CMD] Invalid duration. Use: t 10 (1..14400 seconds)");
+        if (!*arg || end == arg || !end || *end || errno == ERANGE || requested > CLOCK_TIMER_MAX_SECONDS || requested < 1ul) {
+            puts("[CMD] Invalid duration. Use: t 10 (1..86399 seconds)");
         } else if (alarm_ui_state != ALARM_UI_CLOSED || music_ui_open) {
             puts("[TIMER] duration change blocked: editor/music open");
         } else {
@@ -4494,6 +4590,7 @@ int main(void) {
     char rtc_bottom[17] = "Check GP2/5/4";
 #ifdef CLOCK_ENABLE_PHONE_WEB
     bool rtc_available = false;
+    ds1302_datetime_t phone_rtc = {0};
 #endif
     uint64_t next_rtc_ms = 0;
     uint32_t previous_remaining = UINT32_MAX;
@@ -4702,6 +4799,7 @@ int main(void) {
             bool read_ok = ds1302_read_datetime(&dt);
 #ifdef CLOCK_ENABLE_PHONE_WEB
             rtc_available = read_ok;
+            if (read_ok) phone_rtc = dt;
 #endif
             if (read_ok) {
                 display_light_hour = dt.hour;
@@ -4736,6 +4834,7 @@ int main(void) {
                 .track = music_ui_open ? music_ui_track : 0,
                 .track_count = music_ui_open ? music_track_count : 0,
                 .player_mode = music_ui_open ? music_playlist_mode_name(music_playlist.mode) : "",
+                .player_test = music_ui_open && music_ui_audition,
                 .preferences = {
                     .volume_local = volume, .volume_bt = bt_volume, .language = (uint8_t)language,
                     .audio = {menu_audio_selected_jbl(0), menu_audio_selected_jbl(1),
@@ -4754,7 +4853,8 @@ int main(void) {
                           music_ui_pending ? "Waiting" : music_ui_paused ? "Paused" :
                           music_ui_playing ? "Playing" : "Stopped",
             };
-            if (rtc_available) memcpy(snapshot.time, rtc_top, sizeof(snapshot.time));
+            phone_snapshot_overview(&snapshot.overview, rtc_available ? &phone_rtc : NULL, now);
+            if (snapshot.overview.rtc_valid) memcpy(snapshot.time, rtc_top, sizeof(snapshot.time));
             memcpy(snapshot.alarms, alarms, sizeof(snapshot.alarms));
             memcpy(snapshot.birthdays, birthdays, sizeof(snapshot.birthdays));
             phone_web_publish(&snapshot);
@@ -4786,7 +4886,8 @@ int main(void) {
             }
         } else if(menu_state==MENU_BIRTHDAY_LIST) {
             const birthday_t *b=&birthdays[birthday_index];
-            snprintf(top,sizeof(top),"BIRTHDAY %u/5 %s",(unsigned)birthday_index+1,b->enabled?"ON":"OFF");
+            snprintf(top,sizeof(top),"BDAY %u/%u %s",(unsigned)birthday_index+1,
+                (unsigned)CLOCK_BIRTHDAY_COUNT,b->enabled?"ON":"OFF");
             snprintf(bottom,sizeof(bottom),"%02u.%02u %02u:%02u",
                 (unsigned)b->day,(unsigned)b->month,(unsigned)b->hour,(unsigned)b->minute);
         } else if(menu_state>=MENU_BIRTHDAY_ENABLED && menu_state<=MENU_BIRTHDAY_MINUTE) {

@@ -51,6 +51,7 @@ static bool service(uint64_t now, bool idle, bool join_allowed) {
 
 int main(void) {
     network_time_init(false);
+    assert(!network_time_reference_status(0).available);
     assert(network_time_home_status(0).state == NETWORK_HOME_OFFLINE);
     network_time_init(true);
     assert(network_time_home_status(0).state == NETWORK_HOME_UNCONFIGURED);
@@ -74,6 +75,16 @@ int main(void) {
     anchor_valid = true; apply_pending = true; anchor_epoch = 1794384000u; anchor_ms = 3000;
     assert(!service(3250, false, true));
     assert(service(3500, true, true) && dns_calls == 1);
+    network_reference_status_t reference=network_time_reference_status(3500);
+    assert(reference.available && reference.configured && reference.sampled);
+    assert(reference.pending && !reference.synced);
+    network_time_applied(false);
+    assert(!network_time_reference_status(3500).synced);
+    assert(network_time_reference_status(3500).retry);
+    network_time_applied(true);
+    reference=network_time_reference_status(4500);
+    assert(reference.synced && !reference.pending && !reference.retry && reference.sync_age==1);
+    assert(reference.offset==clock_berlin_offset(anchor_epoch));
     anchor_valid = false;
     network_time_suspend_home(true);
     network_time_suspend_home(false);
@@ -91,6 +102,7 @@ int main(void) {
     connect_result = -1;
     assert(!service(39250, false, true) && connect_calls == 4);
     assert(network_time_home_status(39250).seconds == 60);
+    assert(network_time_reference_status(UINT64_MAX).sync_age==UINT32_MAX);
     puts("network_time_test: PASS");
     return 0;
 }

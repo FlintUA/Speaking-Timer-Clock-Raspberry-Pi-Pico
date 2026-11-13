@@ -1,7 +1,8 @@
 #pragma once
 #ifdef CLOCK_ENABLE_PHONE_WEB
-// Leave room for two status responses and their TCP copies.
-#define MEM_SIZE 16384
+// Four simultaneous clients can hold status responses and TCP copies.
+#define MEM_SIZE 49152
+#define MEMP_NUM_TCP_PCB 10
 #else
 #define MEM_SIZE 8192
 #endif

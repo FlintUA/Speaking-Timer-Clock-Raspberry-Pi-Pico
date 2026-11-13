@@ -75,17 +75,18 @@ The integrated direct password is generated once and reused after a successful s
 
 Stable main/v1.0.0 writes Flash v11 without moving sectors. It adds display-light settings and retains alarm weekday masks, annual birthday dates and handled years, network, output, volume and speaker settings. Formats v1-v10 remain readable. Alarms from v1-v8 default to Daily, birthdays from v1-v9 default to disabled, and display illumination defaults to OFF when loading v1-v10. Loading alone does not migrate records. Settings changes and newly claimed birthday occurrences write v11 through deferred autosave. An explicit save writes immediately when the existing safety checks allow it. The 348-byte record still occupies two programmed pages in each clock sector. Once both A/B slots contain v11, earlier firmware can only read a legacy record if one exists. A `-NoWifi` build at v1.0.0 understands v11, but not the development formats below. Snooze and waiting birthday delivery are RAM-only.
 
-The `codex/phone-control` branch reads v1-v13 and chooses a write format from the actual settings:
+The `codex/phone-control` branch reads v1-v14 and chooses a write format from the actual settings:
 
 | Format | Selection and content | Record bytes |
 | --- | --- | --- |
-| v11 | Phone settings are blank and all birth years are unknown; stable baseline fields | 348 |
-| v12 | Phone settings are present, with all birth years unknown; adds direct key, four scoped browser entries and home trust | 504 |
-| v13 | At least one birth year is known; retains phone fields and adds five optional birth years | 512 |
+| v11 | Phone settings are blank, birth years are unknown and slots 6-15 remain at disabled defaults; stable baseline fields | 348 |
+| v12 | Phone settings are present, birth years are unknown and slots 6-15 remain at disabled defaults; adds direct key, four scoped browser entries and home trust | 504 |
+| v13 | At least one birth year in slots 1-5 is known and slots 6-15 remain at disabled defaults; retains phone fields | 512 |
+| v14 | At least one of birthday slots 6-15 differs from its disabled default; retains the v13 prefix and adds ten dates and optional birth years | 616 |
 
-All formats stay within two programmed 256-byte pages of one existing A/B sector. v1-v12 load with unknown birth years. Loading alone never writes or migrates Flash. Both the ordinary profile and `-NoWifi` built from this branch read v12/v13 and preserve phone fields and known birth years even without the web server.
+Formats v11-v13 use two programmed 256-byte pages; v14 uses three pages in one existing 4 KiB A/B sector. The sector offsets, ownership checks, CRC and sequence selection do not change. v1-v12 load with unknown birth years; v1-v13 initialize slots 6-15 disabled. Loading alone never writes or migrates Flash. Both the ordinary profile and `-NoWifi` built from this branch read v12-v14 and preserve phone fields and known birth years even without the web server. A save with any nondefault slot 6-15 writes v14 to the alternate A/B sector, leaving the previous slot intact as fallback. Merely opening or viewing an extra slot does not select v14. If all extra slots later return completely to defaults, the writer can select v11-v13 again according to the remaining fields.
 
-Stable v1.0.0 cannot read v12/v13. Once both slots use a newer format, reverting to that release can load an older legacy record or defaults rather than current settings. Record intended settings before rollback and use a compatible build from this branch for a non-web/offline fallback. Do not equate disabling the web profile with reverting the source to v1.0.0. Snoozes and pending birthday playback remain RAM-only in every profile.
+Stable v1.0.0 cannot read v12-v14. Earlier `codex/phone-control` builds cannot read v14; they may load an older A/B record and appear to lose slots 6-15 and later changes. Once both slots use a newer format, reverting to an older release can load an older legacy record or defaults rather than current settings. Record intended settings before rollback and use a v14-compatible build from this branch for a non-web/offline fallback. Do not equate disabling the web profile with reverting the source to v1.0.0. Snoozes and pending birthday playback remain RAM-only in every profile.
 
 ## Hardware acceptance status
 

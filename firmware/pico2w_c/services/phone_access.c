@@ -206,10 +206,13 @@ static phone_reply_t accept_command(phone_access_t *access, const char *body,
         {"set ", 1, CLOCK_TIMER_MAX_SECONDS}, {"start ", 1, CLOCK_TIMER_MAX_SECONDS},
         {"cancel ", 0, 0}, {"play ", 0, 0}, {"pause ", 0, 0}, {"resume ", 0, 0},
         {"stop ", 0, 0}, {"next ", 0, 0}, {"previous ", 0, 0},
+        {"test_track ", 1, 255},
+        {"test_stop ", 0, 0},
         {"volume_local ", 0, 30}, {"volume_bt ", 0, 30}, {"language ", 0, 1},
         {"audio_manual ", 0, 1}, {"audio_hourly ", 0, 1},
         {"audio_timer ", 0, 1}, {"audio_alarm ", 0, 1},
         {"light_mode ", 0, 2}, {"light_day ", 0, 100}, {"light_night ", 0, 100},
+        {"sound ", 0, 1}, {"say_time ", 0, 0}, {"say_date ", 0, 0}, {"next_alarm ", 0, 0},
         {"set ", 0, 0}, {"set ", 0, 0}
     };
     _Static_assert(sizeof(actions) / sizeof(actions[0]) == PHONE_ACTION_COUNT, "Missing phone action");
@@ -254,7 +257,11 @@ phone_reply_t phone_access_player(phone_access_t *access, const char *body, uint
 }
 
 phone_reply_t phone_access_settings(phone_access_t *access, const char *body, uint8_t scope, bool home_peer) {
-    return accept_command(access, body, scope, home_peer, PHONE_SET_VOLUME_LOCAL, PHONE_SET_ALARM);
+    return accept_command(access, body, scope, home_peer, PHONE_SET_VOLUME_LOCAL, PHONE_SOUND_SET);
+}
+
+phone_reply_t phone_access_control(phone_access_t *access, const char *body, uint8_t scope, bool home_peer) {
+    return accept_command(access, body, scope, home_peer, PHONE_SOUND_SET, PHONE_SET_ALARM);
 }
 
 phone_reply_t phone_access_alarm(phone_access_t *access, const char *body, uint8_t scope, bool home_peer) {

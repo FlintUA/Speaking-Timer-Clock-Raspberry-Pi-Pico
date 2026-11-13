@@ -279,13 +279,50 @@ int main(void) {
     assert(off.display_light.mode==roundtrip.display_light.mode);
     settings_record_current_t with_year;
     memcpy(&with_year,test_flash+SLOT1_OFFSET,sizeof(with_year));
-    assert(with_year.version==RECORD_VERSION && sizeof(with_year)==512);
+    assert(with_year.version==RECORD_V13 && sizeof(with_year)==512);
     off.birthdays[0].birth_year=1985;
     assert(settings_store_save(&off)==SETTINGS_STORE_UNSUPPORTED);
     test_flash[SLOT1_OFFSET+offsetof(settings_record_current_t,birth_years)]^=1;
     assert(settings_store_load(&off)==SETTINGS_STORE_OK);
     assert(off.birthdays[0].birth_year==0 && off.phone.home_trusted);
     assert(settings_store_save(&roundtrip)==SETTINGS_STORE_OCCUPIED);
+    // A v13 record gains ten disabled slots in RAM without changing Flash on load.
+    memset(test_flash, 0xff, sizeof(test_flash));
+    assert(settings_store_save(&roundtrip) == SETTINGS_STORE_OK);
+    uint8_t old_v13_slot[FLASH_SECTOR_SIZE];
+    memcpy(old_v13_slot, test_flash + SLOT0_OFFSET, sizeof(old_v13_slot));
+    assert(settings_store_load(&off) == SETTINGS_STORE_OK);
+    for (unsigned i = STORED_BIRTHDAY_COUNT; i < CLOCK_BIRTHDAY_COUNT; ++i)
+        assert(!off.birthdays[i].enabled && off.birthdays[i].month == 1u &&
+               off.birthdays[i].day == 1u && off.birthdays[i].hour == 9u);
+    assert(!memcmp(old_v13_slot, test_flash + SLOT0_OFFSET, sizeof(old_v13_slot)));
+    off.birthdays[5] = (birthday_t){.enabled = true, .month = 3, .day = 9,
+        .hour = 12, .minute = 30, .last_year = 2025, .birth_year = 1984};
+    off.birthdays[14] = (birthday_t){.enabled = true, .month = 12, .day = 31,
+        .hour = 23, .minute = 59, .last_year = 2024};
+    fail_write = true;
+    assert(settings_store_save(&off) == SETTINGS_STORE_FLASH_ERROR);
+    fail_write = false;
+    clock_settings_t before_v14;
+    assert(settings_store_load(&before_v14) == SETTINGS_STORE_OK);
+    assert(!before_v14.birthdays[5].enabled &&
+           !memcmp(old_v13_slot, test_flash + SLOT0_OFFSET, sizeof(old_v13_slot)));
+    assert(settings_store_save(&off) == SETTINGS_STORE_OK);
+    settings_record_v14_t v14;
+    memcpy(&v14, test_flash + SLOT1_OFFSET, sizeof(v14));
+    assert(v14.prefix.version == RECORD_VERSION && sizeof(v14) == 616u);
+    assert(!memcmp(old_v13_slot, test_flash + SLOT0_OFFSET, sizeof(old_v13_slot)));
+    clock_settings_t expanded;
+    assert(settings_store_load(&expanded) == SETTINGS_STORE_OK);
+    assert(expanded.birthdays[0].birth_year == off.birthdays[0].birth_year);
+    assert(expanded.birthdays[5].birth_year == 1984 && expanded.birthdays[5].last_year == 2025);
+    assert(expanded.birthdays[14].enabled && expanded.birthdays[14].minute == 59);
+    assert(!memcmp(&expanded.phone, &off.phone, sizeof(expanded.phone)));
+    assert(!memcmp(expanded.bt_known, off.bt_known, sizeof(expanded.bt_known)));
+    test_flash[SLOT1_OFFSET + offsetof(settings_record_v14_t, birthdays) + 1u] ^= 1u;
+    assert(settings_store_load(&expanded) == SETTINGS_STORE_OK);
+    assert(!expanded.birthdays[5].enabled && expanded.birthdays[0].birth_year == off.birthdays[0].birth_year);
+    assert(settings_store_save(&off) == SETTINGS_STORE_OCCUPIED);
     memset(test_flash,0xff,sizeof(test_flash));
     test_flash[SLOT0_OFFSET]=0x42;
     clock_settings_t cfg={.quiet_start=22,.quiet_end=7};

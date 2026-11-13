@@ -1,6 +1,6 @@
 # Current roadmap
 
-This is the authoritative roadmap for the C firmware. It distinguishes the stable main baseline from experimental work on `codex/phone-control`. Status reviewed on 2026-11-12 against source revision `499e78c` and user reports. Earlier MicroPython plans and migration logs are historical; unchecked boxes in those files are not the current task list.
+This is the authoritative roadmap for the C firmware. It distinguishes the stable main baseline from experimental work on `codex/phone-control`. Status reviewed on 2026-11-13 includes the capacity/status expansion and quick-control follow-up after `697c062`. Hardware evidence identifies installed candidates independently; the latest quick-control substage has not been installed. Earlier MicroPython plans and migration logs are historical; unchecked boxes in those files are not the current task list.
 
 ## Release baseline
 
@@ -42,14 +42,49 @@ Implemented and broadly user-accepted web functionality:
 - Single birthday date field, optional birth year and mobile form alignment on build `d51dd7adf5b8-bt-mp3-wifi-phone`; the user reported the revised interface generally satisfactory before requesting sliders. This is broad acceptance, not explicit v13 save/restart coverage.
 - Immediate volume and brightness sliders on build `499e78c94a0c-bt-mp3-wifi-phone`; the user reported that everything worked after installation. Sixteen host checks passed with Node.js available, including the production slider-script regression. COM8 verified the build, unchanged alarm/birthday records, valid Flash slots and synchronized NTP; read-only HTTP checks found all four sliders. These checks do not replace the remaining hardware scenarios.
 
-Remaining work, in order:
+### Current expansion status (2026-11-13)
 
-1. Documentation reconciliation is completed for source revision `499e78c`: current profile/build instructions, storage compatibility, menu numbering and acceptance boundaries are aligned. Historical release notes remain historical.
-2. Complete focused hardware checks: two browsers, Sign out/revocation and home-trust disable; remembered access and optional birth years after save/restart; simultaneous physical/browser edits and conflicts; rapid commands and network recovery; sound continuity through refresh/phone disconnect; timer/alarm priorities. Repeat the core workflow in direct/home modes on LOCAL/BT outputs. Follow the [acceptance checklist](../experiments/phone_control_ap/README.md#remaining-web-release-acceptance).
-3. Improve the phone interface presentation and navigation after functionality acceptance. Basic field alignment and sliders are already present; the final visual design is not complete.
-4. Finish user-tested release evidence, build identified artifacts and prepare a separate web-control release. No merge into main or stable web release is implied by functional acceptance.
+The user reported that the latest changes were tested and worked correctly. Record this as broad functional acceptance, not proof that every migration, output/network combination or four-client scenario was exercised. See [hardware evidence](HARDWARE_TEST_EVIDENCE.md#november-13-expansion-user-report).
 
-The first web release does not require browser controls for playlist mode/sleep, Bluetooth discovery/connection, quiet hours, half-hour/exact-hour options or spoken date/next-alarm requests. These are still available through their existing physical/USB paths where implemented. Additional browser controls require a later scope decision. One-time reminders remain excluded.
+| Item | Current source and acceptance |
+| --- | --- |
+| Fifteen birthdays | Physical, USB and browser paths use 15 slots; pending/claim masks are 16-bit. v14 stores nondefault slots 6-15. General acceptance reported; slot 15 save/restart and timed delivery remain individually unconfirmed. |
+| Single countdown through 23:59:59 | Shared 86,399-second limit, physical editor, USB validation and browser wheels are implemented. Zero and 24:00:00 are rejected. A full-length physical run was not reported. |
+| Timer wheels | Hours/minutes/seconds, touch/mouse/keyboard operation and continuous digit scaling/fading are implemented. General interface acceptance reported. |
+| Player layout | Previous / combined Play-Pause / Next, with Stop below. The latest recorded layout supersedes the earlier circular proposal; rotation and seeking are absent. |
+| Alarm track audition | Test/Stop plays one selected track using alarm routing without saving the draft; `player_test` synchronizes the audition state, and `test_stop` affects audition only. General acceptance reported; exact output/priority combinations remain separate checks. |
+| Four web clients | Four POST contexts, 48 KiB lwIP heap and ten configured TCP PCBs support the target; four stored browser authorizations remain a distinct limit. Real four-client/audio concurrency is not confirmed by the general report. |
+| Browser About | Installed with separate approval on November 13. USB/HTTP metadata and preserved settings verified; the user subsequently accepted About on the phone. |
+| Extended overview, substage 1 | Installed with separate approval. Eighteen tests, both builds, startup/HTTP and settings-preservation checks pass. The user subsequently accepted the general overview; individual ringing/snooze and network/output combinations remain focused checks. |
+| Quick controls, substage 2 | Explicit global sound on/off and time/date/nearest-alarm speech are implemented through the shared guarded application path. Nineteen checks and both builds pass; installation/user acceptance pending. |
+
+Seventeen registered checks passed after the earlier clean local Debug rebuild on 2026-11-13. The later extended overview adds a native calendar/JSON test and passes eighteen checks, including production-script slider/overview and timer-wheel checks. This is software evidence; it does not establish real HTTP concurrency or radio/audio timing.
+
+Remaining work, in recommended order:
+
+1. Preserve an identified source revision and reviewed UF2 for each next build; installation always requires separate approval. Complete focused expanded-slot save/restart, four-client and audio-priority checks when the user is available; router outage testing remains deferred.
+2. Install and accept quick controls (substage 2): global sound on/off and information speech. Substage 1 overview is broadly accepted.
+3. Add alarm stop/three-minute snooze/cancel-repeat commands with stale-occurrence protection. Existing guarded application functions remain the source of behavior.
+4. Add browser controls for existing player mode/sleep, automatic announcement options, quiet hours and time/synchronization in separate reviewable increments.
+5. Implement the dedicated [browser Bluetooth management stage](#browser-bluetooth-management-planned). Speaker selection must become available from the browser; choosing an audio preference alone does not connect a speaker.
+6. Add network/access management as a separate stage, including clear mode-switch and revocation consequences.
+7. Implement final navigation/presentation, light/dark/system themes and EN/RU/DE interface localization. Keep speech language separate and all assets local.
+8. Finish release evidence, resource/four-client measurements and English instructions, then prepare a separate web-control release. No merge into main or stable web release is implied by functional acceptance.
+
+The [expansion specification](WEB_CONTROL_SPEC.md) records the implemented capacity/UI stage and links the broader follow-up scope. One-time reminders, track seeking and new display/audio hardware remain excluded from current implementation.
+
+### Browser Bluetooth management (planned)
+
+This is an explicit future implementation stage, requested again after the overview check. Current browser Bluetooth status is read-only.
+
+- Show up to four known devices and new discovery results by name; use a stable internal address for actions, not a changing row index. MAC addresses belong only in optional diagnostic details.
+- Scan with visible progress/completion and cancellation. Preserve the existing intentional disconnect/manual-OFF behavior when discovery starts; ending/cancelling discovery must not silently restore a speaker.
+- Connect a known device directly without scanning, or select a discovered device for pairing/connection. Persist a newly selected peer only after its stream becomes active. Preserve known names and address deduplication.
+- Disconnect while retaining the known entry and pairing key; keep OFF through autosave/restart until explicit Connect. Forget is a separate confirmed deletion of an entry/key.
+- Reuse existing audio/timer/alarm guards, shared authorization, command serialization and retry protection. Audio-output preferences and separate volumes remain independent of speaker connection.
+- Explain replacement when the four-device registry is full. Keep current retry behavior; switch-latency optimization remains in the deferred tail.
+- Use bounded responses for the device list, preferably separate from the already populated 4 KiB status response. Recheck peak memory and four-client contention.
+- Accept with real saved/discovered Portable/Nest connections, cancellation, manual OFF, forget/save/restart, LOCAL fallback and status changes from physical controls. Do not claim support for BLE-only or legacy PIN-only audio devices.
 
 Control restoration stage 1 is implemented. Hardware logs confirm accelerated selection, LOCAL timer start/finish/cancel and GP28 entry/back; remaining precise-field and player-mute checks are in TESTING.md. The user also confirmed timer routing to the selected Bluetooth speaker after changing its independent output preference.
 

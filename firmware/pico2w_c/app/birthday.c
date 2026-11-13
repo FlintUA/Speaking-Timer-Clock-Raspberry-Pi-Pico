@@ -18,10 +18,10 @@ bool birthday_valid(const birthday_t *date) {
     return clock_datetime_to_utc(&d,&wall);
 }
 
-uint8_t birthday_claim(birthday_t dates[CLOCK_BIRTHDAY_COUNT], const ds1302_datetime_t *now) {
+uint16_t birthday_claim(birthday_t dates[CLOCK_BIRTHDAY_COUNT], const ds1302_datetime_t *now) {
     uint64_t wall;
     if (!dates || !clock_datetime_to_utc(now,&wall)) return 0;
-    uint8_t mask=0;
+    uint16_t mask=0;
     for (unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i) {
         birthday_t *b=&dates[i];
         // Don't repeat a previously handled year, including a backward RTC correction.
@@ -29,7 +29,7 @@ uint8_t birthday_claim(birthday_t dates[CLOCK_BIRTHDAY_COUNT], const ds1302_date
             b->month!=now->month || b->day!=now->day ||
             b->hour!=now->hour || b->minute!=now->minute) continue;
         b->last_year=now->year;
-        mask|=(uint8_t)(1u<<i);
+        mask|=(uint16_t)(1u<<i);
     }
     return mask;
 }

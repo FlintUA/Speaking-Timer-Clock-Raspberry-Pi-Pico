@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include "clock_datetime.h"
 
-#define CLOCK_BIRTHDAY_COUNT 5u
+#define CLOCK_BIRTHDAY_COUNT 15u
 #define BIRTHDAY_WAIT_MS (30u * 60000u)
 typedef struct {
     bool enabled;
@@ -16,5 +16,5 @@ void birthday_defaults(birthday_t dates[CLOCK_BIRTHDAY_COUNT]);
 bool birthday_valid(const birthday_t *date);
 // Claims matching events and records the year. No catch-up for missed minutes.
 // February 29 matches only in leap years. RTC weekday is irrelevant.
-uint8_t birthday_claim(birthday_t dates[CLOCK_BIRTHDAY_COUNT], const ds1302_datetime_t *now);
+uint16_t birthday_claim(birthday_t dates[CLOCK_BIRTHDAY_COUNT], const ds1302_datetime_t *now);
 bool birthday_wait_expired(uint64_t queued_ms, uint64_t now_ms);

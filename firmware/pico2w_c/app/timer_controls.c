@@ -1,28 +1,28 @@
 #include "timer_controls.h"
+#include "countdown.h"
 
 static uint8_t wrap(uint8_t value, uint8_t maximum, int direction) {
     if (direction > 0) return value >= maximum ? 0 : (uint8_t)(value+1);
     return value ? (uint8_t)(value-1) : maximum;
 }
 void timer_editor_open(timer_editor_t *e, uint32_t seconds) {
-    if (seconds > 14400) seconds=14400;
+    if (seconds > CLOCK_TIMER_MAX_SECONDS) seconds=CLOCK_TIMER_MAX_SECONDS;
     *e=(timer_editor_t){.hour=(uint8_t)(seconds/3600),
         .minute=(uint8_t)(seconds/60%60),.second=(uint8_t)(seconds%60)};
 }
 void timer_editor_rotate(timer_editor_t *e, int direction) {
     if (!direction) return;
     switch(e->field) {
-        case TIMER_FIELD_HOUR: e->hour=wrap(e->hour,4,direction); break;
+        case TIMER_FIELD_HOUR: e->hour=wrap(e->hour,23,direction); break;
         case TIMER_FIELD_MINUTE: e->minute=wrap(e->minute,59,direction); break;
         case TIMER_FIELD_SECOND: e->second=wrap(e->second,59,direction); break;
     }
-    // The countdown limit is exactly four hours, including editor drafts.
-    if (e->hour==4) e->minute=e->second=0;
 }
 bool timer_editor_confirm(timer_editor_t *e, uint32_t *seconds) {
     if (e->field!=TIMER_FIELD_SECOND) { ++e->field; return false; }
     uint32_t value=(uint32_t)e->hour*3600+e->minute*60+e->second;
-    *seconds=value ? value : 1;
+    if (!value) return false;
+    *seconds=value;
     return true;
 }
 bool timer_editor_back(timer_editor_t *e) {
@@ -43,9 +43,13 @@ uint32_t timer_quick_adjust(timer_acceleration_t *s, uint32_t seconds,
     if(s->streak>=4) increment=10;
     else if(s->streak>=2) increment=5;
     s->valid=true; s->previous_ms=now_ms; s->direction=direction;
+    if (direction > 0 && seconds >= CLOCK_TIMER_MAX_SECONDS) {
+        if (step) *step=increment;
+        return CLOCK_TIMER_MAX_SECONDS;
+    }
     int minutes=(int)(seconds/60)+(direction>0?(int)increment:-(int)increment);
     if(minutes<1) minutes=1;
-    if(minutes>240) minutes=240;
+    if(minutes>1439) minutes=1439;
     if(step) *step=increment;
     return (uint32_t)minutes*60;
 }

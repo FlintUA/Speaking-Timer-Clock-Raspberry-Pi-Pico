@@ -1,6 +1,6 @@
 # Current C firmware controls and modes
 
-This document describes main, starting with 1.0.0-rc.1. The previous MicroPython controls document is retained in [history](history/MICROPYTHON_CONTROLS_AND_MODES.md). Use [HARDWARE_PICO2W.md](HARDWARE_PICO2W.md) for all pin assignments.
+This document describes the current C firmware working tree on `codex/phone-control`, including the fifteen-birthday and 23:59:59 timer expansion. Stable v1.0.0 retains five birthdays and the four-hour timer limit. The previous MicroPython controls document is retained in [history](history/MICROPYTHON_CONTROLS_AND_MODES.md). Use [HARDWARE_PICO2W.md](HARDWARE_PICO2W.md) for all pin assignments.
 
 ## Normal clock screen
 
@@ -8,7 +8,7 @@ This document describes main, starting with 1.0.0-rc.1. The previous MicroPython
 | --- | --- |
 | Volume encoder | Adjust the active audio output; LOCAL and Bluetooth levels are separate |
 | Volume encoder button | Toggle sound on/off |
-| Timer encoder | Adjust an idle countdown in minutes, with accelerated steps of 1/5/10 minutes, bounded to 1..240 minutes |
+| Timer encoder | Adjust the single idle countdown in minutes, with accelerated steps of 1/5/10 minutes, bounded to 1..1439 minutes; use the precise editor for seconds through 23:59:59 |
 | Timer encoder button | Start or cancel the countdown |
 | TIMER_MODE (GP28) | Open the hours/minutes/seconds editor; press again to cancel its draft |
 | SETTINGS | Open settings |
@@ -21,7 +21,7 @@ This document describes main, starting with 1.0.0-rc.1. The previous MicroPython
 
 While an alarm rings, ALARM stops it, TIMER_MODE/GP28 snoozes it for three minutes and volume remains adjustable. Timer/alarm/audio ownership can block settings or playback actions.
 
-The precise timer editor starts from the selected duration. TIMER or SETTINGS advances HOUR -> MIN -> SEC; confirming SEC commits the duration and starts the countdown. MINUS goes to the previous field, or cancels from HOUR. GP28 and the 20-second idle timeout cancel without changing the selected duration. Values wrap within each field; the limit is exactly 04:00:00 and a zero duration starts as one second. The editor is unavailable during a running countdown, alarm, player or another menu. Quick minute adjustment discards sub-minute precision; use the editor for seconds. Consecutive same-direction detents less than 260 ms apart reach 5-minute steps on the third detent and 10-minute steps on the fifth. A pause or direction reversal resets acceleration.
+The precise timer editor starts from the selected duration. TIMER or SETTINGS advances HOUR -> MIN -> SEC; confirming SEC commits the duration and starts the countdown. MINUS goes to the previous field, or cancels from HOUR. GP28 and the 20-second idle timeout cancel without changing the selected duration. Values wrap within each field; the limit is 23:59:59 and a zero duration cannot be confirmed. The editor is unavailable during a running countdown, alarm, player or another menu. Quick minute adjustment normally discards sub-minute precision and clamps at 1..1439 whole minutes; use the precise editor for seconds. A clockwise detent at an already selected 23:59:59 leaves that maximum unchanged. Consecutive same-direction detents less than 260 ms apart reach 5-minute steps on the third detent and 10-minute steps on the fifth. A pause or direction reversal resets acceleration.
 
 ## Date, next alarm and startup
 
@@ -83,11 +83,11 @@ USB commands: bt-disconnect, bt-scan, bt-scan-stop, bt-devices, bt-known, bt-use
 
 ## Birthdays
 
-Five independent annual dates are available under SETTINGS -> Birthdays. Each is numbered 1..5, disabled by default, and initially set to January 1 at 09:00. There are no one-time reminders, personal-name fields or new spoken reminder recordings.
+Fifteen independent annual dates are available under SETTINGS -> Birthdays on this development branch. Each is numbered 1..15, disabled by default, and initially set to January 1 at 09:00. Existing v1-v13 records retain their first five dates and initialize slots 6-15 disabled. There are no one-time reminders, personal-name fields or new spoken reminder recordings.
 
 Rotate TIMER to select a slot, press TIMER or SETTINGS to edit ON/OFF -> MONTH -> DAY -> HOUR -> MINUTE. Rotate to change each value; confirm the minute to save the whole draft. MINUS steps back, or discards the draft from ON/OFF; MINUS from the slot list returns to settings. The normal 20-second settings timeout discards unfinished edits. Month changes clamp the day to a valid value; February 29 is accepted and fires only in leap years. The blinking cursor marks the edited field.
 
-On the matching local calendar minute the event is claimed once per year. The handled year is saved with the date to suppress repeats after reboot, DST or backward clock correction. Enabling/disabling retains that year; explicitly changing the date or time resets it for the new schedule. All five co-due dates are retained and delivered sequentially. No catch-up runs for minutes missed while powered off or skipped by a clock adjustment. A match in the first valid RTC minute after boot is consumed without playback.
+On the matching local calendar minute the event is claimed once per year. The handled year is saved with the date to suppress repeats after reboot, DST or backward clock correction. Enabling/disabling retains that year; explicitly changing the date or time resets it for the new schedule. All fifteen co-due dates can be retained and delivered sequentially. No catch-up runs for minutes missed while powered off or skipped by a clock adjustment. A match in the first valid RTC minute after boot is consumed without playback.
 
 Birthday melody 07/000.mp3 follows the Manual output preference, with the existing Bluetooth-to-LOCAL fallback; it is language-neutral and does not add synthesized speech. Both cards need the file. Playback waits for an idle clock/audio path, closed menus/player, sound enabled and non-quiet hours. It does not interrupt music, timers or alarms. Waiting expires after 30 monotonic minutes, including while muted or quiet. A consumed event is not retried later that year if it expires; waiting delivery is RAM-only and is lost on reset. Disable or change a date to cancel its waiting notification. On delivery LCD shows BIRTHDAY N and the date for eight seconds.
 
@@ -103,9 +103,9 @@ birthday-pending-clear
 
 birthday-set uses slot/day/month/hour/minute/on-or-off and rejects invalid dates. birthday-test queues a RAM-only playback test using normal quiet/priority/expiry rules, even for a disabled slot; it does not change the saved date or handled year. It refuses to replace an already waiting occurrence. birthday-pending-clear discards waiting notifications without resetting saved years. BOOTSEL refuses while a birthday notification is waiting. No test command generates a saved date automatically.
 
-Flash v10 adds five dates and their handled years; v1-v9 load with all birthday slots disabled. The user broadly accepted the feature in build 7964939; COM8 confirms configured dates saved as v10. Timed firing, output-specific melody, expiry and repeat-suppression/reboot cases remain focused coverage checks.
+Flash v10 added the first five dates and their handled years; v14 adds ten more dates. v1-v9 load with all birthday slots disabled. The user broadly accepted the original five-slot feature in build 7964939; COM8 confirms configured dates saved as v10. On 2026-11-13 the user reported that the latest changes worked correctly. This accepts the expanded functional workflow broadly; timed firing, output-specific melody, expiry, expanded-slot persistence and repeat-suppression/reboot cases remain individually tracked checks.
 
-On this development branch, the browser also accepts `DD.MM` with an unknown birth year or `DD.MM.YYYY` with a known year (1000..9999). Both recur annually by day/month; the birth year is metadata and does not change recurrence. A known year must form a valid calendar date, including leap-day validation. Physical and USB date edits preserve a known birth year; clearing it is available in the browser. Changing only the birth year retains the handled event year. Known birth years require v13 storage; see [compatibility](NETWORK_TIME.md#settings-compatibility-and-rollback).
+On this development branch, the browser also accepts `DD.MM` with an unknown birth year or `DD.MM.YYYY` with a known year (1000..9999). Both recur annually by day/month; the birth year is metadata and does not change recurrence. A known year must form a valid calendar date, including leap-day validation. Physical and USB date edits preserve a known birth year; clearing it is available in the browser. Changing only the birth year retains the handled event year. Known birth years in the first five slots require v13 storage; any nondefault slot 6-15 requires v14. See [compatibility](NETWORK_TIME.md#settings-compatibility-and-rollback).
 
 ## Alarms
 
@@ -118,6 +118,8 @@ During ringing, GP28 stops the current sound and schedules one repeat three minu
 The clock screen shows the next snoozed alarm and remaining time. ALARM cancels all snoozes when the main screen is active; ALARM during ringing still stops only the ringing alarm. Disabling or editing a slot cancels its pending/snoozed occurrence. Snoozes live only in RAM and disappear on restart; weekday schedules are saved in Flash.
 
 Music comes from folder 08. The editor uses the detected DFPlayer folder count, or the cached/default count if unavailable, and preserves any already selected higher track. Storage and explicit USB configuration support 1..255. Mirror the same music files onto the separate SPI card when using Bluetooth.
+
+In the browser alarm editor, Test/Stop beside the music-track field auditions one folder 08 track without applying the alarm draft. It uses the alarm output preference with LOCAL fallback, may replace current ordinary music or another audition, and closes after that track finishes. While audition is active, including pause, the button shows Stop. This audition-specific Stop cannot stop ordinary music if a stale page still shows Stop. Next/Previous leave audition mode and resume normal playlist navigation. Timer, ringing alarm, mute and physical editors can block starting a test. The player Stop can also close an audition. File existence and physical output still need checking on the selected card; selecting a valid number alone does not prove the file exists.
 
 Existing alarms remain independent of quiet-hour automatic speech. Concurrent due events and timer priority use the existing deferred-alarm handling and safety timeout.
 
@@ -150,6 +152,8 @@ The output follows the manual audio preference when entering the player. Bluetoo
 The sleep timer counts elapsed time even while paused or muted. Selecting a preset starts a fresh deadline; OFF cancels it. It survives track/mode changes within the current player session, but closing the player or rebooting clears it. Expiry stops playback and returns to the clock without an announcement, without disconnecting Bluetooth and without changing alarm, countdown, output or volume settings. Pause and sleep are RAM-only and do not alter the Flash format. Direct mp3-pause/mp3-resume commands remain diagnostic controls, separate from player button state.
 
 ## Persistence, diagnostics and version
+
+The experimental web Quick controls group adds explicit Sound on/off and manually requested time/date/nearest-alarm speech. It shares the physical sound setter and speech paths, preserves separate volumes and saved schedules, and does not automatically resume music on unmute. Sound remains RAM-only and defaults ON after restart. Like the physical sound button, web sound changes are blocked while an alarm rings. Speech requires sound ON, closed physical editors/player, no countdown/ringing alarm and idle audio. See [phone controls](../experiments/phone_control_ap/README.md#quick-controls-substage-2-installation-pending) for command semantics and installation status.
 
 Committed changes use debounced Flash autosave when idle; wait for autosave=OK before removing power. The cooldown can defer an additional write. Run autosave-status or explicitly save when idle.
 

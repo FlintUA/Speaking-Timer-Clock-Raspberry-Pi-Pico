@@ -1,5 +1,6 @@
 #include "phone_web.h"
 #include "network_time.h"
+#include "firmware_version.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -24,7 +25,7 @@ static uint32_t published_command_id;
 static phone_access_t access;
 
 typedef enum {
-    POST_PAIR, POST_TIMER, POST_PLAYER, POST_SETTINGS, POST_ALARM, POST_BIRTHDAY, POST_ACCESS, POST_LOGOUT
+    POST_PAIR, POST_TIMER, POST_PLAYER, POST_SETTINGS, POST_ALARM, POST_BIRTHDAY, POST_ACCESS, POST_LOGOUT, POST_CONTROL
 } phone_post_action_t;
 
 typedef struct {
@@ -35,7 +36,7 @@ typedef struct {
     char body[128];
 } phone_post_t;
 
-static phone_post_t posts[2];
+static phone_post_t posts[4];
 
 static uint64_t now_ms(void) {
     return to_ms_since_boot(get_absolute_time());
@@ -253,6 +254,7 @@ err_t httpd_post_begin(void *connection, const char *uri, const char *header,
     else if (strcmp(uri, "/timer") == 0) action = POST_TIMER;
     else if (strcmp(uri, "/player") == 0) action = POST_PLAYER;
     else if (strcmp(uri, "/settings") == 0) action = POST_SETTINGS;
+    else if (strcmp(uri, "/control") == 0) action = POST_CONTROL;
     else if (strcmp(uri, "/alarm") == 0) action = POST_ALARM;
     else if (strcmp(uri, "/birthday") == 0) action = POST_BIRTHDAY;
     else if (strcmp(uri, "/access") == 0) action = POST_ACCESS;
@@ -307,6 +309,7 @@ void httpd_post_finished(void *connection, char *response_uri, u16_t response_le
             case POST_TIMER: reply = phone_access_timer(&access, post->body, scope, post->home_peer); break;
             case POST_PLAYER: reply = phone_access_player(&access, post->body, scope, post->home_peer); break;
             case POST_SETTINGS: reply = phone_access_settings(&access, post->body, scope, post->home_peer); break;
+            case POST_CONTROL: reply = phone_access_control(&access, post->body, scope, post->home_peer); break;
             case POST_ALARM: reply = phone_access_alarm(&access, post->body, scope, post->home_peer); break;
             case POST_BIRTHDAY: reply = phone_access_birthday(&access, post->body, scope, post->home_peer); break;
             case POST_ACCESS: reply = phone_access_check(&access, post->body, scope); break;
@@ -353,7 +356,7 @@ int fs_open_custom(struct fs_file *file, const char *name) {
             if (strcmp(name, reply_path((phone_reply_t)i)) == 0) status = codes[i];
         if (!status) return 0;
     }
-    const size_t capacity = 2048;
+    const size_t capacity = 4096;
     char *response = mem_malloc(capacity);
     if (!response) return 0;
     int len = snprintf(response, capacity, "HTTP/1.0 %s\r\nContent-Type: application/json\r\n"
@@ -364,22 +367,28 @@ int fs_open_custom(struct fs_file *file, const char *name) {
     }
     int body_length;
     if (snapshot) {
-        static const char *const results[] = {"pending", "applied", "blocked", "conflict"};
+        static const char *const results[] = {"pending", "applied", "blocked", "conflict", "muted",
+            "rtc_unavailable", "no_alarm", "editing", "timer_busy", "alarm_busy", "player_busy", "audio_busy"};
+        _Static_assert(sizeof(results)/sizeof(results[0]) == PHONE_COMMAND_AUDIO_BUSY + 1u, "Missing command result");
         body_length = snprintf(response + len, capacity - (size_t)len,
-        "{\"time\":\"%s\",\"timer_running\":%s,\"timer_seconds\":%" PRIu32
+        "{\"firmware\":{\"name\":\"Speaking Clock\",\"version\":\"%s\",\"build\":\"%s\","
+        "\"board\":\"pico2_w\",\"author\":\"FlintUA\"},"
+        "\"time\":\"%s\",\"timer_running\":%s,\"timer_seconds\":%" PRIu32
         ",\"player\":\"%s\",\"track\":%u,\"output\":\"%s\",\"timer_request\":%" PRIu32
         ",\"timer_result\":\"%s\",\"timer_nonce\":%" PRIu32 ",\"epoch\":%" PRIu32
-        ",\"home_trusted\":%s,\"track_count\":%u,\"player_mode\":\"%s\""
+        ",\"home_trusted\":%s,\"track_count\":%u,\"player_mode\":\"%s\",\"player_test\":%s"
         ",\"command_id\":%" PRIu32 ",\"command_nonce\":%" PRIu32 ",\"command_result\":\"%s\""
         ",\"settings\":{\"snapshot_id\":%" PRIu32 ",\"volume_local\":%u,\"volume_bt\":%u,\"language\":%u"
         ",\"audio_manual\":%u,\"audio_hourly\":%u,\"audio_timer\":%u,\"audio_alarm\":%u"
         ",\"light_mode\":%u,\"light_day\":%u,\"light_night\":%u"
         ",\"editing\":%s,\"idle\":%s,\"bt_supported\":%s,\"saving\":\"%s\"}",
+        CLOCK_FIRMWARE_VERSION, CLOCK_BUILD_ID,
         published.time, published.timer_running ? "true" : "false",
         published.timer_seconds, published.player, (unsigned)published.track,
         published.bluetooth ? "BT" : "LOCAL", access.last.id,
         access.last.id ? results[access.result] : "none", access.last.nonce, access.epoch,
         trusted_home_peer() ? "true" : "false", (unsigned)published.track_count, published.player_mode,
+        published.player_test ? "true" : "false",
         access.last.id, access.last.nonce, access.last.id ? results[access.result] : "none",
         published_command_id,
         (unsigned)published.preferences.volume_local, (unsigned)published.preferences.volume_bt,
@@ -400,6 +409,12 @@ int fs_open_custom(struct fs_file *file, const char *name) {
     }
     len += body_length;
     if (snapshot) {
+        int overview_length = phone_overview_json(response + len, capacity - (size_t)len, &published.overview);
+        if (overview_length < 0) {
+            mem_free(response);
+            return 0;
+        }
+        len += overview_length;
         int length = schedule_json(response + len, capacity - (size_t)len);
         if (length < 0) {
             mem_free(response);

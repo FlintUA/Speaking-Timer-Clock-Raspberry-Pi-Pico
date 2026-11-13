@@ -10,7 +10,42 @@ Current development branch: `codex/phone-control`. Stable v1.0.0 does not includ
 4. For direct operation without a router or Internet, select **Start direct?**, join **SpeakingClock** with the displayed key and open `http://192.168.4.1/`. Direct and home are alternative modes. Returning home disconnects the direct network; reconnect the phone to the home network and use the home address.
 5. Pair the browser once in each mode where needed, or enable home trust for code-free control from the home subnet. Close physical settings before issuing control commands. Access rules and remaining checks are detailed below.
 
-Current page functions: live clock/timer/player/output status; timer Set/Start/Cancel; player Play/Pause/Resume/Stop/Previous/Next; independent LOCAL/BT volume and day/night brightness sliders; language, audio preferences and light mode; five alarm and five annual birthday editors. It does not offer browser playlist-mode/sleep controls, Bluetooth device management, quiet-hour/half-hour/exact-hour settings, manual time/date or spoken-information requests.
+Current page functions: live clock/timer/player/output status; one 00:00:01..23:59:59 timer with Set/Start/Cancel; Previous, combined Play/Pause and Next in one row, with Stop centered below; independent LOCAL/BT volume and day/night brightness sliders; language, audio preferences and light mode; five alarm and fifteen annual birthday editors. No rotation gesture or track seeking is provided. It does not offer browser playlist-mode/sleep controls, Bluetooth device management, quiet-hour/half-hour/exact-hour settings, manual time/date or spoken-information requests.
+
+## Quick controls (substage 2; installation pending)
+
+The authorized page adds Turn sound on/off, Speak time, Speak date and Speak next alarm. Commands use the authenticated `/control` endpoint with the same credential/epoch/id/nonce envelope and queue as timer/player/settings. Actions are `sound 0|1`, `say_time 0`, `say_date 0` and `next_alarm 0`. They are rejected on other action endpoints.
+
+Sound is an explicit requested state, not a toggle-on-retry. It preserves LOCAL/BT levels and the timer/saved schedules, stops current music without automatically resuming it on unmute, and remains RAM-only with sound ON after reboot. An ordinary alarm first becoming due while sound is OFF is suppressed rather than replayed on unmute; already-deferred events and snoozes retain their existing waiting/expiry rules. Like the physical volume button, the web sound action is allowed in menus/player/countdown but blocked while an alarm is ringing. Live alarm stop/snooze controls are a later substage.
+
+Speech uses the existing manual routing/language/LOCAL fallback. It is refused while muted, editing, counting down, with the player open or otherwise busy. RTC failure and no eligible next alarm have explicit results. Quiet hours do not prevent manually requested information speech. A successful acknowledgement means requested/queued, not proof of completed audible playback or a present audio file.
+
+The page explains disabled actions, sends explicit on/off, rechecks fresh state on the clock and waits for a matching published snapshot before confirming applied controls. Retried speech requests retain their original ID/nonce and cannot enqueue twice. These operational actions do not dirty settings or write Flash.
+
+Device acceptance after separately approved installation: test sound from browser and physical button, independent levels, mute/unmute during LOCAL/BT music with no automatic restart, speech in both languages/routes, no-alarm/RTC/busy feedback and phone reconnect. Restore intended sound state and schedules. Bluetooth connection itself still uses the clock/USB until the planned browser device-management stage.
+
+## About in the integrated page
+
+The integrated page has a collapsible About section below the controls. It displays the device name, Pico 2 W board, full tag-derived firmware version, source/profile build ID and author FlintUA. These are read from the current device's `/status.json` `firmware` object, not hardcoded into the browser. They are available before pairing. A lost connection or older firmware without that object shows Unavailable; subsequent status recovery updates the fields. Build strings wrap on narrow screens. After separate approval on November 13, installation and read-only USB/HTTP checks passed with settings unchanged. The user subsequently confirmed About worked on the phone. Specific wrapping/reconnection scenarios were not individually reported.
+
+## Extended overview status (substage 1; generally accepted)
+
+The existing status response now includes an additive `overview` member, published from the main loop alongside the existing controls. It introduces no control endpoint or Flash-format change.
+
+| Group | Meaning |
+| --- | --- |
+| `rtc_valid`, `date`, `weekday` | Validated local RTC date in YYYY-MM-DD and computed Monday=1..Sunday=7. Invalid RTC is explicitly unavailable. Browser time zone does not determine this date. |
+| `sound_on` | Actual global sound state, separate from both stored volume levels. This substage displays it but adds no mute command. |
+| `alarm` | Active slot (0=none), deferred count, nearest scheduled/snoozed slot and local civil timestamp, snooze count, nearest repeat/remaining seconds and a due-but-waiting indicator. Snoozes use device monotonic time; a forecast is unavailable without a valid date, while repeat remaining time remains available. |
+| `bluetooth` | Unsupported/OFF/scanning/waiting/connected state and a display name. Waiting does not claim an active connection attempt. MAC addresses are not included. Names are JSON-escaped, valid UTF-8 is preserved and invalid bytes are replaced. Connection state is distinct from effective audio output. |
+| `network` | Home/direct mode, home join/address/retry/ready status and its elapsed/remaining seconds. Direct mode is shown as a local network. |
+| `ntp` | Availability/configuration, reference received, successful RTC application, pending application/request/retry, reference age, last application age and applied UTC offset. Ages use uptime, not the phone clock. |
+
+The browser distinguishes a received NTP sample from a successful clock update. A failed RTC application reports retry pending. Direct mode does not request NTP; a previous successful update can still be shown with its age. The existing USB `ntp-status` synced flag describes the reference anchor, whereas the new browser `synced` flag specifically describes successful application.
+
+The Activity row explains a physical editor, active alarm, running timer, open player or other busy audio. Existing command guards remain authoritative. Connection loss clears the additional rows to Unavailable, and older firmware without `overview` remains usable. These fields, like existing status, are read-only and available before browser authorization.
+
+After approved installation, startup/Flash, read-only HTTP and settings-preservation checks passed. The device supplied the expected date/weekday, next alarm and home/NTP state. User acceptance: compare time/date/sound and nearest alarm with the clock; turn the physical sound button; inspect active/snoozed state during a normal alarm test; compare Bluetooth name with its actual connection; confirm home/direct and NTP messages and recovery after a phone reconnect. This substage adds no alarm stop/snooze buttons. Four-client/audio continuity and the existing persistence checks remain separate acceptance items.
 
 ## Standalone prototype scope
 
@@ -82,13 +117,13 @@ On build `6eec0ace9b26-bt-mp3-wifi-phone`, the user confirmed switching to direc
 
 1. Open the clock's numeric IP address over HTTP on the phone. Use the trusted home network or the clock's direct WPA2 network.
 2. Open **Settings → Phone Control → Pair phone?** and press the timer encoder. Enter the six digits shown on the LCD into the browser within 60 seconds and select **Pair and remember**. Up to five attempts are allowed per code. If **Home trust: ON** is enabled and the browser is on the home subnet, it can skip this step.
-3. Once the LCD reports **Phone paired**, press MINUS until the normal clock display returns. In the browser, enter minutes and seconds. **Set** updates the idle timer duration, **Start** starts that duration, and **Cancel timer** stops a running countdown.
+3. Once the LCD reports **Phone paired**, press MINUS until the normal clock display returns. In the browser, select hours, minutes and seconds from 00:00:01 through 23:59:59 using three Android-style scrolling wheels. Scroll by touch or mouse, click a value, or focus a wheel and use arrow keys; Home/End select its limits. The highlighted middle row is selected. **Set** updates the idle timer duration, **Start** starts that duration, and **Cancel timer** stops a running countdown.
 4. Check that a timer started in the browser can be cancelled on the clock and that one started on the clock can be cancelled from the browser. Repeat in both Wi-Fi modes. Start a short timer and disconnect the phone before it finishes. The clock should still play its usual completion sound.
 5. In direct mode or with home trust disabled, pair a second browser. Reopen the first browser and verify that it still has access. Select **Sign out** in that browser, then verify that only the other browser retains control. **Forget browsers?** on the clock revokes all paired browsers.
 6. In home mode, enable **Home trust: ON**. Close settings and open the page in an unpaired browser on the same subnet. Test timer control, then disable home trust and confirm that the unpaired browser requires a code again. Direct mode always requires browser pairing.
 7. After closing settings and waiting for `[FLASH] autosave=OK` when the clock is idle, restart and verify that a paired browser still works and the direct Wi-Fi password is unchanged. Also verify that a browser which signed out stays signed out after the next successful autosave and restart.
 
-The clock remembers up to four browser and network-mode combinations. Pairing is scoped to the clock address in that browser and to home or direct mode on the clock. Remembered access has no inactivity timeout. Browser private mode or clearing website data can remove the browser's copy. Phone settings use the existing A/B autosave, so a change takes effect immediately in RAM and survives a restart after a successful save. Keep a compatible settings backup when rolling back to older firmware. This branch's regular build reads both v12 phone settings and v13 optional birth years.
+The clock remembers up to four browser and network-mode combinations. This stored-authorization capacity is separate from the target of four simultaneous browser clients. Pairing is scoped to the clock address in that browser and to home or direct mode on the clock. Remembered access has no inactivity timeout. Browser private mode or clearing website data can remove the browser's copy. Phone settings use the existing A/B autosave, so a change takes effect immediately in RAM and survives a restart after a successful save. Keep a compatible settings backup when rolling back to older firmware. This branch's regular build reads v12 phone settings, v13 optional birth years and v14 expanded birthdays. Four-client behavior still needs hardware testing.
 
 Pairing the same browser in home and direct modes uses separate entries. Trusted-home access needs no paired entry. When all four entries are occupied, new pairing is refused rather than evicting another browser; use Sign out from an existing paired browser or Forget browsers on the clock to free entries. Clearing browser data alone does not remove the corresponding key from the clock.
 
@@ -106,8 +141,8 @@ The connection status page stays open while a home join or retry is pending, sup
 
 The browser uses the same music player as the physical controls. Access follows the existing remembered-browser or trusted-home rules.
 
-- **Play** opens and starts the player, or starts the selected track when stopped. If paused, the button becomes **Resume** and continues through the existing pause/resume path.
-- **Pause** pauses playback. Repeating a pause request cannot resume it.
+- The central **Play/Pause** button shows **Pause** while playing and **Play** when paused or stopped. It sends an explicit `pause`, `resume` or `play` action according to live state. Play opens/starts the player when closed or resumes a paused track. There is no separate Pause button in the current layout.
+- The underlying **Pause** command is idempotent: repeating it cannot resume playback. Resume remains a distinct command even though its visible button label is Play.
 - **Next** and **Previous** use the existing playlist and history. They start the selected track, including when the previous track was paused.
 - **Stop** stops and closes the player, allowing the timer to start again. Sending Stop when the player is already closed leaves other clock audio running.
 - The live status shows the selected track, track count, playback mode and audio output. Physical button actions appear on the browser's next status refresh.
@@ -122,7 +157,7 @@ Hardware acceptance checklist:
 4. Select Stop and check that music ends and the player closes. Then start and cancel a short timer from the browser.
 5. Repeat in direct and home Wi-Fi modes and on both LOCAL and Bluetooth outputs. Refresh or close the browser during playback and check that music continues.
 6. Check that a scheduled alarm retains its existing priority. While a timer or alarm is active, player start and navigation commands must be refused. A player Stop request must not cancel timer or alarm audio.
-7. Use the page from two devices during playback and check for audio interruptions or repeated track changes. Complete the outstanding Sign out and remembered-access checks from the timer section.
+7. Use the page from four devices during playback and check for audio interruptions or repeated track changes. Poll status and try overlapping control requests; a busy/conflict result must permit a safe retry. Complete the outstanding Sign out and remembered-access checks from the timer section.
 
 Host tests cover player authentication, action validation, shared timer/player sequencing and idempotent retries. A JavaScript execution check covers the browser's player buttons, pause/resume label, track status, a lost response after Next was applied and timer control after Stop.
 
@@ -158,27 +193,27 @@ On 2026-11-11, after installation of build `aa20a9cc4962-bt-mp3-wifi-phone`, the
 
 ## Alarm and birthday editors
 
-The page edits the five existing alarm slots and five annual birthday slots. Select a slot, edit its fields and use Apply alarm or Apply birthday. Alarm fields include enabled state, local time, Daily/Mon-Fri/Sat-Sun/custom weekdays, Signal/Music and a folder 08 music track in the supported 1..255 range. The selected music file must exist on the audio card used by the chosen output. Birthday fields include enabled state, a date and local announcement time. Enter `10.12` when the year is unknown, or `10.12.1985` to store a known birth year. Both repeat annually by day and month, using the existing melody. A supplied year must have four digits, 1000..9999, and form a valid calendar date. February 29 with no year is valid and remains a leap-year event.
+The page edits five alarm slots and fifteen annual birthday slots. Select a slot, edit its fields and use Apply alarm or Apply birthday. Alarm fields include enabled state, local time, Daily/Mon-Fri/Sat-Sun/custom weekdays, Signal/Music and a folder 08 music track in the supported 1..255 range. The selected music file must exist on the audio card used by the chosen output. Birthday fields include enabled state, a date and local announcement time. Enter `10.12` when the year is unknown, or `10.12.1985` to store a known birth year. Both repeat annually by day and month, using the existing melody. A supplied year must have four digits, 1000..9999, and form a valid calendar date. February 29 with no year is valid and remains a leap-year event.
 
 Each Apply submits one complete record. The clock validates it before queuing and applies it from the main loop only while the player, timer, alarm, audio and physical editors are idle. Editing an alarm clears only that slot's queued/snoozed occurrence and consumes its current-minute match, following the physical editor. Birthday edits use the existing apply function. Changing only the birth year preserves the handled year and does not re-arm that year's notification. Existing physical and USB date edits retain a known birth year. Remove the year in the browser to make it unknown again.
 
-Records with known birth years use the v13 A/B format, which still occupies two Flash pages in the existing sectors. v1-v12 records remain readable and load unknown birth years. Loading does not migrate or write Flash. Settings without known birth years retain the v11/v12 encoding. Older firmware cannot read v13 records; use a compatible build when reverting. Birth years are included in stale-record detection but are independent of the last handled event year.
+Records with known birth years among the first five slots use v13 unless slots 6-15 differ from their disabled defaults. Such additional dates use the v14 A/B format, occupying three Flash pages in the existing sectors. v1-v13 records remain readable and initialize the new slots disabled. Loading does not migrate or write Flash. Older firmware cannot read v14 records; use a compatible build when reverting. Birth years are included in stale-record detection but are independent of the last handled event year.
 
 A lossless revision of the editable fields accompanies each request. If a physical edit or another browser changes the selected record first, the clock reports a conflict and retains its current record. Use Reload to discard the local draft and read the latest values. Unapplied drafts survive status polling. Apply or Reload before switching slots. Duplicate requests retain their result, including conflicts, without applying the record twice.
 
-The authenticated `/alarm` and `/birthday` endpoints share the existing command sequence. Read-only status includes the five records of each kind. Calendar validation, access checks and the matching Host/Origin requirement also apply to these endpoints. Scheduling uses the clock's Europe/Berlin time; browser time zone settings do not change the entered hours.
+The authenticated `/alarm` and `/birthday` endpoints share the existing command sequence. Read-only status includes five alarm records and fifteen birthday records. Calendar validation, access checks and the matching Host/Origin requirement also apply to these endpoints. Scheduling uses the clock's Europe/Berlin time; browser time zone settings do not change the entered hours.
 
 Detailed hardware acceptance checklist (the general workflow is user-accepted; the scenarios below are not all individually closed):
 
 1. Choose an unused alarm slot, configure a future time, weekdays, enabled state and Signal. Apply, then compare the physical alarm editor. Check its scheduled operation.
 2. Test Daily, Mon-Fri, Sat-Sun and custom days. At least one day is required. Select Music with a known existing folder 08 track and check that the track is retained.
-3. Configure or disable a birthday in an unused slot and compare its day/month and time with the clock's menu. Test a future date/time with the existing melody. Check both `DD.MM` and `DD.MM.YYYY`, add or remove the year, and verify it after Settings saved and a restart. Restore the intended record afterward.
+3. Configure or disable a birthday in slots 6 and 15 and compare day/month and time with the clock's menu. Test a future date/time with the existing melody. Check both `DD.MM` and `DD.MM.YYYY`, add or remove the year, and verify it after Settings saved and a restart. Confirm the original five dates remain intact and restore any deliberately changed test record afterward.
 4. Leave a draft open in the browser, edit that slot on the clock or another browser, then try Apply. Check that the newer clock record is preserved and Reload retrieves it.
 5. Edit different slots in turn and verify that the other slots retain their values. Try an invalid calendar date and check that it is refused. February 29 is valid.
 6. Check that record editing is disabled during playback, a countdown, a ringing alarm or a physical editor. Stop/close the activity and retry. Timer and player controls should still work.
 7. Wait for Settings saved, restart and verify the accepted alarm/birthday records. Repeat basic editing in direct and home Wi-Fi modes.
 
-Native checks cover malformed or out-of-range records, slot boundaries, weekday masks, 1..255 tracks, calendar validation, access rules and retry handling. A JavaScript execution check covers preset/custom days, conflicts, Reload, draft preservation, slot isolation, a lost reply after applying, calendar messages and the timer. A format check parses the maximum-length status response with five alarms and five birthdays and verifies its buffer limit. The web profile uses a 16 KiB lwIP heap to accommodate the larger responses and TCP copies; the regular profile retains 8 KiB.
+Native checks cover malformed or out-of-range records, slot boundaries, weekday masks, 1..255 tracks, calendar validation, access rules and retry handling. A JavaScript execution check covers preset/custom days, conflicts, Reload, draft preservation, slot isolation, a lost reply after applying, calendar messages and the timer. The status buffer is 4,096 bytes for five alarms and fifteen birthdays. The web profile uses a 48 KiB lwIP heap and four POST contexts; the regular profile retains 8 KiB. Four-client load and response-size checks remain release gates.
 
 On 2026-11-11, the user confirmed the general editors worked on build `3d87e9900de5-bt-mp3-wifi-phone` and requested a single birthday date field with an optional stored birth year. After build `d51dd7adf5b8-bt-mp3-wifi-phone`, the user reported that the result was generally satisfactory and requested sliders for volume/brightness. This broadly accepts revised date entry and mobile alignment; adding/removing a known year and retaining it through a v13 save/restart were not individually reported. Native tests cover known/unknown-year recurrence, leap-year validation, year-only edits and v12 to v13 storage migration. The browser check covers adding and clearing the optional year. A 390-pixel mobile preview was inspected for field alignment and horizontal overflow.
 
@@ -188,7 +223,7 @@ Use existing configured records carefully and restore any deliberately changed t
 
 | Area | Remaining focused check |
 | --- | --- |
-| Access | Two independent browsers; Sign out removes only that browser's paired key; Forget browsers revokes paired keys. Home trust still grants subnet access until switched off. |
+| Access | Four simultaneous browsers, distinct from four stored authorization slots; Sign out removes only that browser's paired key; Forget browsers revokes paired keys. Home trust still grants subnet access until switched off. |
 | Trust and persistence | Disable home trust and require pairing again; save/restart retains intended paired access and direct key; signed-out keys stay revoked after save/restart. |
 | Physical controls | Browser reflects encoder changes after slider release; an unsent draft survives polling; editing the same alarm/birthday elsewhere produces a conflict and Reload retrieves the current record. |
 | Sliders and storage | Rapid moves and final zero on each output; independent LOCAL/BT levels; wait for Settings saved and verify restart retention. A non-active day/night level need not change the current PWM duty. |
@@ -196,4 +231,20 @@ Use existing configured records carefully and restore any deliberately changed t
 | Playback and priorities | Refresh/close the page or disconnect the phone during music; timer/alarm priority and guarded commands remain correct. |
 | Network/output coverage | Repeat core controls in home/direct modes on LOCAL/BT; recover after a phone disconnect and mode switch. Router outage testing remains deferred. |
 
-The remaining product stages are interface presentation/navigation and release preparation, after focused acceptance. Stable main has not been replaced and no stable web release has been published as part of these checks.
+The remaining product stages include expanded status and commands for existing device functions, followed by interface presentation/navigation, themes/localization and release preparation. Follow the [current roadmap](../../doc/ROADMAP.md#current-expansion-status-2026-11-13); stable main has not been replaced and no stable web release has been published as part of these checks.
+
+## November 13 interface revision
+
+Timer digits now scale and fade continuously as they enter or leave the selected row. The player uses a wider combined Play/Pause button between Previous and Next, with Stop centered below. Paused playback uses Resume internally when Play is pressed.
+
+The alarm music-track field has a Test button on its right. Test sends authenticated `/player` action `test_track` with a track number from 1 through 255 and retains the unsaved alarm draft. It uses the alarm output preference and LOCAL fallback, plays one selected folder 08 track, and closes at EOF. Stop in the player ends it early. A new Test can replace a previous audition or ordinary player playback; timer, alarm, mute and physical-editor guards still apply. Test does not save settings. Matching audio files must exist on the selected output card.
+
+Focused acceptance: check smooth scrolling on the phone; Play/Pause/Resume; audition several tracks without Apply; confirm saved alarm records remain unchanged; verify natural EOF and Stop on LOCAL and Bluetooth; confirm an active timer or alarm blocks audition. On 2026-11-13, the user reported that the recent improvements worked correctly. This closes the general functional workflow, not each individual scenario in this checklist. An exact installed build ID was not supplied with that report.
+
+### Test/Stop refinement
+
+The alarm track button now changes from Test to Stop while a track audition is active, including when paused. Stop sends `/player` action `test_stop 0`; this only closes an audition, so a stale browser state cannot stop ordinary music playback. `/status.json` includes `player_test` to synchronize the label across browsers and return to Test after completion or physical Stop. Stopping does not validate the draft track field or save the alarm. Native access and production browser-script checks passed, and the full web-profile firmware rebuilt successfully during development. The user's November 13 report broadly accepts the recent changes; exact LOCAL/BT, paused-audition and competing-browser sequences remain individually unconfirmed.
+
+### Current verification and source provenance
+
+On 2026-11-13, all seventeen host checks passed after a clean local Debug rebuild. This documentation review inspected uncommitted changes based on `697c062`; it did not create or install a new firmware image. Previous build/profile measurements in this guide describe their recorded stage and must not be presented as an exact identity or current peak-memory measurement of the installed device. See [latest hardware evidence](../../doc/HARDWARE_TEST_EVIDENCE.md#november-13-expansion-user-report).

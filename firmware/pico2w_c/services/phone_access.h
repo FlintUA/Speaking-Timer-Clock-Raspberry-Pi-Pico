@@ -13,14 +13,20 @@ typedef enum {
     PHONE_TIMER_SET, PHONE_TIMER_START, PHONE_TIMER_CANCEL,
     PHONE_PLAYER_PLAY, PHONE_PLAYER_PAUSE, PHONE_PLAYER_RESUME,
     PHONE_PLAYER_STOP, PHONE_PLAYER_NEXT, PHONE_PLAYER_PREVIOUS,
+    PHONE_PLAYER_TEST_TRACK,
+    PHONE_PLAYER_TEST_STOP,
     PHONE_SET_VOLUME_LOCAL, PHONE_SET_VOLUME_BT, PHONE_SET_LANGUAGE,
     PHONE_SET_AUDIO_MANUAL, PHONE_SET_AUDIO_HOURLY, PHONE_SET_AUDIO_TIMER, PHONE_SET_AUDIO_ALARM,
     PHONE_SET_LIGHT_MODE, PHONE_SET_LIGHT_DAY, PHONE_SET_LIGHT_NIGHT,
+    PHONE_SOUND_SET, PHONE_SAY_TIME, PHONE_SAY_DATE, PHONE_SAY_NEXT_ALARM,
     PHONE_SET_ALARM, PHONE_SET_BIRTHDAY, PHONE_ACTION_COUNT
 } phone_action_t;
 typedef enum { PHONE_OK, PHONE_INVALID, PHONE_DENIED, PHONE_BUSY } phone_reply_t;
 typedef enum {
-    PHONE_COMMAND_PENDING, PHONE_COMMAND_APPLIED, PHONE_COMMAND_BLOCKED, PHONE_COMMAND_CONFLICT
+    PHONE_COMMAND_PENDING, PHONE_COMMAND_APPLIED, PHONE_COMMAND_BLOCKED, PHONE_COMMAND_CONFLICT,
+    PHONE_COMMAND_MUTED, PHONE_COMMAND_RTC_UNAVAILABLE, PHONE_COMMAND_NO_ALARM,
+    PHONE_COMMAND_EDITING, PHONE_COMMAND_TIMER_BUSY, PHONE_COMMAND_ALARM_BUSY,
+    PHONE_COMMAND_PLAYER_BUSY, PHONE_COMMAND_AUDIO_BUSY
 } phone_command_result_t;
 
 typedef struct {
@@ -52,6 +58,7 @@ phone_reply_t phone_access_logout(phone_access_t *access, const char *token, uin
 phone_reply_t phone_access_timer(phone_access_t *access, const char *body, uint8_t scope, bool home_peer);
 phone_reply_t phone_access_player(phone_access_t *access, const char *body, uint8_t scope, bool home_peer);
 phone_reply_t phone_access_settings(phone_access_t *access, const char *body, uint8_t scope, bool home_peer);
+phone_reply_t phone_access_control(phone_access_t *access, const char *body, uint8_t scope, bool home_peer);
 phone_reply_t phone_access_alarm(phone_access_t *access, const char *body, uint8_t scope, bool home_peer);
 phone_reply_t phone_access_birthday(phone_access_t *access, const char *body, uint8_t scope, bool home_peer);
 uint32_t phone_alarm_revision(const alarm_entry_t *alarm);

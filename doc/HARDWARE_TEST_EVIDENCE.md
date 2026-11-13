@@ -2,6 +2,28 @@
 
 This summary covers the assembled Pico 2 W clock on COM8. Each section identifies its evidence source: direct COM8 verification, user tests or reconstructed historical project records. Software-only results and remaining physical checks are stated separately.
 
+## November 13 extended overview installation
+
+The user separately approved installation of substage 1. The reviewed UF2 was 1,757,696 bytes, SHA-256 `1CEBED741FD86D248A0ABDAF7A6D38412AF64F4141AC443B4131A5A48FD78E95`. COM8 startup/build verification passed with `697c062da090-dirty-bt-mp3-wifi-phone`; image end was `0x100d67f4`. The identical dirty identity of earlier candidates makes the hash and new overview fields important for identification. The user subsequently reported that the overview was generally working correctly and asked about Bluetooth connection from the browser. This is broad acceptance, not individual confirmation of every ringing/snooze/network combination; browser Bluetooth management remains planned.
+
+Flash guard remained OK; v12 slots retained valid sequences 152/153. Pre/post checksums matched for five alarms, fifteen birthdays and volume/language/output/light preferences. Wi-Fi returned in HOME mode and NTP synchronized. Read-only HTTP verified all new page IDs and overview data: 2026-11-13/Friday, sound ON, no active/deferred/snoozed alarm, next slot 4 at 15:00, Bluetooth OFF with no name, home network ready and a successfully applied NTP reference at UTC+1. No timer, audio, settings or alarm action was issued during these checks. COM8 was released. User phone rendering, physical state transitions and actual ringing/snooze display remain pending; no four-client/audio test is claimed.
+
+## November 13 About installation
+
+With separate user approval on November 13, the reviewed About UF2 was installed through COM8. SHA-256: `1F2A16509C308BB9FB9881D03C0E5CD2496E0FB0256E7C482F9018CC502551D6`, 1,742,848 bytes. USB reported `1.0.0+23.g697c062.dirty`, build `697c062da090-dirty-bt-mp3-wifi-phone`. The pre-install firmware shared that dirty identity, so the UF2 hash and newly served About metadata distinguish this installation. Image end changed from `0x100d457c` to `0x100d4afc`.
+
+The updater verified startup and Flash guard OK. v12 A/B sequences 150/151 remained valid and unchanged. Home Wi-Fi and NTP recovered. Pre/post HTTP checksums matched for all five alarms, fifteen birthdays and the ten volume/language/output/light preferences. `/status.json` returned Speaking Clock, Pico 2 W board identity, FlintUA and the version/build matching USB. The served page contained the About disclosure and its metadata fields. These were read-only checks; no setting, timer or playback command was sent. COM8 was released. The user subsequently confirmed About worked on the phone. This accepts About, not the later expanded overview candidate.
+
+## November 13 expansion user report
+
+On 2026-11-13, the user reported that several recent improvements had been completed, tested and worked correctly, and requested documentation reconciliation and next-step planning. The inspected working tree is based on `697c062` with uncommitted firmware, tests, interface and documentation changes. No exact installed build ID or detailed test log accompanied that report, and no COM8 capture or new installation was performed during this documentation review.
+
+The corresponding source contains fifteen birthdays, a 1..86,399-second countdown, three scrolling timer wheels with continuous digit scaling/fading, row-based Previous/Play-Pause/Next plus Stop, and alarm-track Test/Stop. The latest row layout is specified in WEB_CONTROL_SPEC.md and supersedes the earlier circular proposal. Record the user's report as broad functional acceptance; do not assign an invented clean build ID or claim that every listed feature was individually tested.
+
+Separate checks remain for slot 15 persistence and timed delivery, v14 on real Flash after save/restart, optional-year persistence, a full-length countdown, both audio outputs, priority guards, audition completion/Stop after pause, and four simultaneous browsers in home/direct modes. Existing stable-release persistence evidence does not automatically close these new scenarios.
+
+Software verification on this date: a clean MSVC Debug rebuild passed all seventeen registered CTest checks, including the production-script slider/audition and timer-wheel checks. The initial incremental run stalled in the timer-controls executable; it was stopped and the suite rebuilt cleanly before recording the passing result. This follows the existing warning about stale header-dependent objects. No firmware source was changed for this documentation task. This test run is not a real four-client HTTP or Bluetooth audio test.
+
 ## Phone-control acceptance through build 499e78c
 
 Documentation reconciled on 2026-11-12. These results belong to the experimental `codex/phone-control` branch, not stable v1.0.0.

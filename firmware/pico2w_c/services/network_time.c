@@ -13,6 +13,7 @@ static char ssid_value[33], password_value[65];
 static uint64_t join_started, next_join, deadline, next_ntp;
 static uint64_t sample_epoch, sample_ms, anchor_epoch, anchor_ms;
 static uint64_t last_sync_ms;
+static uint64_t last_applied_ms;
 static uint64_t next_apply;
 static unsigned join_failures;
 static unsigned join_attempts;
@@ -117,6 +118,26 @@ void network_time_status(void) {
         configured?"YES":"NO",ready?"READY":"OFFLINE",anchor_valid?"YES":"NO",
         applied_offset,(unsigned long long)(anchor_valid?(now_ms()-last_sync_ms)/1000:0));
 }
+static uint32_t age_seconds(uint64_t now, uint64_t then) {
+    uint64_t seconds = now >= then ? (now - then) / 1000u : 0;
+    return seconds > UINT32_MAX ? UINT32_MAX : (uint32_t)seconds;
+}
+network_reference_status_t network_time_reference_status(uint64_t now) {
+    if (ready) cyw43_arch_lwip_begin();
+    network_reference_status_t status = {
+        .available = ready, .configured = configured, .sampled = anchor_valid,
+        .synced = applied_offset != 0, .offset = applied_offset,
+        .pending = anchor_valid && (apply_pending ||
+            applied_offset != clock_berlin_offset(anchor_epoch +
+                (now >= anchor_ms ? (now - anchor_ms) / 1000u : 0))),
+        .requesting = waiting || dns_pending || received,
+        .retry = anchor_valid && next_apply > now,
+        .sample_age = anchor_valid ? age_seconds(now, last_sync_ms) : 0,
+        .sync_age = applied_offset ? age_seconds(now, last_applied_ms) : 0
+    };
+    if (ready) cyw43_arch_lwip_end();
+    return status;
+}
 bool network_time_service(uint64_t now, bool idle, bool join_allowed, ds1302_datetime_t *local) {
     if (!ready) return false;
     bool fresh=false, timed_out=false;
@@ -180,6 +201,7 @@ bool network_time_is_dst_change(void) {
 }
 void network_time_applied(bool success) {
     if (success) {
+        last_applied_ms=now_ms();
         applied_offset=clock_berlin_offset(anchor_epoch+(now_ms()-anchor_ms)/1000);
         apply_pending=false;
         next_apply=0;

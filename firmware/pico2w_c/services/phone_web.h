@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "phone_access.h"
 #include "display_light.h"
+#include "phone_overview.h"
 
 #define PHONE_WEB_SSID "SpeakingClock"
 
@@ -20,10 +21,12 @@ typedef struct {
     uint8_t track;
     uint8_t track_count;
     bool timer_running;
+    bool player_test;
     bool bluetooth;
     const char *player; // Static, firmware-defined state label.
     const char *player_mode;
     phone_web_preferences_t preferences;
+    phone_overview_t overview;
     alarm_entry_t alarms[CLOCK_ALARM_COUNT];
     birthday_t birthdays[CLOCK_BIRTHDAY_COUNT];
 } phone_web_snapshot_t;

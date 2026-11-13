@@ -4,6 +4,19 @@
 
 Experimental work after stable v1.0.0; no stable web-control release is claimed.
 
+- Added authenticated `/control` Quick controls: explicit sound on/off and time/date/nearest-alarm information speech. Shared main-loop guards, command retries and physical sound/speech functions preserve volumes and scheduling; operations do not write Flash. Detailed muted/editor/timer/alarm/player/audio/RTC/no-alarm results explain refusals. Nineteen checks and both builds pass; installation pending.
+- Made browser Bluetooth device management an explicit future roadmap stage: known/discovered lists, direct saved-device connection, scan/cancel, disconnect and forget. Current status/audio preferences do not connect a speaker.
+
+- Added read-only overview status for validated device date/weekday, sound, active/deferred/nearest alarm, monotonic snoozes, Bluetooth name/state and home/direct Wi-Fi/NTP. NTP reference receipt, successful RTC application and retry are distinct. No control command, Flash schema or audio/scheduler behavior is changed by this substage. Eighteen software checks and both builds pass. Approved installation passed startup/HTTP/settings verification; user acceptance remains pending.
+
+- Added read-only browser About with device, board, full tag-derived version/build and author FlintUA. Metadata comes from the installed firmware's shared version constants via status JSON; reconnect updates it and missing metadata is shown as unavailable. The approved November 13 installation passed USB/HTTP checks; the user subsequently accepted About on the phone.
+
+- Expanded annual birthdays to fifteen across physical/USB/browser editing and scheduling; widened pending masks and added conditional v14 A/B storage (616 bytes, three programmed pages). v1-v13 reads retain the original five entries and initialize slots 6-15 disabled. Nondefault extra slots select v14; loading alone does not write Flash.
+- Extended the single countdown to 1..86,399 seconds (23:59:59) with consistent physical/USB/browser limits. Added three scrolling timer wheels with touch, mouse, keyboard and continuous digit scaling/fading.
+- Combined browser Play/Pause between Previous and Next, with Stop below, following the later row-layout specification. Added alarm music-track Test/Stop: a one-track audition through alarm routing without saving the alarm draft; audition-specific Stop does not stop ordinary music. No seeking or rotation gesture was added.
+- Increased the web profile's response allocation to 4 KiB, lwIP heap to 48 KiB and POST contexts to four for the four-client target. This configuration is not proof of four-client hardware acceptance.
+- On 2026-11-13, the user broadly accepted the recent improvements. A clean local Debug rebuild passed seventeen checks. Exact installed build identity and detailed new persistence/concurrency scenarios remain separately unconfirmed; see [evidence](doc/HARDWARE_TEST_EVIDENCE.md#november-13-expansion-user-report).
+
 - Added the optional local HTTP profile, direct WPA2 access-point and home-network modes, live status, LCD connection progress and a 50-second direct-password screen. Browser control requires neither a cloud service nor Internet access.
 - Added remembered browser authorization without an inactivity timeout, four scoped browser entries, browser Sign out, physical revocation/key rotation and optional home-subnet trust. Direct mode still requires browser pairing; home trust is off by default.
 - Added browser timer and player transport controls, independent LOCAL/BT volume, language, four audio preferences, display-light mode and day/night brightness. HTTP callbacks queue validated commands for the main loop; sequence/nonces and epoch protect retries.

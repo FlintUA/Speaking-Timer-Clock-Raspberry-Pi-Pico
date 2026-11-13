@@ -10,7 +10,7 @@
   h1 { font-size: 1.7rem; margin: 0 0 .5rem; }
   h2 { font-size: 1.2rem; margin: 0; }
   dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .65rem 1.25rem; }
-  dd { margin: 0; font-variant-numeric: tabular-nums; }
+  dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
   form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem 1rem; margin: 1.25rem 0; padding-top: 1.25rem; border-top: 1px solid var(--line); }
   [hidden] { display: none !important; }
   form > p, form > h2, form > div { grid-column: 1 / -1; margin: 0; }
@@ -29,20 +29,48 @@
   .weekdays { display: grid; grid-template-columns: repeat(auto-fit, minmax(4.5rem, 1fr)); gap: .75rem; padding: .4rem 0; }
   #settings-controls > div { display: grid; align-items: end; gap: .7rem; }
   #settings-controls > div:not(.slider-setting) { grid-template-columns: minmax(0, 1fr) auto; }
-  #controls > div, #player-controls { display: flex; flex-wrap: wrap; gap: .5rem; }
+  #controls > div { display: flex; flex-wrap: wrap; gap: .5rem; }
+  #controls .timer-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; width: 100%; max-width: 25rem; margin: .5rem auto; }
+  .timer-column { min-width: 0; text-align: center; }
+  .timer-column > span { display: block; color: var(--muted); font-size: .85rem; margin-bottom: .5rem; }
+  .timer-wheel { height: 12.5rem; overflow-y: auto; overscroll-behavior: contain; scroll-snap-type: y mandatory; scrollbar-width: none; padding-block: 5rem; border-radius: 1rem; background: linear-gradient(to bottom, transparent 40%, #e8f0f4 40%, #e8f0f4 60%, transparent 60%); touch-action: pan-y; }
+  .timer-wheel::-webkit-scrollbar { display: none; }
+  .timer-wheel button { display: block; width: 100%; height: 2.5rem; min-height: 2.5rem; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 1.35rem; line-height: 2.5rem; font-variant-numeric: tabular-nums; scroll-snap-align: center; }
+  .timer-wheel button span { display: inline-block; color: var(--accent); font-size: 2rem; font-weight: 600; transform: scale(.675); opacity: .5; }
+  .timer-wheel[aria-disabled="true"] { opacity: .5; pointer-events: none; }
   #player-controls { padding-top: 1.25rem; border-top: 1px solid var(--line); }
-  #player-controls h2 { flex-basis: 100%; }
+  .player-buttons { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr) minmax(0, 1fr); gap: .75rem; max-width: 27rem; margin: 1.25rem auto; }
+  .player-buttons button { padding: .65rem .35rem; }
+  .player-buttons [data-action="stop"] { grid-column: 2; }
+  .track-test { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: end; }
+  .quick-buttons { display: flex; flex-wrap: wrap; gap: .5rem; }
+  #about { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+  #about summary { min-height: 2.75rem; cursor: pointer; font-weight: 600; }
+  #about-status { color: var(--muted); font-size: .9rem; }
   #feedback { color: var(--accent); }
-  @media (max-width: 26rem) { form { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 26rem) {
+    form { grid-template-columns: minmax(0, 1fr); }
+    .player-buttons { gap: .5rem; }
+    .player-buttons button { font-size: .9rem; }
+  }
 </style>
 <main>
   <h1>Speaking Clock</h1>
   <p id="connection" role="status">Connecting to the clock…</p>
   <dl>
     <dt>Time</dt><dd id="time">—</dd>
+    <dt>Date</dt><dd id="date">Unavailable</dd>
+    <dt>Sound</dt><dd id="sound-status">Unavailable</dd>
+    <dt>Next alarm</dt><dd id="next-alarm">Unavailable</dd>
+    <dt>Alarm</dt><dd id="alarm-status" role="status">Unavailable</dd>
+    <dt>Snooze</dt><dd id="snooze-status">Unavailable</dd>
     <dt>Timer</dt><dd id="timer">—</dd>
     <dt>Player</dt><dd id="player">—</dd>
     <dt>Audio output</dt><dd id="output">—</dd>
+    <dt>Bluetooth</dt><dd id="bluetooth-status">Unavailable</dd>
+    <dt>Wi-Fi</dt><dd id="network-status">Unavailable</dd>
+    <dt>Time sync</dt><dd id="ntp-status">Unavailable</dd>
+    <dt>Activity</dt><dd id="activity-status">Unavailable</dd>
   </dl>
   <form id="pair" hidden>
     <label for="code">Code from Phone Control</label>
@@ -50,9 +78,26 @@
     <button>Pair and remember</button>
   </form>
   <button id="logout" type="button" hidden>Sign out</button>
+  <form id="quick-controls" hidden>
+    <h2>Quick controls</h2>
+    <div class="quick-buttons">
+      <button type="button" id="sound-toggle" data-control="sound">Turn sound off</button>
+      <button type="button" id="say-time" data-control="say_time">Speak time</button>
+      <button type="button" id="say-date" data-control="say_date">Speak date</button>
+      <button type="button" id="say-next-alarm" data-control="next_alarm">Speak next alarm</button>
+    </div>
+    <p id="control-hint"></p>
+  </form>
   <form id="controls" hidden>
-    <label>Minutes <input id="minutes" type="number" min="0" max="240" value="1" required></label>
-    <label>Seconds <input id="seconds" type="number" min="0" max="59" value="0" required></label>
+    <h2>Set timer</h2>
+    <input id="hours" type="hidden" value="0">
+    <input id="minutes" type="hidden" value="1">
+    <input id="seconds" type="hidden" value="0">
+    <div class="timer-picker" role="group" aria-label="Timer duration">
+      <div class="timer-column"><span id="hours-label">Hours</span><div id="wheel-hours" class="timer-wheel" role="spinbutton" tabindex="0" aria-labelledby="hours-label" aria-valuemin="0" aria-valuemax="23" aria-valuenow="0"></div></div>
+      <div class="timer-column"><span id="minutes-label">Minutes</span><div id="wheel-minutes" class="timer-wheel" role="spinbutton" tabindex="0" aria-labelledby="minutes-label" aria-valuemin="0" aria-valuemax="59" aria-valuenow="1"></div></div>
+      <div class="timer-column"><span id="seconds-label">Seconds</span><div id="wheel-seconds" class="timer-wheel" role="spinbutton" tabindex="0" aria-labelledby="seconds-label" aria-valuemin="0" aria-valuemax="59" aria-valuenow="0"></div></div>
+    </div>
     <div>
       <button type="button" data-action="set">Set</button>
       <button type="button" data-action="start">Start</button>
@@ -61,11 +106,12 @@
   </form>
   <div id="player-controls" hidden>
     <h2>Music player</h2>
-    <button type="button" data-action="play" id="player-play">Play</button>
-    <button type="button" data-action="pause">Pause</button>
-    <button type="button" data-action="stop">Stop</button>
-    <button type="button" data-action="previous">Previous</button>
-    <button type="button" data-action="next">Next</button>
+    <div class="player-buttons" role="group" aria-label="Music playback">
+      <button type="button" data-action="previous">Previous</button>
+      <button type="button" data-action="play" id="player-play">Play</button>
+      <button type="button" data-action="next">Next</button>
+      <button type="button" data-action="stop">Stop</button>
+    </div>
   </div>
   <form id="settings-controls" hidden>
     <h2>Settings</h2>
@@ -131,14 +177,17 @@
       <label><input name="days" type="checkbox" value="64">Sun</label>
     </div>
     <label>Sound <select name="sound"><option value="0">Signal</option><option value="1">Music</option></select></label>
-    <label>Music track <input name="track" type="number" min="1" max="255" required></label>
+    <div class="track-test">
+      <label>Music track <input name="track" type="number" min="1" max="255" required></label>
+      <button type="button" id="alarm-track-test" data-schedule="test">Test</button>
+    </div>
     <button type="button" data-schedule="apply">Apply alarm</button>
     <button type="button" data-schedule="reload">Reload</button>
     <p data-record-status role="status"></p>
   </form>
   <form id="birthday-controls" hidden>
     <h2>Annual birthdays</h2>
-    <label>Slot <select name="slot"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+    <label>Slot <select name="slot"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option><option>13</option><option>14</option><option>15</option></select></label>
     <label class="toggle"><input name="enabled" type="checkbox"> Enabled</label>
     <label>Date <input name="date" type="text" maxlength="10" pattern="[0-9]{2}\.[0-9]{2}(\.[0-9]{4})?" placeholder="10.12 or 10.12.1985" autocomplete="off" required></label>
     <label>Time <input name="time" type="time" step="60" required></label>
@@ -148,8 +197,71 @@
     <p data-record-status role="status"></p>
   </form>
   <p id="feedback" role="status"></p>
+  <details id="about">
+    <summary>About</summary>
+    <dl>
+      <dt>Device</dt><dd id="about-name">-</dd>
+      <dt>Board</dt><dd id="about-board">-</dd>
+      <dt>Version</dt><dd id="about-version">-</dd>
+      <dt>Build</dt><dd id="about-build">-</dd>
+      <dt>Author</dt><dd id="about-author">-</dd>
+    </dl>
+    <p id="about-status" role="status">Waiting for device information.</p>
+  </details>
 </main>
 <script>
+  const overviewIds = ["date", "sound-status", "next-alarm", "alarm-status", "snooze-status",
+    "bluetooth-status", "network-status", "ntp-status", "activity-status"];
+  function calendarText(value) {
+    const parts = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2}))?$/.exec(value || "");
+    return parts ? `${parts[3]}.${parts[2]}.${parts[1]}` + (parts[4] ? ` ${parts[4]}:${parts[5]}` : "") : "Unavailable";
+  }
+  function showOverview(overview, data) {
+    const show = (id, value) => { document.getElementById(id).textContent = value; };
+    if (!overview) { for (const id of overviewIds) show(id, "Unavailable"); return; }
+    const days = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    show("date", overview.rtc_valid ? `${days[overview.weekday] || ""} · ${calendarText(overview.date)}` : "Unavailable: clock date unknown");
+    show("sound-status", typeof overview.sound_on === "boolean" ? overview.sound_on ? "On" : "Off" : "Unavailable");
+    const alarm = overview.alarm || {};
+    show("next-alarm", !overview.rtc_valid ? "Unavailable: clock date unknown" :
+      alarm.next_slot ? `Alarm ${alarm.next_slot} · ${calendarText(alarm.next_at)}${alarm.next_snoozed ? " · snoozed" : ""}` : "No enabled alarms");
+    show("alarm-status", (alarm.active ? `Alarm ${alarm.active} ringing` : "No alarm ringing") +
+      (alarm.deferred ? ` · ${alarm.deferred} queued` : ""));
+    show("snooze-status", alarm.snoozes ? `Alarm ${alarm.snooze_slot} · ` +
+      (alarm.snooze_waiting ? "due, waiting for the clock" : `${duration(alarm.snooze_seconds)} remaining`) +
+      (alarm.snoozes > 1 ? ` · ${alarm.snoozes} repeats pending` : "") : "No repeats pending");
+    const bt = overview.bluetooth || {};
+    const btStates = {off: "Off (manual connection required)", scanning: "Scanning",
+      waiting: "Waiting for connection", connected: "Connected", unavailable: "Unavailable"};
+    show("bluetooth-status", (bt.name ? bt.name + " · " : "") + (btStates[bt.state] || "Unavailable"));
+    const network = overview.network || {};
+    const networkStates = {offline: "Unavailable", unconfigured: "Not configured", suspended: "Home network suspended",
+      wait_idle: "Waiting for the clock to become idle", connecting: "Connecting", address: "Getting IP address",
+      retry: "Retry in", ready: "Connected"};
+    show("network-status", network.mode === "direct" ? "Direct Wi-Fi · local connection" :
+      "Home Wi-Fi · " + (networkStates[network.state] || "Unavailable") +
+      (["connecting", "address", "retry"].includes(network.state) ? ` ${network.seconds}s` : ""));
+    const ntp = overview.ntp || {};
+    let sync = !ntp.available ? "Unavailable" : !ntp.configured ? "Not configured" :
+      ntp.retry ? "Clock update failed; retry pending" : ntp.pending ? "Clock update waiting for idle" : ntp.requesting ? "Requesting time reference" :
+      ntp.synced ? "Synchronized" : ntp.sampled ? "Time reference received" : "Waiting for time reference";
+    if (ntp.synced && Number.isFinite(ntp.sync_age)) sync += ` · last synchronized ${duration(ntp.sync_age)} ago`;
+    if (network.mode === "direct") sync = "Direct mode · " + (ntp.synced ? sync : "RTC only");
+    show("ntp-status", sync);
+    show("activity-status", data.settings?.editing ? "Physical settings open" : alarm.active ? "Alarm ringing" :
+      data.timer_running ? "Timer running" : data.player && data.player !== "Closed" ? "Music player open" :
+      data.settings?.idle ? "Ready" : "Audio busy");
+  }
+  function showAbout(firmware) {
+    for (const name of ["name", "board", "version", "build", "author"]) {
+      const value = firmware?.[name];
+      document.getElementById("about-" + name).textContent =
+        typeof value === "string" && value ?
+          (name === "board" && value === "pico2_w" ? "Raspberry Pi Pico 2 W" : value) : "Unavailable";
+    }
+    document.getElementById("about-status").textContent = firmware ?
+      "Version and build identify the installed firmware." : "Device information unavailable.";
+  }
   const labels = Object.fromEntries(
     ["connection", "time", "timer", "player", "output"].map(id => [id, document.getElementById(id)])
   );
@@ -157,6 +269,31 @@
   const controls = document.getElementById("controls");
   const playerControls = document.getElementById("player-controls");
   const playerPlay = document.getElementById("player-play");
+  const quickControls = document.getElementById("quick-controls");
+  const soundToggle = document.getElementById("sound-toggle");
+  const controlHint = document.getElementById("control-hint");
+  const controlMessages = {
+    muted: "Sound is off: speech and scheduled alarm sounds are suppressed.",
+    rtc_unavailable: "Clock time/date is unavailable.", no_alarm: "No upcoming alarm to announce.",
+    editing: "Close settings or the alarm editor on the clock.", timer_busy: "Wait for the timer or cancel it first.",
+    alarm_busy: "A ringing alarm has priority.", player_busy: "Stop and close the music player first.",
+    audio_busy: "Wait for the current audio to finish.", unavailable: "Current device status is unavailable."
+  };
+  function controlReason(action) {
+    const overview = live?.overview;
+    if (!overview) return "unavailable";
+    if (overview.alarm?.active) return "alarm_busy";
+    if (action === "sound") return null;
+    if (!overview.sound_on) return "muted";
+    if (live.settings?.editing) return "editing";
+    if (live.timer_running) return "timer_busy";
+    if (live.player !== "Closed") return "player_busy";
+    if (!live.settings?.idle) return "audio_busy";
+    if (!overview.rtc_valid) return "rtc_unavailable";
+    if (action === "next_alarm" && !overview.alarm?.next_slot) return "no_alarm";
+    return null;
+  }
+  const alarmTrackTest = document.getElementById("alarm-track-test");
   const settingsControls = document.getElementById("settings-controls");
   const settingFields = Object.fromEntries(
     Array.from(settingsControls.querySelectorAll("input, select"), field => [field.name, field])
@@ -172,6 +309,7 @@
     return {kind, form, fields: form.elements, dirty: false, revision: null, loadedSlot: 0, notice: "",
       status: form.querySelector("[data-record-status]")};
   });
+  const hours = document.getElementById("hours");
   const minutes = document.getElementById("minutes");
   const seconds = document.getElementById("seconds");
   const feedback = document.getElementById("feedback");
@@ -181,6 +319,68 @@
   try { token = localStorage.getItem(storageKey); } catch {}
   if (!/^[0-9a-f]{32}$/.test(token || "")) token = null;
   let busy = false, pending = null, live = null, edited = false;
+  const timerWheels = [];
+  for (const field of [hours, minutes, seconds]) {
+    const wheel = document.getElementById("wheel-" + field.id);
+    if (!wheel?.replaceChildren) continue;
+    const maximum = field === hours ? 23 : 59;
+    const rows = Array.from({length: maximum + 1}, (_, value) => {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.tabIndex = -1;
+      row.setAttribute("aria-hidden", "true");
+      const digit = document.createElement("span");
+      digit.textContent = String(value).padStart(2, "0");
+      row.appendChild(digit);
+      row.addEventListener("click", () => choose(value));
+      return row;
+    });
+    wheel.replaceChildren(...rows);
+    function paint() {
+      const height = rows[0].getBoundingClientRect().height;
+      if (!height) return;
+      const position = wheel.scrollTop / height;
+      rows.forEach((row, index) => {
+        const proximity = Math.max(0, 1 - Math.abs(index - position));
+        row.firstElementChild.style.transform = `scale(${.675 + .325 * proximity})`;
+        row.firstElementChild.style.opacity = String(.5 + .5 * proximity);
+      });
+    }
+    function sync() {
+      const value = Number(field.value);
+      rows.forEach((row, index) => row.setAttribute("aria-current", String(index === value)));
+      wheel.setAttribute("aria-valuenow", String(value));
+      wheel.scrollTop = value * rows[0].getBoundingClientRect().height;
+      paint();
+    }
+    function choose(value) {
+      if (wheel.getAttribute("aria-disabled") === "true") return;
+      field.value = String(Math.max(0, Math.min(maximum, value)));
+      edited = true;
+      sync();
+    }
+    wheel.addEventListener("scroll", () => {
+      if (wheel.getAttribute("aria-disabled") === "true") return;
+      const height = rows[0].getBoundingClientRect().height;
+      if (!height) return;
+      paint();
+      const value = Math.max(0, Math.min(maximum, Math.round(wheel.scrollTop / height)));
+      if (value !== Number(field.value)) {
+        field.value = String(value);
+        edited = true;
+        rows.forEach((row, index) => row.setAttribute("aria-current", String(index === value)));
+        wheel.setAttribute("aria-valuenow", String(value));
+      }
+    }, {passive: true});
+    wheel.addEventListener("keydown", event => {
+      const offsets = {ArrowUp: -1, ArrowDown: 1, PageUp: -5, PageDown: 5};
+      if (event.key in offsets || event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        choose(event.key === "Home" ? 0 : event.key === "End" ? maximum : Number(field.value) + offsets[event.key]);
+      }
+    });
+    timerWheels.push({wheel, sync});
+  }
 
   function remember(value) {
     token = value;
@@ -200,16 +400,34 @@
     const allowed = Boolean(live && (live.home_trusted || paired));
     pairForm.hidden = !live || allowed || Boolean(token && checkedEpoch !== live.epoch);
     controls.hidden = !allowed;
+    for (const {wheel, sync} of timerWheels) {
+      const locked = busy || Boolean(pending) || !live || live.timer_running || live.player !== "Closed";
+      wheel.setAttribute("aria-disabled", String(locked));
+      wheel.tabIndex = locked ? -1 : 0;
+      if (!edited) sync();
+    }
     playerControls.hidden = !allowed;
     settingsControls.hidden = !allowed;
+    quickControls.hidden = !allowed || !live?.overview;
+    soundToggle.textContent = live?.overview?.sound_on ? "Turn sound off" : "Turn sound on";
+    for (const button of quickControls.querySelectorAll("button")) {
+      const reason = controlReason(button.dataset.control);
+      button.disabled = !allowed || busy || Boolean(pending) || Boolean(reason);
+      button.title = reason ? controlMessages[reason] : "";
+    }
+    const reason = controlReason("say_time");
+    controlHint.textContent = busy || pending ? "Waiting for the clock..." : reason ? controlMessages[reason] :
+      controlReason("next_alarm") === "no_alarm" ? "Time/date speech is ready. No upcoming alarm to announce." :
+      "Announcements use the Manual speech / music output.";
     logout.hidden = !paired;
     logout.disabled = busy || Boolean(pending);
     for (const button of controls.querySelectorAll("button")) {
       button.disabled = busy || Boolean(pending) || !live ||
         ((live.timer_running || live.player !== "Closed") && button.dataset.action !== "cancel");
     }
-    playerPlay.dataset.action = live?.player === "Paused" ? "resume" : "play";
-    playerPlay.textContent = live?.player === "Paused" ? "Resume" : "Play";
+    playerPlay.dataset.action = live?.player === "Playing" ? "pause" : live?.player === "Paused" ? "resume" : "play";
+    playerPlay.textContent = live?.player === "Playing" ? "Pause" : "Play";
+    alarmTrackTest.textContent = live?.player_test ? "Stop" : "Test";
     const playerOpen = Boolean(live && live.player !== "Closed");
     const canPlay = Boolean(live && !live.timer_running && live.player !== "Muted");
     const playerActions = {
@@ -236,8 +454,12 @@
     for (const editor of scheduleEditors) {
       editor.form.hidden = !allowed;
       for (const field of editor.form.querySelectorAll("input, select, button")) {
+        const audition = editor.kind === "alarm" &&
+          (field.name === "track" || field.dataset.schedule === "test");
         field.disabled = busy || Boolean(pending) || !preferences ||
-          (field.dataset.schedule !== "reload" && !preferences.idle);
+          (field.dataset.schedule !== "reload" && !preferences.idle &&
+            !(field.dataset.schedule === "test" && live.player_test) &&
+            !(audition && !preferences.editing && !live.timer_running && live.player !== "Closed"));
       }
     }
   }
@@ -302,9 +524,9 @@
   controls.addEventListener("click", async event => {
     const action = event.target.dataset.action;
     if (!action) return;
-    const durationSeconds = action === "cancel" ? 0 : Number(minutes.value) * 60 + Number(seconds.value);
-    if (action !== "cancel" && (!controls.reportValidity() || durationSeconds < 1 || durationSeconds > 14400)) {
-      feedback.textContent = "Enter a duration between one second and four hours.";
+    const durationSeconds = action === "cancel" ? 0 : Number(hours.value) * 3600 + Number(minutes.value) * 60 + Number(seconds.value);
+    if (action !== "cancel" && (!controls.reportValidity() || durationSeconds < 1 || durationSeconds > 86399)) {
+      feedback.textContent = "Enter a duration between 00:00:01 and 23:59:59.";
       return;
     }
     await sendCommand("timer", action, durationSeconds);
@@ -314,6 +536,14 @@
     if (action) await sendCommand("player", action, 0);
   });
   settingsControls.addEventListener("submit", event => event.preventDefault());
+  quickControls.addEventListener("submit", event => event.preventDefault());
+  quickControls.addEventListener("click", async event => {
+    const action = event.target.dataset.control;
+    if (!["sound", "say_time", "say_date", "next_alarm"].includes(action)) return;
+    const reason = controlReason(action);
+    if (reason) { feedback.textContent = controlMessages[reason]; return; }
+    await sendCommand("control", action, action === "sound" && !live.overview.sound_on ? 1 : 0);
+  });
   function settingEdited(event) {
     const field = event.target;
     if (!(field.name in settingFields) || field.disabled) return;
@@ -439,6 +669,16 @@
         refreshSchedule(editor, live);
         return;
       }
+      if (action === "test" && editor.kind === "alarm") {
+        if (live.player_test) {
+          await sendCommand("player", "test_stop", 0);
+          return;
+        }
+        const track = Number(editor.fields.track.value);
+        if (!editor.fields.track.reportValidity() || !Number.isInteger(track) || track < 1 || track > 255) return;
+        await sendCommand("player", "test_track", track);
+        return;
+      }
       if (!live.settings?.idle || editor.revision === null || !editor.form.reportValidity()) return;
       const [hour, minute] = editor.fields.time.value.split(":").map(Number);
       const values = [editor.loadedSlot + 1, editor.revision, editor.fields.enabled.checked ? 1 : 0];
@@ -520,6 +760,8 @@
       if (!response.ok) throw new Error("Status unavailable");
       const data = await response.json();
       live = data;
+      showAbout(data.firmware);
+      showOverview(data.overview, data);
       if (refreshingSliders) sliderNeedsStatus = false;
       if (token && checkedEpoch !== data.epoch && !busy) {
         const candidate = token;
@@ -537,7 +779,7 @@
       labels.output.textContent = data.output;
       if (pending && data.epoch === pending.epoch && data.command_id === pending.id &&
           data.command_nonce === pending.nonce && data.command_result !== "pending" &&
-          (pending.target !== "settings" && !pending.editor || data.command_result !== "applied" ||
+          (pending.target !== "settings" && pending.target !== "control" && !pending.editor || data.command_result !== "applied" ||
             data.settings?.snapshot_id >= pending.id)) {
         if (pending.editor) {
           const messages = {applied: "Record applied.", conflict: "Record changed elsewhere. Reload and review it.",
@@ -552,8 +794,14 @@
             dirtySettings.delete(pending.action);
             if (pending.slider) sliderChanges.delete(pending.action);
           }
+        } else if (pending.target === "control") {
+          feedback.textContent = data.command_result === "applied" ?
+            (pending.action === "sound" ? data.overview?.sound_on ? "Sound on." : "Sound off." : "Announcement requested.") :
+            controlMessages[data.command_result] || "Command not applied. Check the clock status.";
         } else if (pending.target === "player") {
-          feedback.textContent = data.command_result === "applied" ? "Player command accepted." :
+          feedback.textContent = data.command_result === "applied" ?
+            (pending.action === "test_track" ? "Track test started. Press Stop to end it." :
+              pending.action === "test_stop" ? "Track test stopped." : "Player command accepted.") :
             "Player busy or sound off. Close settings and check the timer or alarm.";
         } else {
           feedback.textContent = data.command_result === "applied" ? "Timer updated." :
@@ -566,7 +814,8 @@
         feedback.textContent = "Status changed. Check the clock before trying again.";
       }
       if (!edited && !data.timer_running) {
-        minutes.value = Math.floor(data.timer_seconds / 60);
+        hours.value = Math.floor(data.timer_seconds / 3600);
+        minutes.value = Math.floor(data.timer_seconds / 60) % 60;
         seconds.value = data.timer_seconds % 60;
       }
       if (data.settings) {
@@ -587,6 +836,8 @@
       for (const editor of scheduleEditors) refreshSchedule(editor, data);
     } catch {
       live = null;
+      showAbout(null);
+      showOverview(null);
       labels.connection.textContent = "Connection lost. Reconnecting…";
       saveStatus.textContent = "Saved state unavailable while disconnected.";
       for (const key of ["time", "timer", "player", "output"]) labels[key].textContent = "—";

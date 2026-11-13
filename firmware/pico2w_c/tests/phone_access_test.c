@@ -1,5 +1,6 @@
 #include "phone_access.h"
 #include <assert.h>
+#include <string.h>
 #include <stdio.h>
 
 #define TOKEN "0123456789abcdef0123456789abcdef"
@@ -44,7 +45,7 @@ int main(void) {
     assert(phone_access_timer(&access, "- 9 1 11 start 60", PHONE_SCOPE_DIRECT, true) == PHONE_DENIED);
     assert(phone_access_timer(&access, OTHER " 9 1 11 start 60", PHONE_SCOPE_HOME, false) == PHONE_DENIED);
     assert(phone_access_timer(&access, TOKEN " 9 1 11 start 0", PHONE_SCOPE_HOME, false) == PHONE_INVALID);
-    assert(phone_access_timer(&access, TOKEN " 9 1 11 set 14401", PHONE_SCOPE_HOME, false) == PHONE_INVALID);
+    assert(phone_access_timer(&access, TOKEN " 9 1 11 set 86400", PHONE_SCOPE_HOME, false) == PHONE_INVALID);
     assert(phone_access_timer(&access, TOKEN " 9 1 11 cancel 1", PHONE_SCOPE_HOME, false) == PHONE_INVALID);
     assert(phone_access_timer(&access, TOKEN " 9 4294967296 11 start 60", PHONE_SCOPE_HOME, false) == PHONE_INVALID);
     assert(phone_access_timer(&access, TOKEN " 9 1 11 start 60 extra", PHONE_SCOPE_HOME, false) == PHONE_INVALID);
@@ -57,6 +58,9 @@ int main(void) {
     assert(access.result == PHONE_COMMAND_APPLIED); // A retry never queues it again.
     assert(phone_access_timer(&access, "- 9 1 12 start 60", PHONE_SCOPE_HOME, true) == PHONE_BUSY);
     assert(phone_access_timer(&access, TOKEN " 9 2 12 cancel 0", PHONE_SCOPE_HOME, false) == PHONE_OK);
+    access.result = PHONE_COMMAND_APPLIED;
+    assert(phone_access_timer(&access, TOKEN " 9 3 13 set 86399", PHONE_SCOPE_HOME, false) == PHONE_OK);
+    assert(access.last.action == PHONE_TIMER_SET && access.last.value == 86399u);
     access.result = PHONE_COMMAND_APPLIED;
     assert(phone_access_timer(&access, TOKEN " 9 1 11 start 60", PHONE_SCOPE_HOME, false) == PHONE_BUSY);
 
@@ -109,6 +113,20 @@ int main(void) {
     }
     phone_access_reset(&player, 21);
     assert(phone_access_player(&player, "- 20 1 11 play 0", PHONE_SCOPE_HOME, true) == PHONE_BUSY);
+    assert(phone_access_player(&player, "- 21 1 11 test_track 0", PHONE_SCOPE_HOME, true) == PHONE_INVALID);
+    assert(phone_access_player(&player, "- 21 1 11 test_track 256", PHONE_SCOPE_HOME, true) == PHONE_INVALID);
+    assert(phone_access_alarm(&player, "- 21 1 11 test_track 12", PHONE_SCOPE_HOME, true) == PHONE_INVALID);
+    assert(phone_access_player(&player, "- 21 1 11 test_track 255", PHONE_SCOPE_HOME, true) == PHONE_OK);
+    assert(player.last.action == PHONE_PLAYER_TEST_TRACK && player.last.value == 255);
+    player.result = PHONE_COMMAND_APPLIED;
+    assert(phone_access_player(&player, "- 21 1 11 test_track 255", PHONE_SCOPE_HOME, true) == PHONE_OK);
+    assert(player.result == PHONE_COMMAND_APPLIED);
+
+    assert(phone_access_player(&player, "- 21 2 12 test_stop 1", PHONE_SCOPE_HOME, true) == PHONE_INVALID);
+    assert(phone_access_player(&player, "- 21 2 12 test_stop 0", PHONE_SCOPE_HOME, true) == PHONE_OK);
+    assert(player.last.action == PHONE_PLAYER_TEST_STOP);
+    player.result = PHONE_COMMAND_APPLIED;
+    assert(phone_access_player(&player, "- 21 2 12 test_stop 0", PHONE_SCOPE_HOME, true) == PHONE_OK);
 
     phone_access_t settings = {0};
     phone_access_reset(&settings, 30);
@@ -188,7 +206,7 @@ int main(void) {
     assert(phone_access_settings(&schedule, alarm_body, PHONE_SCOPE_HOME, true) == PHONE_INVALID);
     assert(phone_access_timer(&schedule, alarm_body, PHONE_SCOPE_HOME, true) == PHONE_INVALID);
     const char *const invalid_birthdays[] = {
-        "- 40 2 11 set 0 0 1 1 1 7 0", "- 40 2 11 set 6 0 1 1 1 7 0",
+        "- 40 2 11 set 0 0 1 1 1 7 0", "- 40 2 11 set 16 0 1 1 1 7 0",
         "- 40 2 11 set 1 0 2 1 1 7 0", "- 40 2 11 set 1 0 1 0 1 7 0",
         "- 40 2 11 set 1 0 1 13 1 7 0", "- 40 2 11 set 1 0 1 4 31 7 0",
         "- 40 2 11 set 1 0 1 2 30 7 0", "- 40 2 11 set 1 0 1 1 0 7 0",
@@ -229,5 +247,48 @@ int main(void) {
     schedule.result=PHONE_COMMAND_APPLIED;
     assert(phone_access_birthday(&schedule,"- 40 5 14 set 1 4163690497 1 12 10 7 0",PHONE_SCOPE_HOME,true)==PHONE_OK);
     assert(!schedule.last.birthday_year_supplied); // Legacy callers preserve stored metadata.
+    schedule.result=PHONE_COMMAND_APPLIED;
+    assert(phone_access_birthday(&schedule,"- 40 6 15 set 15 0 1 12 31 23 59",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(schedule.last.slot==14 && schedule.last.birthday.hour==23);
+
+    phone_access_t control={0};
+    phone_access_reset(&control,50);
+    assert(phone_access_control(&control,"- 50 1 10 sound 0",PHONE_SCOPE_HOME,true)==PHONE_DENIED);
+    control.settings.home_trusted=1;
+    assert(phone_access_control(&control,"- 50 1 10 sound 0",PHONE_SCOPE_DIRECT,true)==PHONE_DENIED);
+    assert(phone_access_control(&control,"- 50 1 10 sound 0",PHONE_SCOPE_HOME,false)==PHONE_DENIED);
+    const char *const invalid_controls[]={"sound 2","sound -1","say_time 1","say_date 0 extra",
+        "next_alarm 1","play 0","light_day 10","sound"};
+    for(unsigned i=0;i<sizeof(invalid_controls)/sizeof(invalid_controls[0]);++i){
+        char command[96];
+        snprintf(command,sizeof(command),"- 50 1 10 %s",invalid_controls[i]);
+        assert(phone_access_control(&control,command,PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+        assert(!control.last.id);
+    }
+    assert(phone_access_settings(&control,"- 50 1 10 sound 0",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_player(&control,"- 50 1 10 say_time 0",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_control(&control,"- 50 1 10 sound 0",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(control.last.action==PHONE_SOUND_SET && control.last.value==0);
+    assert(phone_access_player(&control,"- 50 2 11 play 0",PHONE_SCOPE_HOME,true)==PHONE_BUSY);
+    control.result=PHONE_COMMAND_APPLIED;
+    assert(phone_access_control(&control,"- 50 1 10 sound 0",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(control.result==PHONE_COMMAND_APPLIED);
+    const char *const speech_controls[]={"say_time","say_date","next_alarm"};
+    for(unsigned i=0;i<3;++i){
+        char command[96];
+        snprintf(command,sizeof(command),"- 50 %u %u %s 0",i+2,i+11,speech_controls[i]);
+        assert(phone_access_control(&control,command,PHONE_SCOPE_HOME,true)==PHONE_OK);
+        control.result=PHONE_COMMAND_RTC_UNAVAILABLE;
+        assert(phone_access_control(&control,command,PHONE_SCOPE_HOME,true)==PHONE_OK);
+        assert(control.result==PHONE_COMMAND_RTC_UNAVAILABLE);
+    }
+    char control_token[PHONE_TOKEN_LEN+1], control_body[96];
+    memset(control_token,'a',PHONE_TOKEN_LEN); control_token[PHONE_TOKEN_LEN]=0;
+    control.settings.browsers[0].scope=PHONE_SCOPE_DIRECT;
+    memcpy(control.settings.browsers[0].token,control_token,sizeof(control_token));
+    snprintf(control_body,sizeof(control_body),"%s 50 5 14 sound 1",control_token);
+    assert(phone_access_control(&control,control_body,PHONE_SCOPE_HOME,false)==PHONE_DENIED);
+    assert(phone_access_control(&control,control_body,PHONE_SCOPE_DIRECT,false)==PHONE_OK);
+    assert(control.last.value==1);
     return 0;
 }

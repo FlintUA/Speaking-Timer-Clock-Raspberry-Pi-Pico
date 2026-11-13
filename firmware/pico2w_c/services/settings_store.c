@@ -34,7 +34,9 @@ _Static_assert(LEGACY_SLOT_OFFSET + FLASH_SECTOR_SIZE <= PICO_FLASH_BANK_STORAGE
                "Legacy clock Flash overlaps BTstack storage");
 #endif
 #define RECORD_MAGIC 0x53434c4bu /* SCLK */
-#define RECORD_VERSION 13u
+#define RECORD_VERSION 14u
+#define RECORD_V13 13u
+#define STORED_BIRTHDAY_COUNT 5u
 #define RECORD_V12 12u
 #define RECORD_V11 11u
 #define RECORD_V10 10u
@@ -209,13 +211,22 @@ typedef struct {
     uint8_t reserved_v8[2];
     uint8_t alarm_weekdays[CLOCK_ALARM_COUNT];
     uint8_t reserved_v9[3];
-    uint8_t birthdays[CLOCK_BIRTHDAY_COUNT][8];
+    uint8_t birthdays[STORED_BIRTHDAY_COUNT][8];
     display_light_t display_light;
     uint8_t reserved_v11;
     phone_settings_t phone;
-    uint16_t birth_years[CLOCK_BIRTHDAY_COUNT];
+    uint16_t birth_years[STORED_BIRTHDAY_COUNT];
     uint32_t crc32;
 } settings_record_current_t;
+
+// v14 extends the immutable v13 prefix. Its checksum covers the prefix and
+// all additional birthdays; the old v13 checksum field is set to erased FF.
+typedef struct {
+    settings_record_current_t prefix;
+    uint8_t birthdays[CLOCK_BIRTHDAY_COUNT - STORED_BIRTHDAY_COUNT][8];
+    uint16_t birth_years[CLOCK_BIRTHDAY_COUNT - STORED_BIRTHDAY_COUNT];
+    uint32_t crc32;
+} settings_record_v14_t;
 
 _Static_assert(sizeof(settings_record_t) == 52, "Unexpected v3 size");
 _Static_assert(offsetof(settings_record_t, crc32) == 48, "Unexpected v3 CRC offset");
@@ -239,6 +250,8 @@ _Static_assert(RECORD_V11_CRC_OFFSET == 344, "Unexpected v11 CRC offset");
 _Static_assert(offsetof(settings_record_current_t, birth_years) == 498, "Unexpected birth year offset");
 _Static_assert(offsetof(settings_record_current_t, crc32) == 508, "Unexpected v13 CRC offset");
 _Static_assert(sizeof(settings_record_current_t) <= 2u * FLASH_PAGE_SIZE, "v13 exceeds two flash pages");
+_Static_assert(sizeof(settings_record_v14_t) <= 3u * FLASH_PAGE_SIZE, "v14 exceeds three flash pages");
+_Static_assert(offsetof(settings_record_v14_t, crc32) == 612u, "Unexpected v14 CRC offset");
 
 static uint32_t record_crc_bytes(const void *data, size_t length) {
     uint32_t crc = 0xffffffffu;
@@ -292,7 +305,8 @@ static bool record_valid(const settings_record_current_t *r) {
     if (r->version != RECORD_V3 && r->version != RECORD_V4 &&
          r->version != RECORD_V5 && r->version != RECORD_V6 && r->version != RECORD_V7 && r->version != RECORD_V8 && r->version != RECORD_V9 &&
          r->version != RECORD_V10 && r->version != RECORD_V11 &&
-         r->version != RECORD_V12 && r->version != RECORD_VERSION) return false;
+         r->version != RECORD_V12 && r->version != RECORD_V13 &&
+         r->version != RECORD_VERSION) return false;
     if (r->quiet_enabled > 1u || r->quiet_start > 23u ||
         r->quiet_end > 23u || r->half_hour_enabled > 1u ||
         r->clock_mode > 1u) return false;
@@ -360,11 +374,11 @@ static bool record_valid(const settings_record_current_t *r) {
         memcpy(&old,r,sizeof(old));
         return old.crc32==record_crc_bytes(&old,offsetof(settings_record_v9_t,crc32));
     }
-    for (unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i) {
+    for (unsigned i=0;i<STORED_BIRTHDAY_COUNT;++i) {
         const uint8_t *b=r->birthdays[i];
         birthday_t date={.enabled=b[0]!=0,.month=b[1],.day=b[2],.hour=b[3],.minute=b[4],
             .last_year=(uint16_t)(b[5]|((uint16_t)b[6]<<8)),
-            .birth_year=r->version == RECORD_VERSION ? r->birth_years[i] : 0};
+            .birth_year=r->version >= RECORD_V13 ? r->birth_years[i] : 0};
         if (b[0]>1u || b[7]!=0xffu || !birthday_valid(&date)) return false;
     }
     if (r->version == RECORD_V10) {
@@ -384,7 +398,24 @@ static bool record_valid(const settings_record_current_t *r) {
         memcpy(&old_crc, (const uint8_t *)r + RECORD_V12_CRC_OFFSET, sizeof(old_crc));
         return old_crc == record_crc_bytes(r, RECORD_V12_CRC_OFFSET);
     }
+    if (r->version == RECORD_VERSION) return r->crc32 == UINT32_MAX;
     return r->crc32 == record_crc_bytes(r, offsetof(settings_record_current_t, crc32));
+}
+
+static bool record_v14_valid(const uint8_t *bytes) {
+    settings_record_v14_t r;
+    memcpy(&r, bytes, sizeof(r));
+    if (!record_valid(&r.prefix) || r.prefix.version != RECORD_VERSION ||
+        r.crc32 != record_crc_bytes(&r, offsetof(settings_record_v14_t, crc32))) return false;
+    for (unsigned i = 0; i < CLOCK_BIRTHDAY_COUNT - STORED_BIRTHDAY_COUNT; ++i) {
+        const uint8_t *b = r.birthdays[i];
+        birthday_t date = {.enabled = b[0] != 0, .month = b[1], .day = b[2],
+            .hour = b[3], .minute = b[4],
+            .last_year = (uint16_t)(b[5] | ((uint16_t)b[6] << 8)),
+            .birth_year = r.birth_years[i]};
+        if (b[0] > 1u || b[7] != 0xffu || !birthday_valid(&date)) return false;
+    }
+    return true;
 }
 
 static size_t record_size(const settings_record_current_t *r) {
@@ -400,6 +431,7 @@ static size_t record_size(const settings_record_current_t *r) {
     if (r->version == RECORD_V10) return RECORD_V10_CRC_OFFSET + sizeof(uint32_t);
     if (r->version == RECORD_V11) return RECORD_V11_CRC_OFFSET + sizeof(uint32_t);
     if (r->version == RECORD_V12) return RECORD_V12_CRC_OFFSET + sizeof(uint32_t);
+    if (r->version == RECORD_VERSION) return sizeof(settings_record_v14_t);
     return sizeof(settings_record_current_t);
 }
 
@@ -417,7 +449,7 @@ static bool sector_owned(unsigned slot) {
     settings_record_current_t r;
     const uint8_t *bytes = slot_bytes(slot);
     memcpy(&r, bytes, sizeof(r));
-    if (!record_valid(&r)) return false;
+    if (!record_valid(&r) || (r.version == RECORD_VERSION && !record_v14_valid(bytes))) return false;
     for (size_t i = record_size(&r); i < FLASH_SECTOR_SIZE; ++i) {
         if (bytes[i] != 0xffu) return false;
     }
@@ -589,11 +621,23 @@ settings_store_result_t settings_store_load(clock_settings_t *out) {
             }
         }
         if (r.version>=RECORD_V10) {
-            for (unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i) {
+            for (unsigned i=0;i<STORED_BIRTHDAY_COUNT;++i) {
                 const uint8_t *b=r.birthdays[i];
                 out->birthdays[i]=(birthday_t){.enabled=b[0]!=0,.month=b[1],.day=b[2],.hour=b[3],.minute=b[4],
                     .last_year=(uint16_t)(b[5]|((uint16_t)b[6]<<8)),
-                    .birth_year=r.version == RECORD_VERSION ? r.birth_years[i] : 0};
+                    .birth_year=r.version >= RECORD_V13 ? r.birth_years[i] : 0};
+            }
+            if (r.version == RECORD_VERSION) {
+                settings_record_v14_t extended;
+                memcpy(&extended, slot_bytes(slot), sizeof(extended));
+                for (unsigned i = STORED_BIRTHDAY_COUNT; i < CLOCK_BIRTHDAY_COUNT; ++i) {
+                    unsigned j = i - STORED_BIRTHDAY_COUNT;
+                    const uint8_t *b = extended.birthdays[j];
+                    out->birthdays[i] = (birthday_t){.enabled = b[0] != 0,
+                        .month = b[1], .day = b[2], .hour = b[3], .minute = b[4],
+                        .last_year = (uint16_t)(b[5] | ((uint16_t)b[6] << 8)),
+                        .birth_year = extended.birth_years[j]};
+                }
             }
         }
         if (r.version >= RECORD_V12) out->phone = r.phone;
@@ -622,13 +666,14 @@ settings_store_result_t settings_store_load(clock_settings_t *out) {
 
 typedef struct {
     uint32_t offset;
-    uint8_t page[2u * FLASH_PAGE_SIZE];
+    size_t program_length;
+    uint8_t page[3u * FLASH_PAGE_SIZE];
 } flash_write_context_t;
 
 static void flash_write_callback(void *arg) {
     flash_write_context_t *ctx = (flash_write_context_t *)arg;
     flash_range_erase(ctx->offset, FLASH_SECTOR_SIZE);
-    flash_range_program(ctx->offset, ctx->page, sizeof(ctx->page));
+    flash_range_program(ctx->offset, ctx->page, ctx->program_length);
 }
 
 settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
@@ -670,12 +715,18 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
     memset(context.page, 0xff, sizeof(context.page));
     const phone_settings_t blank_phone = {0};
     bool have_phone = memcmp(&cfg->phone, &blank_phone, sizeof(blank_phone)) != 0;
-    bool have_birth_year = false;
-    for (unsigned i = 0; i < CLOCK_BIRTHDAY_COUNT; ++i)
+    bool have_birth_year = false, have_extra = false;
+    for (unsigned i = 0; i < STORED_BIRTHDAY_COUNT; ++i)
         have_birth_year |= cfg->birthdays[i].birth_year != 0;
+    for (unsigned i = STORED_BIRTHDAY_COUNT; i < CLOCK_BIRTHDAY_COUNT; ++i) {
+        const birthday_t *b = &cfg->birthdays[i];
+        have_extra |= b->enabled || b->month != 1u || b->day != 1u ||
+            b->hour != 9u || b->minute || b->last_year || b->birth_year;
+    }
     settings_record_current_t r = {
         .magic = RECORD_MAGIC,
-        .version = have_birth_year ? RECORD_VERSION : have_phone ? RECORD_V12 : RECORD_V11,
+        .version = have_extra ? RECORD_VERSION : have_birth_year ? RECORD_V13 :
+            have_phone ? RECORD_V12 : RECORD_V11,
         .sequence = valid ? current.sequence + 1u : 1u,
         .language = cfg->language,
         .volume = cfg->volume,
@@ -709,7 +760,7 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
         r.alarms[i][4] = a->track;
         r.alarm_weekdays[i]=a->weekdays;
     }
-    for (unsigned i=0;i<CLOCK_BIRTHDAY_COUNT;++i) {
+    for (unsigned i=0;i<STORED_BIRTHDAY_COUNT;++i) {
         const birthday_t *b=&cfg->birthdays[i];
         uint8_t *dst=r.birthdays[i];
         dst[0]=b->enabled?1u:0u; dst[1]=b->month; dst[2]=b->day;
@@ -724,17 +775,38 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
     size_t crc_offset = have_birth_year ? offsetof(settings_record_current_t, crc32) :
         have_phone ? RECORD_V12_CRC_OFFSET : RECORD_V11_CRC_OFFSET;
     r.phone = cfg->phone;
-    uint32_t crc = record_crc_bytes(&r, crc_offset);
-    memcpy((uint8_t *)&r + crc_offset, &crc, sizeof(crc));
-    size_t length = record_size(&r);
-    memcpy(context.page, &r, length);
+    size_t length;
+    if (have_extra) {
+        settings_record_v14_t extended;
+        memset(&extended, 0xff, sizeof(extended));
+        r.crc32 = UINT32_MAX;
+        extended.prefix = r;
+        for (unsigned i = STORED_BIRTHDAY_COUNT; i < CLOCK_BIRTHDAY_COUNT; ++i) {
+            unsigned j = i - STORED_BIRTHDAY_COUNT;
+            const birthday_t *b = &cfg->birthdays[i];
+            uint8_t *dst = extended.birthdays[j];
+            dst[0] = b->enabled ? 1u : 0u; dst[1] = b->month; dst[2] = b->day;
+            dst[3] = b->hour; dst[4] = b->minute;
+            dst[5] = (uint8_t)b->last_year; dst[6] = (uint8_t)(b->last_year >> 8);
+            extended.birth_years[j] = b->birth_year;
+        }
+        extended.crc32 = record_crc_bytes(&extended, offsetof(settings_record_v14_t, crc32));
+        length = sizeof(extended);
+        memcpy(context.page, &extended, length);
+    } else {
+        uint32_t crc = record_crc_bytes(&r, crc_offset);
+        memcpy((uint8_t *)&r + crc_offset, &crc, sizeof(crc));
+        length = record_size(&r);
+        memcpy(context.page, &r, length);
+    }
 
+    context.program_length = (length + FLASH_PAGE_SIZE - 1u) / FLASH_PAGE_SIZE * FLASH_PAGE_SIZE;
     int rc = flash_safe_execute(flash_write_callback, &context, 5000u);
     if (rc != PICO_OK) return SETTINGS_STORE_FLASH_ERROR;
 
     settings_record_current_t verify;
     memcpy(&verify, slot_bytes(dest), sizeof(verify));
     if (!sector_owned(dest) || verify.sequence != r.sequence ||
-        memcmp(&verify, &r, length) != 0) return SETTINGS_STORE_VERIFY_ERROR;
+        memcmp(slot_bytes(dest), context.page, length) != 0) return SETTINGS_STORE_VERIFY_ERROR;
     return SETTINGS_STORE_OK;
 }

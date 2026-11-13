@@ -91,7 +91,7 @@ if(CLOCK_ENABLE_PHONE_WEB)
     pico_add_library(clock_phone_web_content NOFLAG)
     pico_set_lwip_httpd_content(clock_phone_web_content INTERFACE
         "${CMAKE_CURRENT_LIST_DIR}/services/phone_web/index.html")
-    target_sources(speaking_clock_c PRIVATE services/phone_web.c services/phone_access.c "${_phone_dhcp}/dhcpserver.c")
+    target_sources(speaking_clock_c PRIVATE services/phone_web.c services/phone_access.c services/phone_overview.c services/phone_control.c "${_phone_dhcp}/dhcpserver.c")
     target_include_directories(speaking_clock_c PRIVATE "${_phone_dhcp}")
     target_link_libraries(speaking_clock_c PRIVATE pico_lwip_http pico_rand clock_phone_web_content)
     target_compile_definitions(speaking_clock_c PRIVATE CLOCK_ENABLE_PHONE_WEB=1)

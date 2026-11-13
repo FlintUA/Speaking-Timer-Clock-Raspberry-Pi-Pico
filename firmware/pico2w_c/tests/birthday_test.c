@@ -9,16 +9,17 @@ int main(void) {
     ds1302_datetime_t now={.year=2026,.month=11,.day=8,.hour=9,.minute=30};
     assert(!birthday_claim(b,&now));
     b[0]=(birthday_t){.enabled=true,.month=11,.day=8,.hour=9,.minute=30};
-    b[4]=b[0];
-    assert(birthday_claim(b,&now)==0x11); // All co-due slots retained.
-    assert(b[0].last_year==2026 && b[4].last_year==2026);
+    b[4]=b[0]; b[5]=b[0]; b[14]=b[0];
+    assert(birthday_claim(b,&now)==0x4031); // All co-due slots retained.
+    assert(b[0].last_year==2026 && b[4].last_year==2026 &&
+           b[5].last_year==2026 && b[14].last_year==2026);
     assert(!birthday_claim(b,&now));
     now.second=59;
     assert(!birthday_claim(b,&now));
     now.year=2025;
     assert(!birthday_claim(b,&now)); // Backward clock correction.
     now.year=2027;
-    assert(birthday_claim(b,&now)==0x11);
+    assert(birthday_claim(b,&now)==0x4031);
     birthday_t saved=b[0];
     birthday_defaults(b);
     b[0]=saved; // Reboot with persisted last_year.
