@@ -124,7 +124,7 @@ phone_reply_t phone_access_pair(phone_access_t *access, const char *body, uint64
 uint32_t phone_alarm_revision(const alarm_entry_t *alarm) {
     return (uint32_t)alarm->enabled | ((uint32_t)alarm->hour << 1) |
         ((uint32_t)alarm->minute << 6) | ((uint32_t)alarm->sound << 12) |
-        ((uint32_t)alarm->track << 13) | ((uint32_t)alarm->weekdays << 21);
+        ((uint32_t)alarm->track << 14) | ((uint32_t)alarm->weekdays << 22);
 }
 
 uint64_t phone_birthday_revision(const birthday_t *birthday) {
@@ -212,7 +212,7 @@ static phone_reply_t accept_command(phone_access_t *access, const char *body,
         {"audio_manual ", 0, 1}, {"audio_hourly ", 0, 1},
         {"audio_timer ", 0, 1}, {"audio_alarm ", 0, 1},
         {"light_mode ", 0, 2}, {"light_day ", 0, 100}, {"light_night ", 0, 100},
-        {"timer_sound ", 0, 2}, {"timer_track ", 1, 255}, {"timer_voice ", 0, 1},
+        {"timer_sound ", 0, 2}, {"timer_track ", 1, 255}, {"timer_voice ", 0, 1}, {"timer_random ", 0, 1},
         {"sound ", 0, 1}, {"say_time ", 0, 0}, {"say_date ", 0, 0}, {"next_alarm ", 0, 0},
         {"alarm_stop ", 1, UINT32_MAX}, {"alarm_snooze ", 1, UINT32_MAX},
         {"snooze_cancel ", 1, UINT32_MAX},

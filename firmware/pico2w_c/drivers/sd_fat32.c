@@ -1,5 +1,6 @@
 #include "sd_fat32.h"
 #include "sd_spi.h"
+#include "music_catalog.h"
 #include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -128,7 +129,7 @@ static void parse_entry(const uint8_t *raw, fat32_entry_t *entry) {
     entry->size = read_le32(raw + 28);
 }
 static bool walk_directory(uint32_t first_cluster, const uint8_t *search,
-                           fat32_entry_t *found, bool list_mode) {
+                           fat32_entry_t *found, bool list_mode, uint8_t *tracks) {
     uint32_t cluster = first_cluster;
     unsigned shown = 0;
     for (unsigned chain = 0; chain < MAX_DIRECTORY_CLUSTERS; ++chain) {
@@ -146,10 +147,14 @@ static bool walk_directory(uint32_t first_cluster, const uint8_t *search,
                 const uint8_t *raw = &sector[pos];
                 if (raw[0] == 0x00) {
                     if (list_mode) printf("[SD-LIST] End of directory (%u entries shown)\n", shown);
-                    return list_mode;
+                    return list_mode || tracks != NULL;
                 }
                 if (raw[0] == 0xe5 || raw[11] == 0x0f ||
                     (raw[11] & 0x08u)) continue; // deleted/LFN/volume label
+                if (tracks) {
+                    fat32_entry_t item; parse_entry(raw, &item);
+                    music_catalog_add(tracks, raw, raw[11], item.size, valid_cluster(item.cluster));
+                }
                 if (!list_mode && search && memcmp(raw, search, 11u) == 0) {
                     if (found) parse_entry(raw, found);
                     return true;
@@ -174,7 +179,7 @@ static bool walk_directory(uint32_t first_cluster, const uint8_t *search,
         }
         if (next >= FAT32_END) {
             if (list_mode) printf("[SD-LIST] End of FAT chain (%u entries shown)\n", shown);
-            return list_mode;
+            return list_mode || tracks != NULL;
         }
         if (!valid_cluster(next) || next == cluster) {
             puts("[SD-FAT] Corrupt directory FAT chain");
@@ -197,7 +202,7 @@ static bool resolve_directory(const char *dir, uint32_t *out) {
         return false;
     }
     fat32_entry_t entry;
-    if (!walk_directory(volume.root_cluster, key, &entry, false) ||
+    if (!walk_directory(volume.root_cluster, key, &entry, false, NULL) ||
         !entry.directory || !valid_cluster(entry.cluster)) {
         printf("[SD-FAT] Directory not found: %s\n", dir);
         return false;
@@ -210,8 +215,20 @@ bool sd_fat32_list(const char *directory) {
     uint32_t dir_cluster;
     if (!resolve_directory(directory, &dir_cluster)) return false;
     printf("[SD-LIST] Listing /%s\n", directory && directory[0] ? directory : "");
-    return walk_directory(dir_cluster, NULL, NULL, true);
+    return walk_directory(dir_cluster, NULL, NULL, true, NULL);
 }
+bool sd_fat32_music_catalog(uint8_t tracks[MUSIC_CATALOG_BYTES]) {
+    if (!tracks) return false;
+    memset(tracks, 0, MUSIC_CATALOG_BYTES);
+    uint32_t directory;
+    if (!mount_volume() || !resolve_directory("08", &directory) ||
+        !walk_directory(directory, NULL, NULL, false, tracks)) {
+        memset(tracks, 0, MUSIC_CATALOG_BYTES); // Never publish a partial catalog.
+        return false;
+    }
+    return true;
+}
+
 bool sd_fat32_file(const char *path) {
     if (!mount_volume()) return false;
     if (!path) return false;
@@ -235,7 +252,7 @@ bool sd_fat32_file(const char *path) {
     uint32_t dir_cluster;
     if (!resolve_directory(dir, &dir_cluster)) return false;
     fat32_entry_t entry;
-    if (!walk_directory(dir_cluster, key, &entry, false) || entry.directory) {
+    if (!walk_directory(dir_cluster, key, &entry, false, NULL) || entry.directory) {
         printf("[SD-FILE] Not found: %s\n", path);
         return false;
     }
@@ -306,7 +323,7 @@ bool sd_fat32_stream_start(const char *path) {
     uint32_t dir_cluster;
     if (!resolve_directory(directory, &dir_cluster)) return false;
     fat32_entry_t entry;
-    if (!walk_directory(dir_cluster, name, &entry, false) ||
+    if (!walk_directory(dir_cluster, name, &entry, false, NULL) ||
         entry.directory || !valid_cluster(entry.cluster)) {
         puts("[SD-STREAM] File missing or invalid first cluster");
         return false;
@@ -421,7 +438,7 @@ bool sd_fat32_open_read(const char *path) {
     uint32_t parent_cluster;
     if (!resolve_directory(directory, &parent_cluster)) return false;
     fat32_entry_t entry;
-    if (!walk_directory(parent_cluster, short_name, &entry, false) ||
+    if (!walk_directory(parent_cluster, short_name, &entry, false, NULL) ||
         entry.directory || !entry.size || !valid_cluster(entry.cluster)) return false;
     file_cursor.first_cluster = entry.cluster;
     file_cursor.cluster = entry.cluster;

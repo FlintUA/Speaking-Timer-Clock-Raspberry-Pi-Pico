@@ -146,5 +146,11 @@ int main(void) {
     assert(alarm_next_occurrence(next_alarms,0,&next)==-1);
     assert(alarm_next_occurrence(next_alarms,&current,0)==-1);
     puts("alarm_engine_host_test: PASS");
+    alarm_entry_t random_alarm={.hour=7,.track=255,.weekdays=127,.sound=ALARM_SOUND_RANDOM};
+    assert(alarm_entry_valid(&random_alarm));
+    random_alarm.sound=(alarm_sound_t)3;assert(!alarm_entry_valid(&random_alarm));
+    alarm_snooze_t chosen={0},repeated;
+    alarm_snooze_schedule(&chosen,1000,7,0,false);chosen.sound_choice=255;
+    assert(alarm_snooze_take(&chosen,181000,&repeated) && repeated.sound_choice==255);
     return 0;
 }

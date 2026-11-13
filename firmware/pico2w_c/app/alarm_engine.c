@@ -39,7 +39,7 @@ void alarm_defaults(alarm_entry_t alarms[CLOCK_ALARM_COUNT]) {
 
 bool alarm_entry_valid(const alarm_entry_t *a) {
     return a && a->hour <= 23u && a->minute <= 59u &&
-           (a->sound == ALARM_SOUND_SIGNAL || a->sound == ALARM_SOUND_MUSIC) &&
+           (a->sound == ALARM_SOUND_SIGNAL || a->sound == ALARM_SOUND_MUSIC || a->sound == ALARM_SOUND_RANDOM) &&
            a->track >= 1u && a->weekdays>=1 && a->weekdays<=CLOCK_ALARM_DAYS_ALL;
 }
 
@@ -144,4 +144,8 @@ int alarm_scheduler_claim_due(alarm_scheduler_t *state,
     }
     if (other_mask) *other_mask = skipped;
     return winner;
+}
+
+const char *alarm_sound_name(alarm_sound_t sound) {
+    return sound == ALARM_SOUND_MUSIC ? "MUSIC" : sound == ALARM_SOUND_RANDOM ? "RANDOM" : "SIGNAL";
 }

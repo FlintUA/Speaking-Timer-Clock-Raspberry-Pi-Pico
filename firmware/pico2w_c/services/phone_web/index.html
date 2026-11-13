@@ -175,17 +175,21 @@
       <button type="button" data-setting="timer_sound">Apply</button>
     </div>
     <div>
+      <label class="toggle"><input name="timer_random" type="checkbox" value="1">Random timer music track</label>
+      <button type="button" data-setting="timer_random">Apply</button>
+    </div>
+    <div>
       <label>Timer music track <input name="timer_track" type="number" min="1" max="255" step="1" value="1" required></label>
       <button type="button" data-setting="timer_track">Apply</button>
     </div>
-    <p>Choose the message independently from None, Signal or one music file in folder 08. Message only, sound only and silent completion are supported. Apply your choices before starting the timer. The German completion message is not yet available. Timer output uses its separate audio preference.</p>
+    <p>Choose the message independently from None, Signal or one music file in folder 08. Message only, sound only and silent completion are supported. Apply your choices before starting the timer. Random mode chooses one existing SPI-card folder-08 file per event. Mirror those files on the DFPlayer card. Snoozed alarms reuse their chosen track. The German completion message is not yet available. Timer output uses its separate audio preference.</p>
     <p>Bluetooth preferences fall back to LOCAL when the speaker is unavailable. Auto light uses night brightness from 22:00 to 07:00.</p>
     <p>Close settings on the clock to apply browser changes. Stop playback before changing language or audio outputs.</p>
     <p id="save-status" role="status"></p>
   </form>
   <form id="alarm-controls" hidden>
     <h2>Alarms</h2>
-    <p>Stop playback or the timer and close editors on the clock before applying records. Times use Europe/Berlin.</p>
+    <p>Stop playback or the timer and close editors on the clock before applying records. Times use Europe/Berlin. Music - random track chooses once per occurrence; Test previews specific tracks only.</p>
     <label>Slot <select name="slot"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
     <label class="toggle"><input name="enabled" type="checkbox"> Enabled</label>
     <label>Time <input name="time" type="time" step="60" required></label>
@@ -199,7 +203,7 @@
       <label><input name="days" type="checkbox" value="32">Sat</label>
       <label><input name="days" type="checkbox" value="64">Sun</label>
     </div>
-    <label>Sound <select name="sound"><option value="0">Signal</option><option value="1">Music</option></select></label>
+    <label>Sound <select name="sound"><option value="0">Signal</option><option value="1">Music - specific track</option><option value="2">Music - random track</option></select></label>
     <div class="track-test">
       <label>Music track <input name="track" type="number" min="1" max="255" required></label>
       <button type="button" id="alarm-track-test" data-schedule="test">Test</button>
@@ -491,15 +495,18 @@
         (needsIdle && !preferences.idle) || (field.name === "volume_bt" && !preferences.bt_supported) ||
         (field.name.startsWith("timer_") && preferences?.[field.name] == null);
     }
+    if (settingFields.timer_track && preferences?.timer_random) settingFields.timer_track.disabled = true;
     for (const button of settingsControls.querySelectorAll("button")) {
       button.disabled = settingFields[button.dataset.setting].disabled;
     }
     for (const editor of scheduleEditors) {
       editor.form.hidden = !allowed;
       for (const field of editor.form.querySelectorAll("input, select, button")) {
+        const randomTrack = editor.kind === "alarm" && Number(editor.fields.sound.value) === 2 &&
+          (field.name === "track" || field.dataset.schedule === "test") && !live?.player_test;
         const audition = editor.kind === "alarm" &&
           (field.name === "track" || field.dataset.schedule === "test");
-        field.disabled = busy || Boolean(pending) || !preferences ||
+        field.disabled = randomTrack || busy || Boolean(pending) || !preferences ||
           (field.dataset.schedule !== "reload" && !preferences.idle &&
             !(field.dataset.schedule === "test" && live.player_test) &&
             !(audition && !preferences.editing && !live.timer_running && live.player !== "Closed"));
@@ -732,6 +739,7 @@
           await sendCommand("player", "test_stop", 0);
           return;
         }
+        if (Number(editor.fields.sound.value) === 2) return;
         const track = Number(editor.fields.track.value);
         if (!editor.fields.track.reportValidity() || !Number.isInteger(track) || track < 1 || track > 255) return;
         await sendCommand("player", "test_track", track);

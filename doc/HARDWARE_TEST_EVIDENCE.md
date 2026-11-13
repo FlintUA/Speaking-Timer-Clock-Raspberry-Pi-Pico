@@ -224,3 +224,11 @@ Read-only HTTP confirmed Stop timer sound and timer_sound_id=0, with no active a
 ### Countdown completion stop: user acceptance
 
 After installation of `1.0.0+26.g3717033` and the requested countdown-stop check, the user confirmed that it works correctly. This closes general acceptance of the separate Stop timer sound fix. The report does not include measured response latency, individual LOCAL/Bluetooth runs, stale-request/concurrent-client testing or a separately isolated cause for the earlier page jump. Scheduled-alarm three-minute repeat and cancellation were separately accepted in the preceding report.
+
+## Independent timer completion choices: approved installation, November 13
+
+After explicit approval, the integrated web/BT/MP3/Wi-Fi image from commit `e5593d11ac93d5aca3ada52fe1fd44ba42f85824` was installed through COM8. Reviewed UF2: 1,786,368 bytes, SHA256 `8E0F2CF1D00353C5DCDE9F8E1C5882A2F663D29523B2CEB950AC99BD5B928A0E`. The updater reported SUCCESS. USB and HTTP identify clean version `1.0.0+27.ge5593d1`, build `e5593d11ac93-bt-mp3-wifi-phone`.
+
+Startup checked SD/FAT32, LCD, RTC, radio and inputs. Flash guard was OK with image_end `0x100d9f04`. Both settings slots remain valid at sequences 172/173, schema v12: merely loading this build did not migrate or save them. Five alarms, fifteen birthday records and ten existing persistent preferences match their immediately pre-install checksum `B418CC407F1AC737DDCB0129194A78C2A94E9212B847ECF6AAEBABAC65387BC4`. The unsaved idle timer selection reset from five to sixty seconds on reboot.
+
+Read-only HTTP verified the new checkbox/select/track controls and defaults timer_voice=1, timer_sound=0, timer_track=1. Home HTTP returned at `192.168.2.116`, Europe/Berlin NTP synchronized, and Bluetooth remained OFF under the saved policy. No connection, timer, audio or settings command was sent during verification. COM8 was closed/released. Actual combinations, selected-card music, physical menu edits, Stop timer sound and v15 persistence remain for user testing. The final clean-identity serializer fixture used 3,722 bytes of the 4,096-byte HTTP buffer (374 bytes free).

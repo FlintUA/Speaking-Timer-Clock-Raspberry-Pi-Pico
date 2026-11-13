@@ -186,7 +186,7 @@ int main(void) {
         "- 40 1 10 set 0 0 1 7 0 127 0 1", "- 40 1 10 set 6 0 1 7 0 127 0 1",
         "- 40 1 10 set 1 0 2 7 0 127 0 1", "- 40 1 10 set 1 0 1 24 0 127 0 1",
         "- 40 1 10 set 1 0 1 7 60 127 0 1", "- 40 1 10 set 1 0 1 7 0 0 0 1",
-        "- 40 1 10 set 1 0 1 7 0 128 0 1", "- 40 1 10 set 1 0 1 7 0 127 2 1",
+        "- 40 1 10 set 1 0 1 7 0 128 0 1", "- 40 1 10 set 1 0 1 7 0 127 3 1",
         "- 40 1 10 set 1 0 1 7 0 127 1 0", "- 40 1 10 set 1 0 1 7 0 127 1 256",
         "- 40 1 10 set 1 0 1 256 0 127 0 1", "- 40 1 10 set 1 4294967296 1 7 0 127 0 1",
         "- 40 1 10 set 1 0 1 7 0 127 0", "- 40 1 10 set 1 0 1 7 0 127 0 1 extra"
@@ -316,6 +316,18 @@ int main(void) {
     timer_settings.result=PHONE_COMMAND_APPLIED;
     assert(phone_access_settings(&timer_settings,"- 90 3 11 timer_track 255",PHONE_SCOPE_HOME,true)==PHONE_OK);
     assert(timer_settings.last.action==PHONE_SET_TIMER_TRACK && timer_settings.last.value==255);
+    timer_settings.result=PHONE_COMMAND_APPLIED;
+    assert(phone_access_settings(&timer_settings,"- 90 4 12 timer_random 2",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_settings(&timer_settings,"- 90 4 12 timer_random 1",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(timer_settings.last.action==PHONE_SET_TIMER_RANDOM && timer_settings.last.value==1);
+    alarm_entry_t x={.enabled=true,.hour=7,.minute=0,.sound=ALARM_SOUND_RANDOM,.track=1,.weekdays=127};
+    alarm_entry_t y=x;y.sound=ALARM_SOUND_SIGNAL;
+    assert(phone_alarm_revision(&x)!=phone_alarm_revision(&y));
+    y=x;y.sound=ALARM_SOUND_SIGNAL;y.track=2;
+    assert(phone_alarm_revision(&x)!=phone_alarm_revision(&y)); // Both sound bits are independent of track bits.
+    phone_access_t random_schedule={0};phone_access_reset(&random_schedule,91);random_schedule.settings.home_trusted=1;
+    assert(phone_access_alarm(&random_schedule,"- 91 1 3 set 5 0 1 7 0 127 2 255",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(random_schedule.last.alarm.sound==ALARM_SOUND_RANDOM && random_schedule.last.slot==4);
     const char *const live_actions[]={"alarm_stop","alarm_snooze","snooze_cancel"};
     for(unsigned i=0;i<3;++i) {
         phone_access_t live={0}; phone_access_reset(&live,77); live.settings.home_trusted=1;

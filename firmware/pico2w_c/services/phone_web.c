@@ -380,7 +380,7 @@ int fs_open_custom(struct fs_file *file, const char *name) {
         ",\"command_id\":%" PRIu32 ",\"command_nonce\":%" PRIu32 ",\"command_result\":\"%s\""
         ",\"settings\":{\"snapshot_id\":%" PRIu32 ",\"volume_local\":%u,\"volume_bt\":%u,\"language\":%u"
         ",\"audio_manual\":%u,\"audio_hourly\":%u,\"audio_timer\":%u,\"audio_alarm\":%u"
-        ",\"light_mode\":%u,\"light_day\":%u,\"light_night\":%u,\"timer_sound\":%u,\"timer_track\":%u,\"timer_voice\":%u"
+        ",\"light_mode\":%u,\"light_day\":%u,\"light_night\":%u,\"timer_sound\":%u,\"timer_track\":%u,\"timer_voice\":%u,\"timer_random\":%u"
         ",\"editing\":%s,\"idle\":%s,\"bt_supported\":%s,\"saving\":\"%s\"}",
         CLOCK_FIRMWARE_VERSION, CLOCK_BUILD_ID,
         published.time, published.timer_running ? "true" : "false",
@@ -397,7 +397,7 @@ int fs_open_custom(struct fs_file *file, const char *name) {
         (unsigned)published.preferences.audio[2], (unsigned)published.preferences.audio[3],
         (unsigned)published.preferences.light.mode, (unsigned)published.preferences.light.day_percent,
         (unsigned)published.preferences.light.night_percent,
-        (unsigned)published.preferences.timer_sound, (unsigned)published.preferences.timer_track, (unsigned)published.preferences.timer_voice,
+        (unsigned)published.preferences.timer_sound, (unsigned)published.preferences.timer_track, (unsigned)published.preferences.timer_voice, (unsigned)published.preferences.timer_random,
         published.preferences.editing ? "true" : "false", published.preferences.idle ? "true" : "false",
         published.preferences.bt_supported ? "true" : "false",
         published.preferences.retry ? "retry" : published.preferences.pending || access.changed ? "pending" : "saved");

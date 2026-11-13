@@ -14,6 +14,8 @@
 #include "countdown.h"
 #include "timer_controls.h"
 #include "music_playlist.h"
+#include "music_catalog.h"
+#include "pico/rand.h"
 #include "music_sleep.h"
 #include "birthday.h"
 #include "alarm_engine.h"
@@ -121,6 +123,7 @@ typedef struct {
     bool pending;
     bool test;
     bool snoozed;
+    uint16_t sound_choice;
     uint8_t hour;
     uint8_t minute;
     uint64_t queued_ms;
@@ -129,12 +132,13 @@ static deferred_alarm_t deferred_alarms[CLOCK_ALARM_COUNT];
 static alarm_snooze_t alarm_snoozes[CLOCK_ALARM_COUNT];
 static uint8_t active_alarm_hour, active_alarm_minute;
 static bool active_alarm_test;
+static uint16_t active_alarm_sound_choice;
 static uint64_t active_alarm_due_ms;
 static void alarm_stop(const char *reason);
 static void alarm_consume_current_minute(unsigned index);
 static void alarm_preview_stop(const char *reason);
 static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
-                              uint64_t now, bool test);
+                              uint64_t now, bool test, uint16_t sound_choice);
 static void alarm_pending_service(uint64_t now);
 static void music_ui_close(const char *reason);
 static void music_ui_stop(const char *reason);
@@ -147,6 +151,19 @@ static bool bootsel_armed;
 static uint64_t bootsel_armed_ms;
 static bool timer_screen;
 static audio_queue_t audio_queue;
+static uint8_t event_music_catalog[MUSIC_CATALOG_BYTES];
+static uint8_t event_music_previous[CLOCK_ALARM_COUNT+1u];
+static uint16_t event_music_choice(unsigned owner) {
+    uint8_t track=music_catalog_pick(event_music_catalog,get_rand_32(),event_music_previous[owner]);
+    if (track) event_music_previous[owner]=track;
+    printf("[RANDOM-MUSIC] owner=%u track=%u%s\n",owner,(unsigned)track,
+        track ? " source=SPI08 mirrored DFPlayer card required" : " fallback=SIGNAL catalog empty/unavailable");
+    return track ? track : 256u;
+}
+static uint16_t alarm_event_choice(unsigned slot) {
+    return alarms[slot].sound == ALARM_SOUND_RANDOM ? event_music_choice(slot+1u) :
+        alarms[slot].sound == ALARM_SOUND_MUSIC ? alarms[slot].track : 256u;
+}
 static uint32_t timer_finish_serial, timer_finish_id;
 static void clock_audio_clear(void) {
     timer_finish_id = 0;
@@ -221,8 +238,8 @@ static bool volume_overlay_bluetooth;
 static bool bt_volume_remote_synced;
 static bool sound_enabled = true;
 static speech_language_t language = SPEECH_RU;
-static uint8_t timer_sound, timer_track = 1u, timer_voice = 1u;
-static uint8_t timer_sound_draft, timer_track_draft, timer_voice_draft;
+static uint8_t timer_sound, timer_track = 1u, timer_voice = 1u, timer_random;
+static uint8_t timer_sound_draft, timer_track_draft, timer_voice_draft, timer_random_draft;
 // Two-level settings menu, following the MicroPython navigation model.
 typedef enum {
     MENU_CLOSED = 0,
@@ -259,7 +276,7 @@ typedef enum {
     MENU_PHONE_PAIR_CODE,
     MENU_PHONE_CONFIRM,
 #endif
-    MENU_TIMER_VOICE, MENU_TIMER_SOUND, MENU_TIMER_TRACK,
+    MENU_TIMER_VOICE, MENU_TIMER_SOUND, MENU_TIMER_MUSIC_MODE, MENU_TIMER_TRACK,
     MENU_TIMER_EDITOR
 } menu_state_t;
 static menu_state_t menu_state;
@@ -648,6 +665,12 @@ static void timer_audio_cancel(void) {
 }
 
 static void timer_audio_finished(void) {
+    uint8_t finish_sound=timer_sound, finish_track=timer_track;
+    if (sound_enabled && timer_sound==1u && timer_random) {
+        uint16_t choice=event_music_choice(0);
+        if(choice==256u) finish_sound=0u;
+        else finish_track=(uint8_t)choice;
+    }
 #ifdef CLOCK_ENABLE_A2DP
     bt_timer_cancel("TIMER_FINISH_PRIORITY");
 #endif
@@ -655,11 +678,11 @@ static void timer_audio_finished(void) {
     if (!sound_enabled) return;
 #ifdef CLOCK_ENABLE_A2DP
     audio_queue_t plan = {0};
-    (void)speech_enqueue_timer_finish_sound(&plan, language, timer_voice != 0u, timer_sound, timer_track);
+    (void)speech_enqueue_timer_finish_sound(&plan, language, timer_voice != 0u, finish_sound, finish_track);
     if (!plan.size) return; // Silent selection or unavailable DE-only message.
     if (bt_timer_prepare(&plan, "FINISH")) { timer_finish_arm(); return; }
 #endif
-    (void)speech_enqueue_timer_finish_sound(&audio_queue, language, timer_voice != 0u, timer_sound, timer_track);
+    (void)speech_enqueue_timer_finish_sound(&audio_queue, language, timer_voice != 0u, finish_sound, finish_track);
     if (audio_queue.size) timer_finish_arm();
 }
 
@@ -1002,7 +1025,7 @@ static info_announce_result_t announce_clock_info(bool nearest_alarm) {
 }
 
 static void alarm_pending_add(unsigned index, uint8_t hour,
-                              uint8_t minute, uint64_t due_ms, bool test) {
+                              uint8_t minute, uint64_t due_ms, bool test, uint16_t sound_choice) {
     if (index >= CLOCK_ALARM_COUNT) return;
     deferred_alarm_t *p = &deferred_alarms[index];
     if (p->pending) {
@@ -1011,7 +1034,7 @@ static void alarm_pending_add(unsigned index, uint8_t hour,
     }
     *p = (deferred_alarm_t){
         .pending = true, .test = test, .hour = hour, .minute = minute,
-        .queued_ms = due_ms
+        .queued_ms = due_ms, .sound_choice = sound_choice ? sound_choice : alarm_event_choice(index)
     };
     printf("[ALARM-PENDING] queued=%u time=%02u:%02u ttl=30m%s\n",
            index + 1u, (unsigned)hour, (unsigned)minute,
@@ -1045,6 +1068,7 @@ static void alarm_snooze_start(uint64_t now) {
     unsigned slot=(unsigned)alarm_active_index;
     alarm_snooze_schedule(&alarm_snoozes[slot],now,active_alarm_hour,
                            active_alarm_minute,active_alarm_test);
+    alarm_snoozes[slot].sound_choice=active_alarm_sound_choice;
     alarm_stop("SNOOZE");
     printf("[SNOOZE] slot=%u delay=%lus (monotonic, RAM only)\n",slot+1,
            (unsigned long)(CLOCK_ALARM_SNOOZE_MS/1000u));
@@ -1068,7 +1092,7 @@ static void alarm_snooze_service(uint64_t now) {
         alarm_snooze_t due;
         if(!alarm_snooze_take(&alarm_snoozes[i],now,&due)) continue;
         if(!deferred_alarms[i].pending) {
-            alarm_pending_add(i,due.hour,due.minute,now,due.test);
+            alarm_pending_add(i,due.hour,due.minute,now,due.test,due.sound_choice);
             deferred_alarms[i].snoozed=true;
         }
         printf("[SNOOZE] due=%u; normal audio priority and 30m expiry apply\n",i+1);
@@ -1126,7 +1150,7 @@ static void alarm_pending_service(uint64_t now) {
     // Keep the original RTC due time rather than announcing the late wall time.
     active_alarm_due_ms = pending.queued_ms;
     alarm_start_audio((unsigned)first, pending.hour, pending.minute,
-                      now, pending.test);
+                      now, pending.test, pending.sound_choice);
 }
 
 static void timer_start_now(uint64_t now) {
@@ -1140,7 +1164,7 @@ static void timer_start_now(uint64_t now) {
         unsigned interrupted = (unsigned)alarm_active_index;
         alarm_pending_add(interrupted, active_alarm_hour,
                           active_alarm_minute, active_alarm_due_ms,
-                          active_alarm_test);
+                          active_alarm_test, active_alarm_sound_choice);
         alarm_stop("TIMER_PRIORITY_DEFERRED");
     }
     countdown_start(&timer, now);
@@ -1171,7 +1195,7 @@ static clock_settings_t settings_snapshot(void) {
         .half_hour_enabled = half_hour_enabled,
         .clock_mode = clock_mode,
         .display_light = display_light,
-        .timer_sound = timer_sound, .timer_track = timer_track, .timer_voice = timer_voice,
+        .timer_sound = timer_sound, .timer_track = timer_track, .timer_voice = timer_voice, .timer_random = timer_random,
 #ifdef CLOCK_ENABLE_A2DP
         .audio_manual_jbl = audio_router.requested == AUDIO_OUTPUT_BT_JBL ? 1u : 0u,
         .audio_hourly_jbl = auto_voice_jbl_enabled ? 1u : 0u,
@@ -1207,7 +1231,7 @@ static bool settings_equal(const clock_settings_t *a, const clock_settings_t *b)
         a->quiet_start != b->quiet_start || a->quiet_end != b->quiet_end ||
         a->half_hour_enabled != b->half_hour_enabled ||
         a->clock_mode != b->clock_mode ||
-        a->timer_voice != b->timer_voice || a->timer_sound != b->timer_sound || a->timer_track != b->timer_track ||
+        a->timer_random != b->timer_random || a->timer_voice != b->timer_voice || a->timer_sound != b->timer_sound || a->timer_track != b->timer_track ||
         a->display_light.mode != b->display_light.mode ||
         a->display_light.day_percent != b->display_light.day_percent ||
         a->display_light.night_percent != b->display_light.night_percent ||
@@ -1247,15 +1271,15 @@ static void settings_mark_changed(void) {
     }
 }
 
-static bool timer_sound_apply(uint8_t sound, uint8_t track, uint8_t voice) {
-    if (sound > 2u || voice > 1u || !track || timer.running || alarm_active_index >= 0 || music_ui_open ||
+static bool timer_sound_apply(uint8_t sound, uint8_t track, uint8_t voice, uint8_t random) {
+    if (sound > 2u || voice > 1u || random > 1u || !track || timer.running || alarm_active_index >= 0 || music_ui_open ||
         !audio_queue_idle(&audio_queue) || dfplayer_busy() || mp3_play_active() ||
         mp3_probe_active() || sd_fat32_stream_active()) return false;
 #ifdef CLOCK_ENABLE_A2DP
     if (bt_speech_running || bt_timer_running || bt_alarm_running || routed_test_pending) return false;
 #endif
-    if (timer_voice != voice || timer_sound != sound || timer_track != track) {
-        timer_sound = sound; timer_track = track; timer_voice = voice;
+    if (timer_random != random || timer_voice != voice || timer_sound != sound || timer_track != track) {
+        timer_sound = sound; timer_track = track; timer_voice = voice; timer_random = random;
         settings_mark_changed();
     }
     printf("[TIMER-SOUND] voice=%s sound=%s track=%u (folder 08)\n", voice ? "ON" : "OFF", sound == 1u ? "MUSIC" : sound == 2u ? "NONE" : "SIGNAL", (unsigned)track);
@@ -1865,7 +1889,7 @@ commit:
                        (unsigned)(alarm_ui_index + 1u),
                        saved->enabled ? "ON" : "OFF",
                        (unsigned)saved->hour, (unsigned)saved->minute,
-                       saved->sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL",
+                       alarm_sound_name(saved->sound),
                        (unsigned)saved->track, changed ? "YES" : "NO");
             }
             alarm_ui_state = ALARM_UI_LIST;
@@ -1906,9 +1930,7 @@ static void alarm_ui_rotate(int direction, uint64_t now) {
             alarm_ui_days_invalid=false;
             break;
         case ALARM_UI_SOUND:
-            alarm_ui_draft.sound =
-                alarm_ui_draft.sound == ALARM_SOUND_SIGNAL ?
-                ALARM_SOUND_MUSIC : ALARM_SOUND_SIGNAL;
+            alarm_ui_draft.sound = (alarm_sound_t)wrap_u8((uint8_t)alarm_ui_draft.sound,0u,2u,direction);
             break;
         case ALARM_UI_TRACK:
             alarm_ui_draft.track = wrap_u8(alarm_ui_draft.track, 1u,
@@ -1920,7 +1942,7 @@ static void alarm_ui_rotate(int direction, uint64_t now) {
            (unsigned)(alarm_ui_index + 1u),
            alarm_ui_draft.enabled ? "ON" : "OFF",
            (unsigned)alarm_ui_draft.hour, (unsigned)alarm_ui_draft.minute,
-           alarm_ui_draft.sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL",
+           alarm_sound_name(alarm_ui_draft.sound),
            (unsigned)alarm_ui_draft.track);
 }
 
@@ -2259,10 +2281,11 @@ static bool service_phone_settings(const phone_command_t *request) {
         return true;
     }
     if (!phone_settings_idle()) return false;
-    if (request->action >= PHONE_SET_TIMER_SOUND && request->action <= PHONE_SET_TIMER_VOICE)
+    if (request->action >= PHONE_SET_TIMER_SOUND && request->action <= PHONE_SET_TIMER_RANDOM)
         return timer_sound_apply(request->action == PHONE_SET_TIMER_SOUND ? value : timer_sound,
             request->action == PHONE_SET_TIMER_TRACK ? value : timer_track,
-            request->action == PHONE_SET_TIMER_VOICE ? value : timer_voice);
+            request->action == PHONE_SET_TIMER_VOICE ? value : timer_voice,
+            request->action == PHONE_SET_TIMER_RANDOM ? value : timer_random);
     if (request->action == PHONE_SET_LANGUAGE) {
         if ((uint8_t)language != value) {
             language = (speech_language_t)value;
@@ -2529,7 +2552,7 @@ static void menu_begin_edit(uint64_t now) {
             puts("[MENU-ABOUT] Speaking Clock / Pico 2 W");
             return;
         case SETTINGS_MENU_ITEMS - 1u:
-            timer_sound_draft = timer_sound; timer_track_draft = timer_track; timer_voice_draft = timer_voice;
+            timer_sound_draft = timer_sound; timer_track_draft = timer_track; timer_voice_draft = timer_voice; timer_random_draft = timer_random;
             menu_state = MENU_TIMER_VOICE;
             return;
         default:
@@ -2544,13 +2567,17 @@ static void menu_commit(uint64_t now) {
         case MENU_TIMER_VOICE:
             menu_state = MENU_TIMER_SOUND; return;
         case MENU_TIMER_SOUND:
-            if (timer_sound_draft == 1u) { menu_state = MENU_TIMER_TRACK; return; }
-            if (!timer_sound_apply(timer_sound_draft, timer_track_draft, timer_voice_draft)) {
+            if (timer_sound_draft == 1u) { menu_state = MENU_TIMER_MUSIC_MODE; return; }
+            if (!timer_sound_apply(timer_sound_draft, timer_track_draft, timer_voice_draft, timer_random_draft)) {
                 puts("[TIMER-SOUND] Save blocked: timer/audio busy"); return;
             }
             menu_state = MENU_LIST; return;
+        case MENU_TIMER_MUSIC_MODE:
+            if (!timer_random_draft) { menu_state=MENU_TIMER_TRACK; return; }
+            if (!timer_sound_apply(timer_sound_draft,timer_track_draft,timer_voice_draft,timer_random_draft)) return;
+            menu_state=MENU_LIST; return;
         case MENU_TIMER_TRACK:
-            if (!timer_sound_apply(timer_sound_draft, timer_track_draft, timer_voice_draft)) {
+            if (!timer_sound_apply(timer_sound_draft, timer_track_draft, timer_voice_draft, timer_random_draft)) {
                 puts("[TIMER-SOUND] Save blocked: timer/audio busy"); return;
             }
             menu_state = MENU_LIST; return;
@@ -2783,8 +2810,10 @@ static void menu_back(uint64_t now) {
         puts("[MENU-BT] Connection choice cancelled");
     } else if (menu_state == MENU_TIMER_SOUND) {
         menu_state = MENU_TIMER_VOICE;
-    } else if (menu_state == MENU_TIMER_TRACK) {
+    } else if (menu_state == MENU_TIMER_MUSIC_MODE) {
         menu_state = MENU_TIMER_SOUND;
+    } else if (menu_state == MENU_TIMER_TRACK) {
+        menu_state = MENU_TIMER_MUSIC_MODE;
     } else if (menu_state == MENU_BT_SCANNING) {
 #ifdef CLOCK_ENABLE_A2DP
         clock_a2dp_scan_stop();
@@ -2811,6 +2840,8 @@ static void menu_rotate(int direction, uint64_t now) {
             timer_voice_draft = !timer_voice_draft; break;
         case MENU_TIMER_SOUND:
             timer_sound_draft = wrap_u8(timer_sound_draft, 0u, 2u, direction); break;
+        case MENU_TIMER_MUSIC_MODE:
+            timer_random_draft=!timer_random_draft; break;
         case MENU_TIMER_TRACK:
             timer_track_draft = wrap_u8(timer_track_draft, 1u, 255u, direction); break;
         case MENU_TIMER_EDITOR:
@@ -2997,7 +3028,7 @@ static void load_settings_at_boot(void) {
         half_hour_enabled = saved.half_hour_enabled;
         clock_mode = saved.clock_mode;
         display_light = saved.display_light;
-        timer_sound = saved.timer_sound; timer_track = saved.timer_track; timer_voice = saved.timer_voice;
+        timer_sound = saved.timer_sound; timer_track = saved.timer_track; timer_voice = saved.timer_voice; timer_random=saved.timer_random;
         memcpy(alarms, saved.alarms, sizeof(alarms));
         memcpy(birthdays,saved.birthdays,sizeof(birthdays));
         memcpy(saved_bt_target_addr, saved.bt_target_addr,
@@ -3133,7 +3164,7 @@ static void alarm_status(void) {
         printf("[ALARM] %u enabled=%s time=%02u:%02u sound=%s track=%u days=%s mask=0x%02x valid=%s\n",
                i + 1u, a->enabled ? "ON" : "OFF",
                (unsigned)a->hour, (unsigned)a->minute,
-               a->sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL",
+               alarm_sound_name(a->sound),
                (unsigned)a->track,alarm_days_name(a->weekdays),(unsigned)a->weekdays,
                alarm_entry_valid(a) ? "YES" : "NO");
     }
@@ -3210,7 +3241,8 @@ static void bt_alarm_service(void) {
 #endif
 
 static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
-                              uint64_t now, bool test) {
+                              uint64_t now, bool test, uint16_t sound_choice) {
+    if(!sound_choice) sound_choice=alarm_event_choice(index);
 #ifdef CLOCK_ENABLE_A2DP
     bt_speech_cancel("ALARM_PRIORITY");
     bt_timer_cancel("ALARM_PRIORITY");
@@ -3230,8 +3262,8 @@ static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
     if (queued)
         queued = speech_enqueue_time(&plan, language, hour, minute, exact_hour_phrase);
     if (queued) {
-        if (alarms[index].sound == ALARM_SOUND_MUSIC)
-            queued = audio_queue_enqueue(&plan, 8u, alarms[index].track);
+        if (sound_choice<=255u)
+            queued = audio_queue_enqueue(&plan, 8u, (uint8_t)sound_choice);
         else
             queued = audio_queue_enqueue(&plan, 7u, 13u);
     }
@@ -3246,6 +3278,7 @@ static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
     active_alarm_hour = hour;
     active_alarm_minute = minute;
     active_alarm_test = test;
+    active_alarm_sound_choice = sound_choice;
     // Direct test calls start immediately; deferred events preserve original due.
     if (!active_alarm_due_ms || active_alarm_due_ms > now)
         active_alarm_due_ms = now;
@@ -3266,8 +3299,8 @@ static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
     }
     printf("[ALARM] %u RINGING %02u:%02u sound=%s track=%u%s\n",
            index + 1u, (unsigned)hour, (unsigned)minute,
-           alarms[index].sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL",
-           (unsigned)alarms[index].track, test ? " TEST" : "");
+           alarm_sound_name(alarms[index].sound),
+           (unsigned)(sound_choice<=255u?sound_choice:0u), test ? " TEST" : "");
 }
 
 static void alarm_stop(const char *reason) {
@@ -3351,7 +3384,7 @@ static void alarm_service_rtc(const ds1302_datetime_t *dt, uint64_t now) {
     }
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
         if (due_mask & (1u << i))
-            alarm_pending_add(i, dt->hour, dt->minute, now, false);
+            alarm_pending_add(i, dt->hour, dt->minute, now, false, 0);
     }
 }
 
@@ -3370,7 +3403,7 @@ static void alarm_days_command(char *args) {
     unsigned slot; char text[16], extra; uint8_t mask;
     if(sscanf(args,"%u %15s %c",&slot,text,&extra)!=2 || slot<1 ||
        slot>CLOCK_ALARM_COUNT || !alarm_days_parse(text,&mask)) {
-        puts("[TIMER-SOUND] timer-sound; timer-sound none|signal|music N; timer-voice on|off");
+        puts("[TIMER-SOUND] timer-sound; timer-sound none|signal|music N; timer-voice on|off; timer-random on|off; random-music-status");
         puts("[ALARM] alarm-days N daily|weekdays|weekends|135 (1=Mon,7=Sun)"); return;
     }
     if(alarm_active_index>=0 || alarm_ui_state!=ALARM_UI_CLOSED || music_ui_open) {
@@ -3390,10 +3423,11 @@ static void alarm_set(char *args) {
     int fields = sscanf(args, " %u %u %11s %u %c",
                         &hh, &mm, kind, &track, &extra);
     bool signal = fields == 3 && strcmp(kind, "signal") == 0;
+    bool random = fields == 3 && strcmp(kind, "random") == 0;
     bool music = fields == 4 && strcmp(kind, "music") == 0 &&
                  track >= 1u && track <= CLOCK_ALARM_MAX_TRACK;
-    if (hh > 23u || mm > 59u || (!signal && !music)) {
-        puts("[ALARM] Use alarm-set HH MM signal OR alarm-set HH MM music TRACK(1..255)");
+    if (hh > 23u || mm > 59u || (!signal && !music && !random)) {
+        puts("[ALARM] Use alarm-set HH MM signal|random OR alarm-set HH MM music TRACK(1..255)");
         return;
     }
     if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED ||
@@ -3405,13 +3439,13 @@ static void alarm_set(char *args) {
     alarms[0].enabled = true;
     alarms[0].hour = (uint8_t)hh;
     alarms[0].minute = (uint8_t)mm;
-    alarms[0].sound = music ? ALARM_SOUND_MUSIC : ALARM_SOUND_SIGNAL;
+    alarms[0].sound = random ? ALARM_SOUND_RANDOM : music ? ALARM_SOUND_MUSIC : ALARM_SOUND_SIGNAL;
     alarms[0].track = music ? (uint8_t)track : 1u;
     // Consume only this slot; preserve other already-fired alarms.
     alarm_consume_current_minute(0);
     settings_mark_changed();
     printf("[ALARM] 1 enabled=ON time=%02u:%02u sound=%s track=%u\n",
-           hh, mm, music ? "MUSIC" : "SIGNAL", music ? track : 1u);
+           hh, mm, random ? "RANDOM" : music ? "MUSIC" : "SIGNAL", music ? track : 1u);
 }
 
 // New syntax for all five alarm slots; keep alarm-set as a slot-1 alias.
@@ -3421,11 +3455,12 @@ static void alarm_config(char *args) {
     int fields = sscanf(args, " %u %u %u %11s %u %c",
                         &slot, &hh, &mm, kind, &track, &extra);
     bool signal = fields == 4 && strcmp(kind, "signal") == 0;
+    bool random = fields == 4 && strcmp(kind, "random") == 0;
     bool music = fields == 5 && strcmp(kind, "music") == 0 &&
                  track >= 1u && track <= CLOCK_ALARM_MAX_TRACK;
     if (slot < 1u || slot > CLOCK_ALARM_COUNT || hh > 23u || mm > 59u ||
-        (!signal && !music)) {
-        puts("[ALARM] Use alarm-config N HH MM signal OR alarm-config N HH MM music TRACK");
+        (!signal && !music && !random)) {
+        puts("[ALARM] Use alarm-config N HH MM signal|random OR alarm-config N HH MM music TRACK");
         return;
     }
     if (alarm_active_index >= 0 || alarm_ui_state != ALARM_UI_CLOSED ||
@@ -3438,7 +3473,7 @@ static void alarm_config(char *args) {
     a->enabled = true;
     a->hour = (uint8_t)hh;
     a->minute = (uint8_t)mm;
-    a->sound = music ? ALARM_SOUND_MUSIC : ALARM_SOUND_SIGNAL;
+    a->sound = random ? ALARM_SOUND_RANDOM : music ? ALARM_SOUND_MUSIC : ALARM_SOUND_SIGNAL;
     a->track = music ? (uint8_t)track : 1u;
 
     // Do not trigger retroactively if configured in the very same minute.
@@ -3454,7 +3489,7 @@ static void alarm_config(char *args) {
     }
     settings_mark_changed();
     printf("[ALARM] %u enabled=ON time=%02u:%02u sound=%s track=%u\n",
-           slot, hh, mm, music ? "MUSIC" : "SIGNAL", music ? track : 1u);
+           slot, hh, mm, random ? "RANDOM" : music ? "MUSIC" : "SIGNAL", music ? track : 1u);
 }
 
 static void alarm_enable(char *args) {
@@ -4067,7 +4102,7 @@ static void handle_command(char *line) {
         puts("[ALARM] alarm-days N daily|weekdays|weekends|135; alarm-snooze; alarm-snooze-status; alarm-snooze-cancel");
         printf("[SNOOZE] ringing: GP28 snoozes %u min; ALARM stops. On clock screen ALARM cancels snoozes\n",
                CLOCK_ALARM_SNOOZE_MINUTES);
-        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music [track], alarm-config N HH MM signal|music [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
+        puts("[CMD] t <seconds>, start, cancel, status, say [HH MM], lang ru|de, exact on|off, play F T, pause, audio, vol N, sound, menu, flash-info, flash-inspect, flash-tail, autosave-status, quiet-status, mode-status, mode voice|chime, alarm-status, alarm-set HH MM signal|music|random [track], alarm-config N HH MM signal|music|random [track], alarm-enable N on|off, alarm-off, alarm-stop, alarm-test HH MM [slot], auto-status, auto-debug, auto-test HH MM, auto on|off, rtc-debug, rtc-reset-stats, save, help");
         puts("[NETWORK] wifi-config SSID|password; wifi-clear; ntp-status; ntp-sync; version");
 #ifdef CLOCK_ENABLE_PHONE_WEB
         puts("[PHONE-WEB] phone-web-status shows the active network and IPv4 address");
@@ -4200,11 +4235,20 @@ static void handle_command(char *line) {
         print_autosave_status(now);
     } else if (strcmp(line, "auto-status") == 0) {
         auto_status();
+    } else if (strcmp(line,"random-music-status")==0) {
+        printf("[RANDOM-MUSIC] source=SPI08 count=%u timer_random=%s\n",music_catalog_count(event_music_catalog),timer_random?"ON":"OFF");
+        for(unsigned n=1;n<=255u;++n) if(event_music_catalog[n/8u]&(1u<<(n%8u))) printf("[RANDOM-MUSIC] 08/%03u.mp3\n",n);
+    } else if (strncmp(line,"timer-random ",13)==0) {
+        bool on=strcmp(line+13,"on")==0, off=strcmp(line+13,"off")==0;
+        if(!on && !off) puts("[TIMER-SOUND] Use timer-random on|off");
+        else if(menu_state!=MENU_CLOSED || alarm_ui_state!=ALARM_UI_CLOSED ||
+            !timer_sound_apply(timer_sound,timer_track,timer_voice,on?1u:0u))
+            puts("[TIMER-SOUND] Change blocked: close editors; stop timer/audio");
     } else if (strncmp(line, "timer-voice ", 12) == 0) {
         bool on = strcmp(line + 12, "on") == 0, off = strcmp(line + 12, "off") == 0;
         if (!on && !off) puts("[TIMER-SOUND] Use timer-voice on|off");
         else if (menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED ||
-            !timer_sound_apply(timer_sound, timer_track, on ? 1u : 0u))
+            !timer_sound_apply(timer_sound, timer_track, on ? 1u : 0u, timer_random))
             puts("[TIMER-SOUND] Change blocked: close editors; stop timer/audio");
     } else if (strcmp(line, "timer-sound") == 0) {
         printf("[TIMER-SOUND] voice=%s sound=%s track=%u (folder 08)\n", timer_voice ? "ON" : "OFF", timer_sound == 1u ? "MUSIC" : timer_sound == 2u ? "NONE" : "SIGNAL", (unsigned)timer_track);
@@ -4216,7 +4260,7 @@ static void handle_command(char *line) {
         bool music = count == 2 && strcmp(choice, "music") == 0 && track >= 1u && track <= 255u;
         if (!signal && !music && !none) puts("[TIMER-SOUND] Use timer-sound none | signal | music 1..255");
         else if (menu_state != MENU_CLOSED || alarm_ui_state != ALARM_UI_CLOSED ||
-            !timer_sound_apply(music ? 1u : none ? 2u : 0u, music ? (uint8_t)track : timer_track, timer_voice))
+            !timer_sound_apply(music ? 1u : none ? 2u : 0u, music ? (uint8_t)track : timer_track, timer_voice, timer_random))
             puts("[TIMER-SOUND] Change blocked: close editors; stop timer/audio");
     } else if (strcmp(line, "alarm-status") == 0) {
         alarm_status();
@@ -4246,7 +4290,7 @@ static void handle_command(char *line) {
             if (!ds1302_read_datetime(&dt))
                 puts("[ALARM-PENDING] TEST refused: RTC unavailable");
             else
-                alarm_pending_add(slot - 1u, dt.hour, dt.minute, now, true);
+                alarm_pending_add(slot - 1u, dt.hour, dt.minute, now, true, 0);
         }
     } else if (strncmp(line, "alarm-config ", 13) == 0) {
         alarm_config(line + 13);
@@ -4306,7 +4350,7 @@ static void handle_command(char *line) {
                 puts("[ALARM-AUDIO] TEST refused: RTC unavailable");
             else
                 active_alarm_due_ms = now;
-                alarm_start_audio(slot - 1u, dt.hour, dt.minute, now, true);
+                alarm_start_audio(slot - 1u, dt.hour, dt.minute, now, true, 0);
         }
     } else if (strcmp(line, "alarm-stop") == 0) {
         alarm_stop("SERIAL");
@@ -4693,6 +4737,9 @@ int main(void) {
     // Failures are nonfatal; playback falls back to local DFPlayer.
     if (!sd_spi_ensure_fat32())
         puts("[SD-AUTO] Boot will continue with LOCAL audio fallback");
+    else if (sd_fat32_music_catalog(event_music_catalog))
+        printf("[RANDOM-MUSIC] Cached folder 08 catalog: %u tracks\n",music_catalog_count(event_music_catalog));
+    else puts("[RANDOM-MUSIC] Catalog unavailable; random events use SIGNAL");
 #endif
 #if defined(CLOCK_ENABLE_A2DP) || defined(CLOCK_ENABLE_WIFI)
     radio_ready=cyw43_arch_init()==PICO_OK;
@@ -4995,7 +5042,7 @@ int main(void) {
                 .player_test = music_ui_open && music_ui_audition,
                 .preferences = {
                     .volume_local = volume, .volume_bt = bt_volume, .language = (uint8_t)language,
-                    .timer_sound = timer_sound, .timer_track = timer_track, .timer_voice = timer_voice,
+                    .timer_sound = timer_sound, .timer_track = timer_track, .timer_voice = timer_voice, .timer_random = timer_random,
                     .audio = {menu_audio_selected_jbl(0), menu_audio_selected_jbl(1),
                               menu_audio_selected_jbl(2), menu_audio_selected_jbl(3)},
                     .light = display_light,
@@ -5068,7 +5115,7 @@ int main(void) {
                      alarm_days_name(a->weekdays));
             snprintf(bottom, sizeof(bottom), "%02u:%02u %s",
                      (unsigned)a->hour, (unsigned)a->minute,
-                     a->sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL");
+                     alarm_sound_name(a->sound));
         } else if(alarm_ui_state==ALARM_UI_DAYS) {
             cursor_column=0;
             snprintf(top,sizeof(top),"ALARM %u DAYS",(unsigned)alarm_ui_index+1);
@@ -5099,7 +5146,7 @@ int main(void) {
                          (unsigned)alarm_ui_draft.minute);
             else if (alarm_ui_state == ALARM_UI_SOUND)
                 snprintf(bottom, sizeof(bottom), "%s NEXT",
-                         alarm_ui_draft.sound == ALARM_SOUND_MUSIC ? "MUSIC" : "SIGNAL");
+                         alarm_sound_name(alarm_ui_draft.sound));
             else
                 snprintf(bottom, sizeof(bottom), "%u SET=PREV T=OK",
                          (unsigned)alarm_ui_draft.track);
@@ -5107,6 +5154,10 @@ int main(void) {
             snprintf(top, sizeof(top), "SETTINGS %u/%u",
                      (unsigned)(menu_index + 1u), (unsigned)SETTINGS_MENU_ITEMS);
             snprintf(bottom, sizeof(bottom), "%s", menu_item_name(menu_index));
+        } else if (menu_state == MENU_TIMER_MUSIC_MODE) {
+            cursor_column=0;
+            snprintf(top,sizeof(top),"TIMER MUSIC");
+            snprintf(bottom,sizeof(bottom),"%s T=%s",timer_random_draft?"RANDOM":"FIXED",timer_random_draft?"SAVE":"NEXT");
         } else if (menu_state == MENU_TIMER_VOICE) {
             cursor_column = 0;
             snprintf(top, sizeof(top), "TIMER MESSAGE");

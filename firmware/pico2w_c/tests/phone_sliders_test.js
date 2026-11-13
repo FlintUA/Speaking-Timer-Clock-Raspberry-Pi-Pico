@@ -12,7 +12,7 @@ function createForm(id) {
   const markup = html.split('id="' + id + '"')[1].split("</form>")[0];
   const inputs = Array.from(markup.matchAll(/<(?:input|select)\b[^>]*\bname="([^"]+)"/g), match => ({
     name: match[1], value: match[1] === "slot" ? "1" : "", dataset: {}, checked: false,
-    type: sliderNames.includes(match[1]) ? "range" : match[1]==="timer_voice" ? "checkbox" : "text",
+    type: sliderNames.includes(match[1]) ? "range" : ["timer_voice","timer_random"].includes(match[1]) ? "checkbox" : "text",
     max: match[1].startsWith("volume_") ? "30" : "100", reportValidity: () => true
   }));
   const fields = Object.fromEntries(inputs.filter(field => field.name !== "days").map(field => [field.name, field]));
@@ -39,7 +39,7 @@ function getElementById(id) {
 }
 
 const preferences = {
-  volume_local: 12, volume_bt: 11, language: 0, timer_voice:1,timer_sound:0,timer_track:1, audio_manual: 1, audio_hourly: 1,
+  volume_local: 12, volume_bt: 11, language: 0, timer_voice:1,timer_sound:0,timer_track:1,timer_random:0, audio_manual: 1, audio_hourly: 1,
   audio_timer: 1, audio_alarm: 1, light_mode: 1, light_day: 70, light_night: 20,
   editing: false, idle: true, bt_supported: true, saving: "saved", snapshot_id: 0
 };
@@ -448,11 +448,25 @@ async function settled() {
   move("timer_track",255,"change");
   await form.handlers.click({target:{dataset:{setting:"timer_track"}}});await settled();
   assert.equal(preferences.timer_track,255);
+  const randomField=form.elements.timer_random;
+  randomField.checked=true;form.handlers.change({target:randomField,type:"change"});
+  await form.handlers.click({target:{dataset:{setting:"timer_random"}}});await settled();
+  assert.equal(preferences.timer_random,1);assert(form.elements.timer_track.disabled);
+  randomField.checked=false;form.handlers.change({target:randomField,type:"change"});
+  await form.handlers.click({target:{dataset:{setting:"timer_random"}}});await settled();
+  assert.equal(preferences.timer_random,0);assert(!form.elements.timer_track.disabled);
+  const randomAlarmForm=getElementById("alarm-controls");
+  randomAlarmForm.elements.sound.value="2";
+  randomAlarmForm.handlers.change({target:randomAlarmForm.elements.sound});
+  await update();assert(randomAlarmForm.elements.track.disabled);
+  randomAlarmForm.elements.sound.value="1";
+  randomAlarmForm.handlers.change({target:randomAlarmForm.elements.sound});
+  await update();assert(!randomAlarmForm.elements.track.disabled);
   preferences.idle=false;state.timer_running=true;
   await update();
   assert(voiceField.disabled && form.elements.timer_sound.disabled && form.elements.timer_track.disabled);
   preferences.idle=true;state.timer_running=false;
-  delete preferences.timer_sound;delete preferences.timer_voice;delete preferences.timer_track;
+  delete preferences.timer_sound;delete preferences.timer_voice;delete preferences.timer_track;delete preferences.timer_random;
   await update();
   assert(voiceField.disabled && form.elements.timer_sound.disabled && form.elements.timer_track.disabled);
   console.log("phone_sliders_test: PASS");

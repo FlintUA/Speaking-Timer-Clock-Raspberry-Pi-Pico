@@ -271,7 +271,7 @@ The `/timer` action `stop_sound <timer_sound_id>` uses the existing credential/e
 
 The page requests status every 250 ms during the last five countdown seconds and while completion audio or a scheduled alarm is active, versus the usual 1 second (plus response time). This improves observation latency; it does not guarantee immediate response under radio/decoder load. Controls remain state-based. If completion has already ended, Stop timer sound is disabled. The user reported correct operation after installation. End-to-end latency was not measured and the earlier page-jump cause was not isolated; the page contains no full-page reload operation.
 
-## Timer completion choices (installation pending)
+## Timer completion choices (user acceptance pending)
 
 Completion message and extra sound are independent saved preferences:
 
@@ -293,4 +293,8 @@ USB: `timer-sound` reports all three values; `timer-voice on|off`, `timer-sound 
 
 The v15 record is 624 bytes (three Flash pages), extending the immutable v14 prefix without changing sectors or BTstack storage. Reads of v1-v14 do not write Flash and default to message ON, signal, track 1. Nondefault timer preferences require v15; default preferences retain the existing v11-v14 conditional encodings. All fifteen birthdays, birth years, Wi-Fi/browser credentials, Bluetooth devices and other settings are preserved. A rollback must use a v15-aware build to retain access to v15 records; an older build can ignore those records and refuse further saves. This is a settings-format compatibility requirement, not a change to the updater.
 
-Nineteen registered host tests and both firmware profiles pass. Device installation, actual card playback, selected combinations and power-cycle persistence remain pending user acceptance.
+Nineteen registered host tests and both firmware profiles pass. After explicit approval, version `1.0.0+27.ge5593d1` was installed on November 13. Startup/read-only HTTP/settings checks passed, including legacy message ON / signal / track 1 defaults. Actual card playback, selected combinations and v15 save/power-cycle persistence remain pending user acceptance.
+
+## Random timer and alarm music (installation pending)
+
+Timer music can use a saved random flag independently of its message. Each alarm slot 1-5 now selects Signal / fixed Music / random Music. One actual numeric folder-08 file is selected per event, retained on snooze and output fallback, and redrawn for the next occurrence. A missing catalog falls back to signal. Mirror folder 08 on both cards. See [controls, file catalog, v16 compatibility and tests](../../doc/RANDOM_EVENT_MUSIC.md). Installation and hardware acceptance are pending.

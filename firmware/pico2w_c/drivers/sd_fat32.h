@@ -24,3 +24,7 @@ void sd_fat32_close_read(void);
 size_t sd_fat32_read(void *dst, size_t count);
 bool sd_fat32_seek(uint32_t offset);
 uint32_t sd_fat32_size(void);
+
+// Idle-only full directory scan; no decoder/file cursor may be active.
+// Numeric IDs 001..255 in /08, excludes empty/deleted/non-MP3/directory entries.
+bool sd_fat32_music_catalog(uint8_t tracks[32]);

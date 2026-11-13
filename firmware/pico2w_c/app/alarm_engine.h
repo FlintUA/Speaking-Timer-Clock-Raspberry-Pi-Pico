@@ -15,7 +15,8 @@
 
 typedef enum {
     ALARM_SOUND_SIGNAL = 0,
-    ALARM_SOUND_MUSIC = 1
+    ALARM_SOUND_MUSIC = 1,
+    ALARM_SOUND_RANDOM = 2
 } alarm_sound_t;
 
 typedef struct {
@@ -23,7 +24,7 @@ typedef struct {
     uint8_t hour;   // 0..23
     uint8_t minute; // 0..59
     alarm_sound_t sound;
-    uint8_t track;  // 1..255, used only for music
+    uint8_t track;  // 1..255 fixed choice, retained while RANDOM is selected.
     uint8_t weekdays; // Bit 0=Monday ... bit 6=Sunday; nonzero.
 } alarm_entry_t;
 
@@ -31,6 +32,7 @@ typedef struct {
     bool pending, test;
     uint8_t hour, minute;
     uint64_t deadline_ms;
+    uint16_t sound_choice; // Runtime: 0=unselected, 1..255=track, 256=signal.
 } alarm_snooze_t;
 
 bool alarm_day_matches(const alarm_entry_t *alarm, uint16_t year, uint8_t month, uint8_t day);
@@ -73,3 +75,5 @@ int alarm_scheduler_claim_due(alarm_scheduler_t *state,
     const alarm_entry_t alarms[CLOCK_ALARM_COUNT],
     uint16_t year, uint8_t month, uint8_t day,
     uint8_t hour, uint8_t minute, uint8_t *other_mask);
+
+const char *alarm_sound_name(alarm_sound_t sound);

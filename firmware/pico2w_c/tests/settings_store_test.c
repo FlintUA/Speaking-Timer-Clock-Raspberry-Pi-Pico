@@ -339,7 +339,7 @@ int main(void) {
     assert(settings_store_save(&off)==SETTINGS_STORE_OK);
     settings_record_v15_t v15;
     memcpy(&v15,test_flash+SLOT1_OFFSET,sizeof(v15));
-    assert(v15.prefix.prefix.version==RECORD_VERSION && sizeof(v15)==624);
+    assert(v15.prefix.prefix.version==RECORD_V15 && sizeof(v15)==624);
     assert(record_v15_valid(test_flash+SLOT1_OFFSET));
     assert(!memcmp(before_timer,test_flash+SLOT0_OFFSET,sizeof(before_timer)));
     assert(settings_store_load(&expanded)==SETTINGS_STORE_OK);
@@ -371,6 +371,35 @@ int main(void) {
     assert(!sector_owned(latest_timer));
     assert(settings_store_load(&off)==SETTINGS_STORE_OK); // Previous A/B version survives.
     assert(settings_store_save(&off)==SETTINGS_STORE_OCCUPIED);
+    // v16 preserves fixed v15 selections and all records; each alarm has its own random mode.
+    memset(test_flash,0xff,sizeof(test_flash));
+    off.timer_sound=1;off.timer_voice=1;off.timer_track=255;off.timer_random=0;
+    assert(settings_store_save(&off)==SETTINGS_STORE_OK);
+    assert(settings_store_load(&expanded)==SETTINGS_STORE_OK && !expanded.timer_random);
+    uint8_t prior_random[FLASH_SECTOR_SIZE];memcpy(prior_random,test_flash+SLOT0_OFFSET,sizeof(prior_random));
+    off.timer_random=1;
+    for(unsigned i=0;i<CLOCK_ALARM_COUNT;++i) off.alarms[i].sound=ALARM_SOUND_RANDOM;
+    assert(settings_store_save(&off)==SETTINGS_STORE_OK);
+    settings_record_v16_t v16;memcpy(&v16,test_flash+SLOT1_OFFSET,sizeof(v16));
+    assert(v16.prefix.prefix.prefix.version==RECORD_VERSION && sizeof(v16)==632 && record_v16_valid(test_flash+SLOT1_OFFSET));
+    assert(!memcmp(prior_random,test_flash+SLOT0_OFFSET,sizeof(prior_random)));
+    assert(settings_store_load(&expanded)==SETTINGS_STORE_OK && expanded.timer_random==1);
+    for(unsigned i=0;i<CLOCK_ALARM_COUNT;++i) assert(expanded.alarms[i].sound==ALARM_SOUND_RANDOM);
+    assert(expanded.birthdays[5].birth_year==off.birthdays[5].birth_year);
+    assert(!memcmp(&expanded.phone,&off.phone,sizeof(off.phone)) && !strcmp(expanded.wifi_password,off.wifi_password));
+    off.timer_random=2;assert(settings_store_save(&off)==SETTINGS_STORE_UNSUPPORTED);off.timer_random=1;
+    v16.timer_random=2;v16.crc32=record_crc_bytes(&v16,offsetof(settings_record_v16_t,crc32));
+    memcpy(test_flash+SLOT1_OFFSET,&v16,sizeof(v16));assert(!sector_owned(1));
+    assert(settings_store_load(&expanded)==SETTINGS_STORE_OK && !expanded.timer_random);
+    assert(settings_store_save(&off)==SETTINGS_STORE_OCCUPIED);
+    // Alarm-only random choice also selects v16, independent of timer randomness.
+    memset(test_flash,0xff,sizeof(test_flash));
+    off.timer_random=0;off.timer_voice=1;off.timer_sound=0;off.timer_track=1;
+    for(unsigned i=0;i<CLOCK_ALARM_COUNT;++i)off.alarms[i].sound=ALARM_SOUND_SIGNAL;
+    off.alarms[4].sound=ALARM_SOUND_RANDOM;
+    assert(settings_store_save(&off)==SETTINGS_STORE_OK);
+    assert(settings_store_load(&expanded)==SETTINGS_STORE_OK && !expanded.timer_random && expanded.alarms[4].sound==ALARM_SOUND_RANDOM);
+    assert(expanded.timer_sound==0 && expanded.timer_voice==1 && expanded.timer_track==1);
     memset(test_flash,0xff,sizeof(test_flash));
     test_flash[SLOT0_OFFSET]=0x42;
     clock_settings_t cfg={.quiet_start=22,.quiet_end=7,.timer_track=1,.timer_voice=1};

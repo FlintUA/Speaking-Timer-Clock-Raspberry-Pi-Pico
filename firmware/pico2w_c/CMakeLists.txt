@@ -25,6 +25,7 @@ add_executable(speaking_clock_c
     drivers/lcd1602_i2c.c
     app/countdown.c
     app/timer_controls.c
+    app/music_catalog.c
     app/music_playlist.c
     app/music_sleep.c
     app/birthday.c
@@ -51,6 +52,7 @@ target_include_directories(speaking_clock_c PRIVATE
 # Use the full 4 KiB SCRATCH_Y bank for the main stack.
 target_compile_definitions(speaking_clock_c PRIVATE PICO_STACK_SIZE=0x1000)
 target_link_libraries(speaking_clock_c PRIVATE
+    pico_rand
     pico_stdlib
     hardware_i2c
     hardware_spi
