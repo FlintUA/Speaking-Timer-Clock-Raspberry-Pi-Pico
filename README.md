@@ -151,6 +151,10 @@ The page requests status every 250 ms during the last five countdown seconds and
 
 The development branch adds an independent completion-message checkbox and None / Signal / Music sound choice, plus a folder-08 track number. Message only, sound only and silent completion are supported. Settings are available on the clock, in the browser and over USB, with deferred save and v1-v14 migration defaults. Start/cancel phrases, independent volumes and output routing stay unchanged. See [timer completion choices](experiments/phone_control_ap/README.md#timer-completion-choices-user-acceptance-pending) for controls, missing German speech and v15 rollback compatibility. Hardware acceptance is pending.
 
-## Random timer and alarm music (installation pending)
+## Random timer and alarm music (user acceptance pending)
 
-Timer music can use a saved random flag independently of its message. Each alarm slot 1-5 now selects Signal / fixed Music / random Music. One actual numeric folder-08 file is selected per event, retained on snooze and output fallback, and redrawn for the next occurrence. A missing catalog falls back to signal. Mirror folder 08 on both cards. See [controls, file catalog, v16 compatibility and tests](doc/RANDOM_EVENT_MUSIC.md). Installation and hardware acceptance are pending.
+Timer music can use a saved random flag independently of its message. Each alarm slot 1-5 now selects Signal / fixed Music / random Music. One actual numeric folder-08 file is selected per event, retained on snooze and output fallback, and redrawn for the next occurrence. A missing catalog falls back to signal. Mirror folder 08 on both cards. See [controls, file catalog, v16 compatibility and tests](doc/RANDOM_EVENT_MUSIC.md). Approved installation and read-only startup/catalog/settings checks passed on November 13 as `1.0.0+28.g36286e9`; hardware acceptance is pending.
+
+## Optional five-second timer warning (installation pending)
+
+A separate saved checkbox enables single beeps at 5, 4, 3, 2 and 1 seconds. Default OFF; Sound OFF suppresses it. Warning audio uses 19/001.mp3 and timer routing, does not queue late ticks or delay zero, and leaves message/music choices independent. The physical Timer sound editor adds the warning page before its existing fields. See [timing, busy skips, v17 compatibility and tests](doc/TIMER_PREWARNING.md). Software checks pass; actual cadence and persistence await hardware acceptance.

@@ -25,6 +25,7 @@ add_executable(speaking_clock_c
     drivers/lcd1602_i2c.c
     app/countdown.c
     app/timer_controls.c
+    app/timer_warning.c
     app/music_catalog.c
     app/music_playlist.c
     app/music_sleep.c

@@ -1,6 +1,6 @@
 # Random music for timer and scheduled alarms
 
-Status: implemented and software-tested on the development branch; installation and physical acceptance are pending.
+Status: installed with separate approval on November 13 as `1.0.0+28.g36286e9`. Startup, catalog and read-only USB/HTTP/settings checks passed; the user subsequently confirmed general operation. Focused per-slot/output/persistence cases remain separate.
 
 ## Controls
 
@@ -38,3 +38,5 @@ Twenty-one registered checks cover numeric/sparse/duplicate/invalid catalog entr
 A one-off host harness compiles actual main-loop choice/queue/start/stop/snooze/timer-preemption and Bluetooth fallback handlers with stubbed hardware. It verifies no reroll on snooze, delayed dispatch or LOCAL fallback, a new choice for the next occurrence, empty-catalog signal fallback and unchanged fixed tracks. This is transport-independent software evidence, not physical audio acceptance.
 
 After separately approved installation, confirm the boot catalog and existing settings first. With matching cards, test timer random with and without its message, repeated new countdowns, and Stop timer sound. For each desired alarm slot select random, let it ring, snooze three minutes and verify the same music returns; the next scheduled event should draw again. Compare LOCAL/Bluetooth when convenient. Wait for saved settings, power cycle and verify preferences. Four real browser clients, load latency and card equality remain separate checks. Do not hot-swap cards during playback to force a failure.
+
+The user subsequently confirmed that both cards are identical and music numbering has no gaps. The implementation continues to use actual IDs and does not depend on contiguous numbering.

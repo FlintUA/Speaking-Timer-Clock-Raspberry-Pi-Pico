@@ -34,7 +34,8 @@ _Static_assert(LEGACY_SLOT_OFFSET + FLASH_SECTOR_SIZE <= PICO_FLASH_BANK_STORAGE
                "Legacy clock Flash overlaps BTstack storage");
 #endif
 #define RECORD_MAGIC 0x53434c4bu /* SCLK */
-#define RECORD_VERSION 16u
+#define RECORD_VERSION 17u
+#define RECORD_V16 16u
 #define RECORD_V15 15u
 #define RECORD_V14 14u
 #define RECORD_V13 13u
@@ -244,6 +245,15 @@ typedef struct {
     uint8_t reserved[3];
     uint32_t crc32;
 } settings_record_v16_t;
+typedef struct {
+    settings_record_v16_t prefix;
+    uint8_t timer_warning;
+    uint8_t reserved[3];
+    uint32_t crc32;
+} settings_record_v17_t;
+_Static_assert(offsetof(settings_record_v17_t,crc32)==636u,"Unexpected v17 CRC offset");
+_Static_assert(sizeof(settings_record_v17_t)==640u,"Unexpected v17 size");
+_Static_assert(sizeof(settings_record_v17_t)<=3u*FLASH_PAGE_SIZE,"v17 exceeds three pages");
 _Static_assert(offsetof(settings_record_v16_t,crc32)==628u,"Unexpected v16 CRC offset");
 _Static_assert(sizeof(settings_record_v16_t)==632u,"Unexpected v16 size");
 _Static_assert(sizeof(settings_record_v16_t)<=3u*FLASH_PAGE_SIZE,"v16 exceeds three pages");
@@ -328,7 +338,7 @@ static bool record_valid(const settings_record_current_t *r) {
     if (r->version != RECORD_V3 && r->version != RECORD_V4 &&
          r->version != RECORD_V5 && r->version != RECORD_V6 && r->version != RECORD_V7 && r->version != RECORD_V8 && r->version != RECORD_V9 &&
          r->version != RECORD_V10 && r->version != RECORD_V11 &&
-         r->version != RECORD_V12 && r->version != RECORD_V13 && r->version != RECORD_V14 && r->version != RECORD_V15 &&
+         r->version != RECORD_V12 && r->version != RECORD_V13 && r->version != RECORD_V14 && r->version != RECORD_V15 && r->version != RECORD_V16 &&
          r->version != RECORD_VERSION) return false;
     if (r->quiet_enabled > 1u || r->quiet_start > 23u ||
         r->quiet_end > 23u || r->half_hour_enabled > 1u ||
@@ -336,7 +346,7 @@ static bool record_valid(const settings_record_current_t *r) {
     for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
         const uint8_t *a = r->alarms[i];
         if (a[0] > 1u || a[1] > 23u || a[2] > 59u ||
-            a[3] > (r->version >= RECORD_VERSION ? 2u : 1u) || a[4] < 1u ||
+            a[3] > (r->version >= RECORD_V16 ? 2u : 1u) || a[4] < 1u ||
             (r->version < RECORD_V8 && a[4] > 45u)) return false;
     }
     if (r->reserved[0] != 0xffu || r->reserved[1] != 0xffu ||
@@ -455,9 +465,16 @@ static bool record_v15_valid(const uint8_t *bytes) {
 
 static bool record_v16_valid(const uint8_t *bytes) {
     settings_record_v16_t r; memcpy(&r,bytes,sizeof(r));
-    return record_v15_valid(bytes) && r.prefix.prefix.prefix.version==RECORD_VERSION &&
+    return record_v15_valid(bytes) && r.prefix.prefix.prefix.version>=RECORD_V16 &&
         r.timer_random<=1u && r.reserved[0]==0xffu && r.reserved[1]==0xffu && r.reserved[2]==0xffu &&
-        r.crc32==record_crc_bytes(&r,offsetof(settings_record_v16_t,crc32));
+        (r.prefix.prefix.prefix.version==RECORD_V16 ?
+            r.crc32==record_crc_bytes(&r,offsetof(settings_record_v16_t,crc32)) : r.crc32==UINT32_MAX);
+}
+static bool record_v17_valid(const uint8_t *bytes) {
+    settings_record_v17_t r;memcpy(&r,bytes,sizeof(r));
+    return record_v16_valid(bytes) && r.prefix.prefix.prefix.prefix.version==RECORD_VERSION &&
+        r.timer_warning<=1u && r.reserved[0]==0xffu && r.reserved[1]==0xffu && r.reserved[2]==0xffu &&
+        r.crc32==record_crc_bytes(&r,offsetof(settings_record_v17_t,crc32));
 }
 static size_t record_size(const settings_record_current_t *r) {
     if (r->version == RECORD_V1) return sizeof(settings_record_v1_t);
@@ -474,7 +491,8 @@ static size_t record_size(const settings_record_current_t *r) {
     if (r->version == RECORD_V12) return RECORD_V12_CRC_OFFSET + sizeof(uint32_t);
     if (r->version == RECORD_V14) return sizeof(settings_record_v14_t);
     if (r->version == RECORD_V15) return sizeof(settings_record_v15_t);
-    if (r->version == RECORD_VERSION) return sizeof(settings_record_v16_t);
+    if (r->version == RECORD_V16) return sizeof(settings_record_v16_t);
+    if (r->version == RECORD_VERSION) return sizeof(settings_record_v17_t);
     return sizeof(settings_record_current_t);
 }
 
@@ -494,7 +512,8 @@ static bool sector_owned(unsigned slot) {
     memcpy(&r, bytes, sizeof(r));
     if (!record_valid(&r) || (r.version == RECORD_V14 && !record_v14_valid(bytes)) ||
         (r.version == RECORD_V15 && !record_v15_valid(bytes)) ||
-        (r.version == RECORD_VERSION && !record_v16_valid(bytes))) return false;
+        (r.version == RECORD_V16 && !record_v16_valid(bytes)) ||
+        (r.version == RECORD_VERSION && !record_v17_valid(bytes))) return false;
     for (size_t i = record_size(&r); i < FLASH_SECTOR_SIZE; ++i) {
         if (bytes[i] != 0xffu) return false;
     }
@@ -648,9 +667,13 @@ settings_store_result_t settings_store_load(clock_settings_t *out) {
             out->timer_sound = extended.timer_sound;
             out->timer_track = extended.timer_track;
         }
-        if (r.version == RECORD_VERSION) {
+        if (r.version >= RECORD_V16) {
             settings_record_v16_t extended; memcpy(&extended,slot_bytes(slot),sizeof(extended));
             out->timer_random=extended.timer_random;
+        }
+        if (r.version == RECORD_VERSION) {
+            settings_record_v17_t extended;memcpy(&extended,slot_bytes(slot),sizeof(extended));
+            out->timer_warning=extended.timer_warning;
         }
         out->language = r.language;
         out->volume = r.volume;
@@ -737,7 +760,7 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
     if (!settings_store_layout_safe()) return SETTINGS_STORE_IMAGE_OVERLAP;
     if (!cfg || cfg->language > 1u || cfg->volume > 30u ||
         cfg->quiet_start > 23u || cfg->quiet_end > 23u ||
-        cfg->clock_mode > 1u || cfg->timer_sound > 2u || cfg->timer_voice > 1u || cfg->timer_random > 1u || !cfg->timer_track ||
+        cfg->clock_mode > 1u || cfg->timer_sound > 2u || cfg->timer_voice > 1u || cfg->timer_random > 1u || cfg->timer_warning > 1u || !cfg->timer_track ||
         cfg->audio_manual_jbl > 1u ||
         cfg->audio_hourly_jbl > 1u || cfg->audio_timer_jbl > 1u ||
         cfg->audio_alarm_jbl > 1u || cfg->bt_volume > 30u ||
@@ -781,12 +804,13 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
         have_extra |= b->enabled || b->month != 1u || b->day != 1u ||
             b->hour != 9u || b->minute || b->last_year || b->birth_year;
     }
+    bool have_warning=cfg->timer_warning!=0;
     bool have_random = cfg->timer_random != 0;
     for(unsigned i=0;i<CLOCK_ALARM_COUNT;++i) have_random |= cfg->alarms[i].sound==ALARM_SOUND_RANDOM;
     bool have_timer = cfg->timer_sound != 0u || cfg->timer_track != 1u || cfg->timer_voice != 1u;
     settings_record_current_t r = {
         .magic = RECORD_MAGIC,
-        .version = have_random ? RECORD_VERSION : have_timer ? RECORD_V15 : have_extra ? RECORD_V14 : have_birth_year ? RECORD_V13 :
+        .version = have_warning ? RECORD_VERSION : have_random ? RECORD_V16 : have_timer ? RECORD_V15 : have_extra ? RECORD_V14 : have_birth_year ? RECORD_V13 :
             have_phone ? RECORD_V12 : RECORD_V11,
         .sequence = valid ? current.sequence + 1u : 1u,
         .language = cfg->language,
@@ -837,7 +861,7 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
         have_phone ? RECORD_V12_CRC_OFFSET : RECORD_V11_CRC_OFFSET;
     r.phone = cfg->phone;
     size_t length;
-    if (have_extra || have_timer || have_random) {
+    if (have_extra || have_timer || have_random || have_warning) {
         settings_record_v14_t extended;
         memset(&extended, 0xff, sizeof(extended));
         r.crc32 = UINT32_MAX;
@@ -851,18 +875,25 @@ settings_store_result_t settings_store_save(const clock_settings_t *cfg) {
             dst[5] = (uint8_t)b->last_year; dst[6] = (uint8_t)(b->last_year >> 8);
             extended.birth_years[j] = b->birth_year;
         }
-        if (have_timer || have_random) {
+        if (have_timer || have_random || have_warning) {
             settings_record_v15_t latest;
             memset(&latest, 0xff, sizeof(latest));
             latest.prefix = extended;
             latest.timer_voice = cfg->timer_voice;
             latest.timer_sound = cfg->timer_sound;
             latest.timer_track = cfg->timer_track;
-            if (have_random) {
+            if (have_random || have_warning) {
                 settings_record_v16_t newest; memset(&newest,0xff,sizeof(newest));
                 newest.prefix=latest; newest.timer_random=cfg->timer_random;
-                newest.crc32=record_crc_bytes(&newest,offsetof(settings_record_v16_t,crc32));
-                length=sizeof(newest);memcpy(context.page,&newest,length);
+                if(have_warning) {
+                    settings_record_v17_t warning;memset(&warning,0xff,sizeof(warning));
+                    warning.prefix=newest;warning.timer_warning=cfg->timer_warning;
+                    warning.crc32=record_crc_bytes(&warning,offsetof(settings_record_v17_t,crc32));
+                    length=sizeof(warning);memcpy(context.page,&warning,length);
+                } else {
+                    newest.crc32=record_crc_bytes(&newest,offsetof(settings_record_v16_t,crc32));
+                    length=sizeof(newest);memcpy(context.page,&newest,length);
+                }
             } else {
                 latest.crc32 = record_crc_bytes(&latest, offsetof(settings_record_v15_t, crc32));
                 length = sizeof(latest);

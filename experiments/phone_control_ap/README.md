@@ -283,7 +283,7 @@ Completion message and extra sound are independent saved preferences:
 
 The message plays first when enabled and available, followed by the selected signal or a single music track. Message-only, signal-only, music-only and fully silent completion are valid; silent completion still updates the display/status. Signal and music are alternatives. Start/cancel phrases, the countdown range, separate output volumes and timer routing are unchanged. The existing Stop timer sound action applies to any nonempty completion plan. German completion speech is still missing on the current card; no Russian replacement or missing German track is requested. Selected signal/music still plays.
 
-On the clock, open Settings -> Timer sound (12 in the ordinary profile, 13 in the web profile). Choose Message ON/OFF, then NONE/SIGNAL/MUSIC, and a track for MUSIC. Confirm the last applicable field to save the whole draft. MINUS backs up or cancels; timeout discards uncommitted changes. Existing menu item numbers, including Phone Control and About, are unchanged.
+On the clock, open Settings -> Timer sound (12 in the ordinary profile, 13 in the web profile). Choose the optional five-second warning ON/OFF, Message ON/OFF, then NONE/SIGNAL/MUSIC, and a track for MUSIC. Confirm the last applicable field to save the whole draft. MINUS backs up or cancels; timeout discards uncommitted changes. Existing menu item numbers, including Phone Control and About, are unchanged.
 
 In the browser, use the Timer completion message checkbox and Timer finish sound / Timer music track controls under Settings. Apply each edited field before starting a countdown. These controls require idle audio, stopped timer/player and closed physical editors; volume/brightness retain their existing behavior. Settings use the normal deferred Flash autosave. Wait for Settings saved before power cycling.
 
@@ -295,6 +295,10 @@ The v15 record is 624 bytes (three Flash pages), extending the immutable v14 pre
 
 Nineteen registered host tests and both firmware profiles pass. After explicit approval, version `1.0.0+27.ge5593d1` was installed on November 13. Startup/read-only HTTP/settings checks passed, including legacy message ON / signal / track 1 defaults. Actual card playback, selected combinations and v15 save/power-cycle persistence remain pending user acceptance.
 
-## Random timer and alarm music (installation pending)
+## Random timer and alarm music (user acceptance pending)
 
-Timer music can use a saved random flag independently of its message. Each alarm slot 1-5 now selects Signal / fixed Music / random Music. One actual numeric folder-08 file is selected per event, retained on snooze and output fallback, and redrawn for the next occurrence. A missing catalog falls back to signal. Mirror folder 08 on both cards. See [controls, file catalog, v16 compatibility and tests](../../doc/RANDOM_EVENT_MUSIC.md). Installation and hardware acceptance are pending.
+Timer music can use a saved random flag independently of its message. Each alarm slot 1-5 now selects Signal / fixed Music / random Music. One actual numeric folder-08 file is selected per event, retained on snooze and output fallback, and redrawn for the next occurrence. A missing catalog falls back to signal. Mirror folder 08 on both cards. See [controls, file catalog, v16 compatibility and tests](../../doc/RANDOM_EVENT_MUSIC.md). Approved installation and read-only startup/catalog/settings checks passed on November 13 as `1.0.0+28.g36286e9`; hardware acceptance is pending.
+
+## Optional five-second timer warning (installation pending)
+
+A separate saved checkbox enables single beeps at 5, 4, 3, 2 and 1 seconds. Default OFF; Sound OFF suppresses it. Warning audio uses 19/001.mp3 and timer routing, does not queue late ticks or delay zero, and leaves message/music choices independent. The physical Timer sound editor adds the warning page before its existing fields. See [timing, busy skips, v17 compatibility and tests](../../doc/TIMER_PREWARNING.md). Software checks pass; actual cadence and persistence await hardware acceptance.

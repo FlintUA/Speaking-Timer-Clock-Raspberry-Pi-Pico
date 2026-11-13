@@ -58,6 +58,10 @@ The countdown finish announcement is not a scheduled alarm occurrence. Its separ
 
 Before continuing player expansion, the user prioritized timer completion choices. The message is an independent boolean (`timer_voice`), extra sound is Signal=0/Music=1/None=2 (`timer_sound`), and `timer_track` selects 1-255 in folder 08. Defaults preserve message + signal. A checkbox plus mutually exclusive extra-sound choices supports message-only, signal-only, music-only and silent completion. Values are published in `settings` and updated through the existing authenticated `/settings` queue; changing them requires idle audio/stopped timer and closed editors. Physical menu and USB paths share the same apply/validation logic. No audio assets or start/cancel phrase changes are included. Nondefault preferences use conditional Flash v15; see phone-control documentation for compatibility and pending hardware tests.
 
-## Random event music (installation pending)
+## Random event music (user acceptance pending)
 
 Timer `settings.timer_random` is a saved boolean applied through `/settings timer_random 0|1`. Each alarm record's sound value adds RANDOM=2; SIGNAL=0 and fixed MUSIC=1 are unchanged. The per-slot revision allocates two sound bits to keep compare-and-apply lossless. Existing command IDs, nonces, scopes and physical-editor/idle guards are retained. The UI keeps the fixed track as a remembered value, disables timer fixed-track editing while random is applied and skips fixed-track audition for random alarm drafts. File catalog, one-choice-per-occurrence behavior, mirror-card requirement, v16 storage and pending hardware checks are specified in [RANDOM_EVENT_MUSIC.md](RANDOM_EVENT_MUSIC.md).
+
+## Optional timer pre-warning (installation pending)
+
+A saved `settings.timer_warning` boolean, default 0, is updated through authenticated `/settings timer_warning 0|1`. The existing checkbox Apply, id/nonce retries, idle guards and snapshots are reused. It is independent of timer_voice, timer_sound, timer_random and timer_track. No browser-generated audio or network-driven second timing is used; the clock owns the monotonic 5..1 schedule. See [TIMER_PREWARNING.md](TIMER_PREWARNING.md) for skip/priority behavior, numeric asset and conditional Flash v17.

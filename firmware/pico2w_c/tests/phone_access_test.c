@@ -328,6 +328,12 @@ int main(void) {
     phone_access_t random_schedule={0};phone_access_reset(&random_schedule,91);random_schedule.settings.home_trusted=1;
     assert(phone_access_alarm(&random_schedule,"- 91 1 3 set 5 0 1 7 0 127 2 255",PHONE_SCOPE_HOME,true)==PHONE_OK);
     assert(random_schedule.last.alarm.sound==ALARM_SOUND_RANDOM && random_schedule.last.slot==4);
+    timer_settings.result=PHONE_COMMAND_APPLIED;
+    assert(phone_access_settings(&timer_settings,"- 90 5 13 timer_warning 2",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_timer(&timer_settings,"- 90 5 13 timer_warning 1",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_settings(&timer_settings,"- 90 5 13 timer_warning 1",PHONE_SCOPE_HOME,false)==PHONE_DENIED);
+    assert(phone_access_settings(&timer_settings,"- 90 5 13 timer_warning 1",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(timer_settings.last.action==PHONE_SET_TIMER_WARNING && timer_settings.last.value==1);
     const char *const live_actions[]={"alarm_stop","alarm_snooze","snooze_cancel"};
     for(unsigned i=0;i<3;++i) {
         phone_access_t live={0}; phone_access_reset(&live,77); live.settings.home_trusted=1;

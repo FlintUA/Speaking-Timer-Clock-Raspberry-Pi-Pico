@@ -12,7 +12,7 @@ function createForm(id) {
   const markup = html.split('id="' + id + '"')[1].split("</form>")[0];
   const inputs = Array.from(markup.matchAll(/<(?:input|select)\b[^>]*\bname="([^"]+)"/g), match => ({
     name: match[1], value: match[1] === "slot" ? "1" : "", dataset: {}, checked: false,
-    type: sliderNames.includes(match[1]) ? "range" : ["timer_voice","timer_random"].includes(match[1]) ? "checkbox" : "text",
+    type: sliderNames.includes(match[1]) ? "range" : ["timer_voice","timer_random","timer_warning"].includes(match[1]) ? "checkbox" : "text",
     max: match[1].startsWith("volume_") ? "30" : "100", reportValidity: () => true
   }));
   const fields = Object.fromEntries(inputs.filter(field => field.name !== "days").map(field => [field.name, field]));
@@ -39,7 +39,7 @@ function getElementById(id) {
 }
 
 const preferences = {
-  volume_local: 12, volume_bt: 11, language: 0, timer_voice:1,timer_sound:0,timer_track:1,timer_random:0, audio_manual: 1, audio_hourly: 1,
+  volume_local: 12, volume_bt: 11, language: 0, timer_voice:1,timer_sound:0,timer_track:1,timer_random:0,timer_warning:0, audio_manual: 1, audio_hourly: 1,
   audio_timer: 1, audio_alarm: 1, light_mode: 1, light_day: 70, light_night: 20,
   editing: false, idle: true, bt_supported: true, saving: "saved", snapshot_id: 0
 };
@@ -448,6 +448,11 @@ async function settled() {
   move("timer_track",255,"change");
   await form.handlers.click({target:{dataset:{setting:"timer_track"}}});await settled();
   assert.equal(preferences.timer_track,255);
+  const warningField=form.elements.timer_warning;
+  assert.equal(warningField.checked,false);
+  warningField.checked=true;form.handlers.change({target:warningField,type:"change"});
+  await form.handlers.click({target:{dataset:{setting:"timer_warning"}}});await settled();
+  assert.equal(preferences.timer_warning,1);assert(posts.at(-1).endsWith("timer_warning 1"));
   const randomField=form.elements.timer_random;
   randomField.checked=true;form.handlers.change({target:randomField,type:"change"});
   await form.handlers.click({target:{dataset:{setting:"timer_random"}}});await settled();
@@ -464,11 +469,11 @@ async function settled() {
   await update();assert(!randomAlarmForm.elements.track.disabled);
   preferences.idle=false;state.timer_running=true;
   await update();
-  assert(voiceField.disabled && form.elements.timer_sound.disabled && form.elements.timer_track.disabled);
+  assert(voiceField.disabled && form.elements.timer_sound.disabled && form.elements.timer_track.disabled && warningField.disabled);
   preferences.idle=true;state.timer_running=false;
-  delete preferences.timer_sound;delete preferences.timer_voice;delete preferences.timer_track;delete preferences.timer_random;
+  delete preferences.timer_sound;delete preferences.timer_voice;delete preferences.timer_track;delete preferences.timer_random;delete preferences.timer_warning;
   await update();
-  assert(voiceField.disabled && form.elements.timer_sound.disabled && form.elements.timer_track.disabled);
+  assert(voiceField.disabled && form.elements.timer_sound.disabled && form.elements.timer_track.disabled && warningField.disabled);
   console.log("phone_sliders_test: PASS");
 })().catch(error => {
   console.error(error);

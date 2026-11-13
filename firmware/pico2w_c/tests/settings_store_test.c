@@ -72,7 +72,7 @@ int main(void) {
         clock_settings_t cfg;
         assert(settings_store_load(&cfg)==SETTINGS_STORE_OK);
         assert(cfg.language==1 && cfg.volume==18);
-        assert(cfg.timer_voice==1 && cfg.timer_sound==0 && cfg.timer_track==1);
+        assert(cfg.timer_voice==1 && cfg.timer_sound==0 && cfg.timer_track==1 && !cfg.timer_warning);
         assert(cfg.bt_volume==(v>=6?12:16));
         assert(cfg.bt_known_count==(v>=7?1:0));
         assert(cfg.audio_manual_jbl==(v>=4?1:0) && cfg.audio_timer_jbl==(v>=4?1:0));
@@ -381,7 +381,7 @@ int main(void) {
     for(unsigned i=0;i<CLOCK_ALARM_COUNT;++i) off.alarms[i].sound=ALARM_SOUND_RANDOM;
     assert(settings_store_save(&off)==SETTINGS_STORE_OK);
     settings_record_v16_t v16;memcpy(&v16,test_flash+SLOT1_OFFSET,sizeof(v16));
-    assert(v16.prefix.prefix.prefix.version==RECORD_VERSION && sizeof(v16)==632 && record_v16_valid(test_flash+SLOT1_OFFSET));
+    assert(v16.prefix.prefix.prefix.version==RECORD_V16 && sizeof(v16)==632 && record_v16_valid(test_flash+SLOT1_OFFSET));
     assert(!memcmp(prior_random,test_flash+SLOT0_OFFSET,sizeof(prior_random)));
     assert(settings_store_load(&expanded)==SETTINGS_STORE_OK && expanded.timer_random==1);
     for(unsigned i=0;i<CLOCK_ALARM_COUNT;++i) assert(expanded.alarms[i].sound==ALARM_SOUND_RANDOM);
@@ -400,6 +400,32 @@ int main(void) {
     assert(settings_store_save(&off)==SETTINGS_STORE_OK);
     assert(settings_store_load(&expanded)==SETTINGS_STORE_OK && !expanded.timer_random && expanded.alarms[4].sound==ALARM_SOUND_RANDOM);
     assert(expanded.timer_sound==0 && expanded.timer_voice==1 && expanded.timer_track==1);
+    // v17 warning defaults OFF for all old formats and preserves random preferences.
+    assert(!expanded.timer_warning);
+    memcpy(prior_random,test_flash+SLOT0_OFFSET,sizeof(prior_random));
+    off.timer_warning=1;
+    fail_write=true;assert(settings_store_save(&off)==SETTINGS_STORE_FLASH_ERROR);fail_write=false;
+    assert(settings_store_load(&expanded)==SETTINGS_STORE_OK && !expanded.timer_warning);
+    assert(settings_store_save(&off)==SETTINGS_STORE_OK);
+    settings_record_v17_t v17;memcpy(&v17,test_flash+SLOT1_OFFSET,sizeof(v17));
+    assert(v17.prefix.prefix.prefix.prefix.version==RECORD_VERSION && sizeof(v17)==640 && record_v17_valid(test_flash+SLOT1_OFFSET));
+    assert(!memcmp(prior_random,test_flash+SLOT0_OFFSET,sizeof(prior_random)));
+    assert(settings_store_load(&expanded)==SETTINGS_STORE_OK && expanded.timer_warning==1);
+    assert(expanded.alarms[4].sound==ALARM_SOUND_RANDOM && expanded.timer_track==off.timer_track);
+    assert(!memcmp(&expanded.phone,&off.phone,sizeof(off.phone)) && !strcmp(expanded.wifi_password,off.wifi_password));
+    off.timer_warning=2;assert(settings_store_save(&off)==SETTINGS_STORE_UNSUPPORTED);off.timer_warning=1;
+    v17.timer_warning=2;v17.crc32=record_crc_bytes(&v17,offsetof(settings_record_v17_t,crc32));
+    memcpy(test_flash+SLOT1_OFFSET,&v17,sizeof(v17));assert(!sector_owned(1));
+    assert(settings_store_load(&expanded)==SETTINGS_STORE_OK && !expanded.timer_warning);
+    assert(settings_store_save(&off)==SETTINGS_STORE_OCCUPIED);
+    // Warning alone must also create v17; disabling can return to an older encoding.
+    memset(test_flash,0xff,sizeof(test_flash));
+    alarm_defaults(off.alarms);birthday_defaults(off.birthdays);off.phone=(phone_settings_t){0};
+    off.timer_random=0;off.timer_warning=1;off.timer_voice=1;off.timer_sound=0;off.timer_track=1;
+    assert(settings_store_save(&off)==SETTINGS_STORE_OK);
+    assert(settings_store_load(&expanded)==SETTINGS_STORE_OK && expanded.timer_warning && !expanded.timer_random);
+    off.timer_warning=0;assert(settings_store_save(&off)==SETTINGS_STORE_OK);
+    assert(settings_store_load(&expanded)==SETTINGS_STORE_OK && !expanded.timer_warning && expanded.timer_voice==1);
     memset(test_flash,0xff,sizeof(test_flash));
     test_flash[SLOT0_OFFSET]=0x42;
     clock_settings_t cfg={.quiet_start=22,.quiet_end=7,.timer_track=1,.timer_voice=1};
