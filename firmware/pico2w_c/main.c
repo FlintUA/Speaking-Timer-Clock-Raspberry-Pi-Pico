@@ -107,6 +107,10 @@ static alarm_entry_t alarms[CLOCK_ALARM_COUNT];
 static alarm_scheduler_t alarm_scheduler;
 static bool alarm_boot_seeded;
 static int alarm_active_index = -1;
+#ifdef CLOCK_ENABLE_PHONE_WEB
+static uint32_t phone_alarm_instance;
+static phone_snooze_revision_t phone_snooze_state;
+#endif
 static uint64_t alarm_deadline_ms;
 static bool alarm_audio_armed;
 #define ALARM_SAFETY_TIMEOUT_MS (15u * 60u * 1000u)
@@ -2104,6 +2108,18 @@ static void menu_audio_apply(unsigned index, bool jbl) {
 }
 
 #ifdef CLOCK_ENABLE_PHONE_WEB
+static uint32_t phone_current_snooze_revision(void) {
+    uint8_t waiting = 0;
+    uint64_t queued[CLOCK_ALARM_COUNT] = {0};
+    for (unsigned i = 0; i < CLOCK_ALARM_COUNT; ++i) {
+        if (deferred_alarms[i].pending && deferred_alarms[i].snoozed) {
+            waiting |= (uint8_t)(1u << i);
+            queued[i] = deferred_alarms[i].queued_ms;
+        }
+    }
+    return phone_snooze_revision(&phone_snooze_state, alarm_snoozes, waiting, queued);
+}
+
 static void phone_snapshot_overview(phone_overview_t *view,
                                     const ds1302_datetime_t *rtc, uint64_t now) {
     uint8_t waiting = 0;
@@ -2115,6 +2131,8 @@ static void phone_snapshot_overview(phone_overview_t *view,
     }
     phone_overview_calendar(view, rtc, alarms, alarm_snoozes, waiting, now);
     view->active_alarm = alarm_active_index >= 0 ? (uint8_t)(alarm_active_index + 1) : 0;
+    view->active_id = alarm_active_index >= 0 ? phone_alarm_instance : 0;
+    view->snooze_revision = phone_current_snooze_revision();
     view->sound_on = sound_enabled;
     view->direct = phone_web_direct();
     view->network = network_time_home_status(now);
@@ -2216,6 +2234,19 @@ static phone_command_result_t service_phone_schedule(const phone_command_t *requ
 }
 
 static phone_command_result_t service_phone_control(const phone_command_t *request) {
+    if (request->action >= PHONE_ALARM_STOP && request->action <= PHONE_ALARM_CANCEL_SNOOZES) {
+        uint64_t now = to_ms_since_boot(get_absolute_time());
+        phone_command_result_t result = phone_alarm_guard(request->action, request->value,
+            phone_alarm_instance, phone_current_snooze_revision(), alarm_active_index >= 0,
+            alarm_snooze_next(now, NULL) >= 0);
+        if (result != PHONE_COMMAND_APPLIED) return result;
+        if (request->action == PHONE_ALARM_STOP) alarm_stop("WEB");
+        else if (request->action == PHONE_ALARM_SNOOZE) alarm_snooze_start(now);
+        else alarm_snooze_cancel_all();
+        // Observe the mutation before a later command can use the old revision.
+        (void)phone_current_snooze_revision();
+        return PHONE_COMMAND_APPLIED;
+    }
     const phone_control_state_t state = {
         .sound_on = sound_enabled, .alarm_active = alarm_active_index >= 0,
         .timer_running = timer.running,
@@ -3108,6 +3139,9 @@ static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
         return;
     }
     alarm_active_index = (int)index;
+#ifdef CLOCK_ENABLE_PHONE_WEB
+    if (!++phone_alarm_instance) ++phone_alarm_instance;
+#endif
     active_alarm_hour = hour;
     active_alarm_minute = minute;
     active_alarm_test = test;

@@ -153,10 +153,14 @@ The sleep timer counts elapsed time even while paused or muted. Selecting a pres
 
 ## Persistence, diagnostics and version
 
-The experimental web Quick controls group adds explicit Sound on/off and manually requested time/date/nearest-alarm speech. It shares the physical sound setter and speech paths, preserves separate volumes and saved schedules, and does not automatically resume music on unmute. Sound remains RAM-only and defaults ON after restart. Like the physical sound button, web sound changes are blocked while an alarm rings. Speech requires sound ON, closed physical editors/player, no countdown/ringing alarm and idle audio. See [phone controls](../experiments/phone_control_ap/README.md#quick-controls-substage-2-installation-pending) for command semantics and installation status.
+The experimental web Quick controls group adds explicit Sound on/off and manually requested time/date/nearest-alarm speech. It shares the physical sound setter and speech paths, preserves separate volumes and saved schedules, and does not automatically resume music on unmute. Sound remains RAM-only and defaults ON after restart. Like the physical sound button, web sound changes are blocked while an alarm rings. Speech requires sound ON, closed physical editors/player, no countdown/ringing alarm and idle audio. See [phone controls](../experiments/phone_control_ap/README.md#quick-controls-substage-2-generally-accepted) for command semantics and installation status.
 
 Committed changes use debounced Flash autosave when idle; wait for autosave=OK before removing power. The cooldown can defer an additional write. Run autosave-status or explicitly save when idle.
 
 Use help for the complete USB command list. Important read-only commands: version, flash-info, alarm-status, audio-settings, bt-known, rtc-debug, audio-health and ntp-status. Serial speed is 115200.
 
 See [network setup](NETWORK_TIME.md), [roadmap](ROADMAP.md) and [hardware evidence](HARDWARE_TEST_EVIDENCE.md) for current implementation and validation boundaries.
+
+## Browser live alarm actions (installation pending)
+
+The experimental page adds Stop alarm, Snooze 3 min and Cancel snoozed repeats. Stop/snooze act only on the displayed ringing occurrence. Cancel removes sleeping/audio-waiting snoozed repeats, preserves saved alarm schedules and leaves any ringing alarm running. Commands use current occurrence/set IDs so stale pages cannot silently affect a later occurrence. Physical buttons retain their existing behavior. See [live alarm actions](../experiments/phone_control_ap/README.md#live-alarm-actions-substage-3-installation-pending).

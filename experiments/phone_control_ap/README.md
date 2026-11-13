@@ -12,7 +12,7 @@ Current development branch: `codex/phone-control`. Stable v1.0.0 does not includ
 
 Current page functions: live clock/timer/player/output status; one 00:00:01..23:59:59 timer with Set/Start/Cancel; Previous, combined Play/Pause and Next in one row, with Stop centered below; independent LOCAL/BT volume and day/night brightness sliders; language, audio preferences and light mode; five alarm and fifteen annual birthday editors. No rotation gesture or track seeking is provided. It does not offer browser playlist-mode/sleep controls, Bluetooth device management, quiet-hour/half-hour/exact-hour settings, manual time/date or spoken-information requests.
 
-## Quick controls (substage 2; installation pending)
+## Quick controls (substage 2; generally accepted)
 
 The authorized page adds Turn sound on/off, Speak time, Speak date and Speak next alarm. Commands use the authenticated `/control` endpoint with the same credential/epoch/id/nonce envelope and queue as timer/player/settings. Actions are `sound 0|1`, `say_time 0`, `say_date 0` and `next_alarm 0`. They are rejected on other action endpoints.
 
@@ -22,7 +22,7 @@ Speech uses the existing manual routing/language/LOCAL fallback. It is refused w
 
 The page explains disabled actions, sends explicit on/off, rechecks fresh state on the clock and waits for a matching published snapshot before confirming applied controls. Retried speech requests retain their original ID/nonce and cannot enqueue twice. These operational actions do not dirty settings or write Flash.
 
-Device acceptance after separately approved installation: test sound from browser and physical button, independent levels, mute/unmute during LOCAL/BT music with no automatic restart, speech in both languages/routes, no-alarm/RTC/busy feedback and phone reconnect. Restore intended sound state and schedules. Bluetooth connection itself still uses the clock/USB until the planned browser device-management stage.
+Approved installation on November 13 and read-only USB/HTTP/settings checks passed. The user subsequently confirmed general operation. Focused cases not individually reported remain: test sound from browser and physical button, independent levels, mute/unmute during LOCAL/BT music with no automatic restart, speech in both languages/routes, no-alarm/RTC/busy feedback and phone reconnect. Restore intended sound state and schedules. Bluetooth connection itself still uses the clock/USB until the planned browser device-management stage.
 
 ## About in the integrated page
 
@@ -248,3 +248,15 @@ The alarm track button now changes from Test to Stop while a track audition is a
 ### Current verification and source provenance
 
 On 2026-11-13, all seventeen host checks passed after a clean local Debug rebuild. This documentation review inspected uncommitted changes based on `697c062`; it did not create or install a new firmware image. Previous build/profile measurements in this guide describe their recorded stage and must not be presented as an exact identity or current peak-memory measurement of the installed device. See [latest hardware evidence](../../doc/HARDWARE_TEST_EVIDENCE.md#november-13-expansion-user-report).
+
+### Deferred next-alarm wording
+
+The user reports that Speak next alarm announces the correct upcoming alarm date/time but begins with the existing fired-alarm phrase (reported Russian wording: "The alarm number 5 has triggered"). This is misleading for an information request. After functional development is complete, refresh the speech assets so next-alarm information omits the fired-event introduction or uses a dedicated upcoming-alarm introduction. Keep the actual alarm-trigger announcement distinct. No audio assets or speech sequence were changed for this report.
+
+## Live alarm actions (substage 3; installation pending)
+
+An authorized browser shows Alarm actions alongside the existing live overview. Stop alarm and Snooze 3 min are enabled only while an alarm is ringing. Cancel snoozed repeats is enabled when at least one sleeping or audio-waiting snoozed repeat exists. The overview already identifies the ringing slot and remaining repeat time. The buttons remain usable independently of physical editors, speech availability, timer state or RTC availability. Connection loss disables them; older firmware without occurrence/revision fields hides them.
+
+Stop ends the current occurrence. Snooze uses the existing three-minute monotonic deadline. Cancel removes all snoozed repeats known to the reviewed state without disabling the saved weekday schedules or stopping another ringing occurrence. Each request carries the displayed occurrence ID or snooze-set revision. Changed state is refused with a request to review the latest status. Duplicate network retries use the existing command ID/nonce and cannot snooze twice. Feedback waits for the matching published snapshot. Operations are RAM-only.
+
+Nineteen registered checks and both firmware profiles pass. Host checks cover stale same-slot occurrences, snooze-set changes, waiting transitions, authorization/endpoint/value validation, cached retries and browser controls/feedback. The real C HTTP serializer fits the 4,096-byte buffer with five alarms, fifteen birthdays, escaped Bluetooth names and boundary IDs/counters. These checks do not establish physical audio behavior or four-client timing. Installation and user acceptance remain pending.

@@ -88,14 +88,14 @@ int phone_overview_json(char *buffer, size_t capacity, const phone_overview_t *s
     json_name(name, s->bt_name);
     int length = snprintf(buffer, capacity,
         ",\"overview\":{\"rtc_valid\":%s,\"date\":\"%s\",\"weekday\":%u,\"sound_on\":%s,"
-        "\"alarm\":{\"active\":%u,\"deferred\":%u,\"next_slot\":%u,\"next_at\":\"%s\",\"next_snoozed\":%s,"
+        "\"alarm\":{\"active\":%u,\"active_id\":%" PRIu32 ",\"snooze_revision\":%" PRIu32 ",\"deferred\":%u,\"next_slot\":%u,\"next_at\":\"%s\",\"next_snoozed\":%s,"
         "\"snoozes\":%u,\"snooze_slot\":%u,\"snooze_seconds\":%" PRIu32 ",\"snooze_waiting\":%s},"
         "\"bluetooth\":{\"state\":\"%s\",\"name\":\"%s\"},"
         "\"network\":{\"mode\":\"%s\",\"state\":\"%s\",\"seconds\":%" PRIu32 "},"
         "\"ntp\":{\"available\":%s,\"configured\":%s,\"sampled\":%s,\"synced\":%s,\"pending\":%s,\"requesting\":%s,\"retry\":%s,"
         "\"sample_age\":%" PRIu32 ",\"sync_age\":%" PRIu32 ",\"offset\":%d}}",
         s->rtc_valid ? "true" : "false", s->date, (unsigned)s->weekday, s->sound_on ? "true" : "false",
-        (unsigned)s->active_alarm, (unsigned)s->deferred_count, (unsigned)s->next_slot, s->next_at,
+        (unsigned)s->active_alarm, s->active_id, s->snooze_revision, (unsigned)s->deferred_count, (unsigned)s->next_slot, s->next_at,
         s->next_snoozed ? "true" : "false", (unsigned)s->snooze_count, (unsigned)s->snooze_slot,
         s->snooze_seconds, s->snooze_waiting ? "true" : "false",
         (unsigned)s->bt_state < sizeof(bt)/sizeof(bt[0]) ? bt[s->bt_state] : bt[0], name,

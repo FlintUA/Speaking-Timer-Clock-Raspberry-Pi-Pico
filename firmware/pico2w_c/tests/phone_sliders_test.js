@@ -62,6 +62,8 @@ const quickButtons = ["sound", "say_time", "say_date", "next_alarm"].map((action
   return button;
 });
 getElementById("quick-controls").querySelectorAll=()=>quickButtons;
+const alarmLiveButtons=["alarm_stop","alarm_snooze","snooze_cancel"].map(action=>({dataset:{alarmLive:action}}));
+getElementById("alarm-live-controls").querySelectorAll=()=>alarmLiveButtons;
 const document = {getElementById, activeElement: null, addEventListener() {}};
 const context = vm.createContext({
   Date, AbortController, document, setTimeout, clearTimeout,
@@ -97,6 +99,16 @@ const context = vm.createContext({
         else {
           controlCalls.push(fields[4]);
           if(fields[4]==="sound") state.overview.sound_on=Number(fields[5])===1;
+          const a=state.overview.alarm;
+          if(["alarm_stop","alarm_snooze","snooze_cancel"].includes(fields[4])) {
+            const cancel=fields[4]==="snooze_cancel";
+            if(Number(fields[5])!==(cancel?a.snooze_revision:a.active_id)) state.command_result="conflict";
+            else if(cancel) {a.snoozes=0;++a.snooze_revision;}
+            else {
+              a.active=0;a.active_id=0;
+              if(fields[4]==="alarm_snooze") {a.snoozes=1;a.snooze_seconds=180;++a.snooze_revision;}
+            }
+          }
         }
       }
       preferences.snapshot_id = state.command_id;
@@ -333,6 +345,57 @@ async function settled() {
   await update();
   assert.equal(quick.hidden,true);
   assert(quickButtons.every(button=>button.disabled));
+  const alarmLive=getElementById("alarm-live-controls");
+  assert.equal(alarmLive.hidden,true);
+  state.home_trusted=true;
+  const a=state.overview.alarm;
+  Object.assign(a,{active:5,active_id:70,snooze_revision:80,snoozes:0});
+  state.overview.sound_on=false; // Alarm actions do not depend on speech/mute/editor/RTC guards.
+  preferences.editing=true; state.timer_running=true;
+  await update();
+  assert.equal(alarmLive.hidden,false);
+  assert.equal(alarmLiveButtons[0].disabled,false);
+  assert.equal(alarmLiveButtons[1].disabled,false);
+  assert.equal(alarmLiveButtons[2].disabled,true);
+  const clickAlarm=async index=>{await alarmLive.handlers.click({target:alarmLiveButtons[index]});await settled();};
+  dropResponses=1;
+  await clickAlarm(1);
+  assert(posts.at(-1).endsWith("alarm_snooze 70"));
+  assert.equal(posts.at(-1),posts.at(-2));
+  assert.equal(a.active,0);assert.equal(a.snooze_seconds,180);
+  assert.equal(getElementById("feedback").textContent,"Alarm snoozed for 3 minutes.");
+  assert.equal(alarmLiveButtons[0].disabled,true);
+  assert.equal(alarmLiveButtons[2].disabled,false);
+  assert(getElementById("alarm-live-hint").textContent.includes("saved alarm schedules"));
+  const schedules=JSON.stringify(state.alarms);
+  await clickAlarm(2);
+  assert.equal(a.snoozes,0);
+  assert.equal(JSON.stringify(state.alarms),schedules);
+  assert.equal(preferences.saving,"saved");
+  assert.equal(alarmLiveButtons[2].disabled,true);
+  Object.assign(a,{active:5,active_id:71,snoozes:1,snooze_revision:83});
+  await update(); // Browser still has occurrence 71 when another one starts.
+  a.active_id=72;
+  await clickAlarm(0);
+  assert.equal(a.active,5);
+  assert.equal(a.active_id,72);
+  assert(getElementById("feedback").textContent.includes("Alarm state changed"));
+  await clickAlarm(0);
+  assert.equal(a.active,0);
+  assert.equal(a.snoozes,1); // Stop does not cancel unrelated pending snoozes.
+  assert.equal(getElementById("feedback").textContent,"Alarm stopped.");
+  a.snooze_waiting=true; // A due repeat waiting for audio remains cancellable.
+  await update();
+  a.snooze_revision=84;
+  await clickAlarm(2);
+  assert.equal(a.snoozes,1);
+  assert(getElementById("feedback").textContent.includes("Alarm state changed"));
+  await clickAlarm(2);
+  assert.equal(a.snoozes,0);
+  failStatusReads=1;
+  await update();
+  assert.equal(alarmLive.hidden,true);
+  assert(alarmLiveButtons.every(button=>button.disabled));
   console.log("phone_sliders_test: PASS");
 })().catch(error => {
   console.error(error);

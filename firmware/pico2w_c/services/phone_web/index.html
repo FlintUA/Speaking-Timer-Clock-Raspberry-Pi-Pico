@@ -88,6 +88,15 @@
     </div>
     <p id="control-hint"></p>
   </form>
+  <form id="alarm-live-controls" hidden>
+    <h2>Alarm actions</h2>
+    <div class="quick-buttons">
+      <button type="button" data-alarm-live="alarm_stop">Stop alarm</button>
+      <button type="button" data-alarm-live="alarm_snooze">Snooze 3 min</button>
+      <button type="button" data-alarm-live="snooze_cancel">Cancel snoozed repeats</button>
+    </div>
+    <p id="alarm-live-hint" aria-live="polite"></p>
+  </form>
   <form id="controls" hidden>
     <h2>Set timer</h2>
     <input id="hours" type="hidden" value="0">
@@ -270,9 +279,13 @@
   const playerControls = document.getElementById("player-controls");
   const playerPlay = document.getElementById("player-play");
   const quickControls = document.getElementById("quick-controls");
+  const alarmLiveControls = document.getElementById("alarm-live-controls");
+  const alarmLiveHint = document.getElementById("alarm-live-hint");
   const soundToggle = document.getElementById("sound-toggle");
   const controlHint = document.getElementById("control-hint");
   const controlMessages = {
+    conflict: "Alarm state changed. Review the current status and try again.",
+    no_ringing: "No alarm is ringing now.", no_snooze: "No snoozed repeats remain.",
     muted: "Sound is off: speech and scheduled alarm sounds are suppressed.",
     rtc_unavailable: "Clock time/date is unavailable.", no_alarm: "No upcoming alarm to announce.",
     editing: "Close settings or the alarm editor on the clock.", timer_busy: "Wait for the timer or cancel it first.",
@@ -419,6 +432,18 @@
     controlHint.textContent = busy || pending ? "Waiting for the clock..." : reason ? controlMessages[reason] :
       controlReason("next_alarm") === "no_alarm" ? "Time/date speech is ready. No upcoming alarm to announce." :
       "Announcements use the Manual speech / music output.";
+    const alarm = live?.overview?.alarm;
+    const alarmActionsAvailable = Number.isInteger(alarm?.active_id) && Number.isInteger(alarm?.snooze_revision);
+    alarmLiveControls.hidden = !allowed || !alarmActionsAvailable;
+    for (const button of alarmLiveControls.querySelectorAll("button")) {
+      const cancel = button.dataset.alarmLive === "snooze_cancel";
+      button.disabled = !allowed || !alarmActionsAvailable || busy || Boolean(pending) ||
+        (cancel ? !alarm?.snoozes : !alarm?.active || !alarm?.active_id);
+    }
+    alarmLiveHint.textContent = !alarm ? "Current alarm status is unavailable." :
+      alarm.active ? `Alarm ${alarm.active} is ringing. Snooze repeats it in 3 minutes.` :
+      alarm.snoozes ? "Cancel removes snoozed repeats only; saved alarm schedules stay enabled." :
+      "No ringing alarm or snoozed repeats. Saved alarm schedules stay enabled.";
     logout.hidden = !paired;
     logout.disabled = busy || Boolean(pending);
     for (const button of controls.querySelectorAll("button")) {
@@ -543,6 +568,16 @@
     const reason = controlReason(action);
     if (reason) { feedback.textContent = controlMessages[reason]; return; }
     await sendCommand("control", action, action === "sound" && !live.overview.sound_on ? 1 : 0);
+  });
+  alarmLiveControls.addEventListener("submit", event => event.preventDefault());
+  alarmLiveControls.addEventListener("click", async event => {
+    const action = event.target.dataset.alarmLive;
+    if (!["alarm_stop", "alarm_snooze", "snooze_cancel"].includes(action)) return;
+    const alarm = live?.overview?.alarm;
+    const cancel = action === "snooze_cancel";
+    const revision = cancel ? alarm?.snooze_revision : alarm?.active_id;
+    if (!Number.isInteger(revision) || revision < 1 || (cancel ? !alarm?.snoozes : !alarm?.active)) return;
+    await sendCommand("control", action, revision);
   });
   function settingEdited(event) {
     const field = event.target;
@@ -796,7 +831,10 @@
           }
         } else if (pending.target === "control") {
           feedback.textContent = data.command_result === "applied" ?
-            (pending.action === "sound" ? data.overview?.sound_on ? "Sound on." : "Sound off." : "Announcement requested.") :
+            (pending.action === "sound" ? data.overview?.sound_on ? "Sound on." : "Sound off." :
+              pending.action === "alarm_stop" ? "Alarm stopped." :
+              pending.action === "alarm_snooze" ? "Alarm snoozed for 3 minutes." :
+              pending.action === "snooze_cancel" ? "Snoozed repeats cancelled. Saved schedules unchanged." : "Announcement requested.") :
             controlMessages[data.command_result] || "Command not applied. Check the clock status.";
         } else if (pending.target === "player") {
           feedback.textContent = data.command_result === "applied" ?

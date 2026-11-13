@@ -290,5 +290,26 @@ int main(void) {
     assert(phone_access_control(&control,control_body,PHONE_SCOPE_HOME,false)==PHONE_DENIED);
     assert(phone_access_control(&control,control_body,PHONE_SCOPE_DIRECT,false)==PHONE_OK);
     assert(control.last.value==1);
+    const char *const live_actions[]={"alarm_stop","alarm_snooze","snooze_cancel"};
+    for(unsigned i=0;i<3;++i) {
+        phone_access_t live={0}; phone_access_reset(&live,77); live.settings.home_trusted=1;
+        char live_body[128];
+        snprintf(live_body,sizeof(live_body),"- 77 1 11 %s 0",live_actions[i]);
+        assert(phone_access_control(&live,live_body,PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+        snprintf(live_body,sizeof(live_body),"- 77 1 11 %s 4294967296",live_actions[i]);
+        assert(phone_access_control(&live,live_body,PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+        snprintf(live_body,sizeof(live_body),"- 77 1 11 %s 4294967295",live_actions[i]);
+        assert(phone_access_alarm(&live,live_body,PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+        assert(phone_access_player(&live,live_body,PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+        assert(phone_access_settings(&live,live_body,PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+        assert(phone_access_control(&live,live_body,PHONE_SCOPE_HOME,false)==PHONE_DENIED);
+        assert(phone_access_control(&live,live_body,PHONE_SCOPE_HOME,true)==PHONE_OK);
+        assert(live.last.value==UINT32_MAX && live.last.action==PHONE_ALARM_STOP+(phone_action_t)i);
+        live.result=PHONE_COMMAND_CONFLICT;
+        assert(phone_access_control(&live,live_body,PHONE_SCOPE_HOME,true)==PHONE_OK);
+        assert(live.result==PHONE_COMMAND_CONFLICT); // Retry cannot be applied to a later occurrence.
+        snprintf(live_body,sizeof(live_body),"- 77 1 11 %s 1",live_actions[i]);
+        assert(phone_access_control(&live,live_body,PHONE_SCOPE_HOME,true)==PHONE_BUSY);
+    }
     return 0;
 }

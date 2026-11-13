@@ -184,3 +184,17 @@ Each switch is followed by a complete manual time announcement: 19:46 on Nest an
 For both switches, the first direct connection attempt immediately after release of the previous channel returned 0x56. In the installed BTstack, this is BTSTACK_MEMORY_ALLOC_FAILED. The automatic retry after 5000 ms returned 0x00 and restored the connection. A possible relationship to incomplete resource release from the previous channel needs separate investigation; the log does not establish the cause. The clock continued running during the wait.
 
 The user separately confirmed that the LCD displays speaker names without MAC addresses. Remaining checks are persistence of deletion after power loss and booting with Nest selected. Portable reconnection after power loss is already verified.
+
+## Quick controls: approved installation, November 13, 2026
+
+After explicit user approval, the integrated phone/BT/MP3/Wi-Fi profile was installed through COM8. The reviewed UF2 was 1,766,912 bytes, SHA256 `EA6990E10B989BA309D00BEDE2D89F71970EAAAAD0A5B2B5E3F386AB23A0AC7F`, built from commit `38a8743a6cea3b2382570dafe93b4293cf18ae9a`.
+
+Post-install USB and HTTP reported version `1.0.0+24.g38a8743` and build `38a8743a6cea-bt-mp3-wifi-phone`, without a dirty suffix. Both Flash slots remained valid with sequences 162/161 and schema v12; the image guard was OK. Home Wi-Fi returned at `192.168.2.116`, NTP reported synchronized Europe/Berlin time, and Bluetooth recovered an ACTIVE 44100 Hz stream. No timer, alarm, MP3 or speech was active during verification.
+
+Read-only HTTP checks confirmed the overview and all five quick-control element IDs. Five alarms, fifteen birthday records and ten persistent preference fields produced the same pre/post SHA256: `E25CFB7A3D7C26410D9DD8FFD51DECD420D762A80F7E1602B8765D63001A75A0`. The idle, unsaved timer selection reset from 540 to 60 seconds on reboot; this was not an active countdown or a persistent preference.
+
+No HTTP control actions or audible test commands were sent during post-install verification. COM8 was closed and released. User acceptance of sound on/off and time/date/nearest-alarm speech is pending, as are the separately listed four-client/audio-load cases. Stable main and the v1.0.0 release were not changed.
+
+### Quick-control user acceptance and deferred wording
+
+After installation, the user reported that everything works. This is general acceptance of the tested quick controls, not individual evidence for every route, language, failure case or four-client load. The user specifically confirmed that Speak next alarm refers to the upcoming alarm, but reported a fired-alarm introduction before its date and time. The user deferred phrase replacement until functional development is complete and audio assets are refreshed. No firmware or audio change, rebuild or installation was performed for this feedback.

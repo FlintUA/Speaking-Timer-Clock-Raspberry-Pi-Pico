@@ -213,6 +213,8 @@ static phone_reply_t accept_command(phone_access_t *access, const char *body,
         {"audio_timer ", 0, 1}, {"audio_alarm ", 0, 1},
         {"light_mode ", 0, 2}, {"light_day ", 0, 100}, {"light_night ", 0, 100},
         {"sound ", 0, 1}, {"say_time ", 0, 0}, {"say_date ", 0, 0}, {"next_alarm ", 0, 0},
+        {"alarm_stop ", 1, UINT32_MAX}, {"alarm_snooze ", 1, UINT32_MAX},
+        {"snooze_cancel ", 1, UINT32_MAX},
         {"set ", 0, 0}, {"set ", 0, 0}
     };
     _Static_assert(sizeof(actions) / sizeof(actions[0]) == PHONE_ACTION_COUNT, "Missing phone action");

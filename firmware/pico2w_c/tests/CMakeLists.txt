@@ -32,7 +32,7 @@ add_executable(phone_access_test phone_access_test.c "${SERVICES}/phone_access.c
 add_executable(network_time_test network_time_test.c "${APP}/clock_time.c")
 add_executable(phone_overview_test phone_overview_test.c "${SERVICES}/phone_overview.c"
     "${APP}/alarm_engine.c" "${APP}/clock_time.c")
-add_executable(phone_control_test phone_control_test.c "${SERVICES}/phone_control.c")
+add_executable(phone_control_test phone_control_test.c "${SERVICES}/phone_control.c" "${APP}/alarm_engine.c" "${APP}/clock_time.c")
 target_include_directories(network_time_test PRIVATE network_mocks)
 target_compile_definitions(network_time_test PRIVATE CLOCK_ENABLE_PHONE_WEB=1)
 target_include_directories(lcd_cursor_test PRIVATE mocks "${CMAKE_CURRENT_LIST_DIR}/../drivers")

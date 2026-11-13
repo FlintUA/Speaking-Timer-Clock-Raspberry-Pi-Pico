@@ -13,6 +13,7 @@ typedef struct {
     char date[16];
     uint8_t weekday;
     uint8_t active_alarm, deferred_count;
+    uint32_t active_id, snooze_revision;
     uint8_t next_slot;
     char next_at[32];
     bool next_snoozed;
