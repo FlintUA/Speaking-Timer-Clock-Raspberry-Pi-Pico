@@ -43,10 +43,18 @@ CMake flags CLOCK_ENABLE_A2DP, CLOCK_ENABLE_MP3 and CLOCK_ENABLE_WIFI are explic
 
 `CLOCK_ENABLE_PHONE_WEB` defaults to OFF. `build-clock-bt.ps1 -Mp3 -PhoneWeb` enables the integrated local HTTP server and appends `-phone` to the build ID. It requires Wi-Fi and the pico-examples DHCP server. The web profile configures a 48 KiB lwIP heap and four POST contexts for four simultaneous clients; the ordinary profile retains 8 KiB. Four stored browser authorization entries are a separate limit. Hardware concurrency and audio continuity remain to be tested. Only the web profile adds Phone Control before About in the physical settings menu. Both home and direct modes serve the same embedded page; switching selects one network mode at a time.
 
-## Browser live alarm actions (substage 3; installation pending)
+## Browser live alarm actions (substage 3; user acceptance pending)
 
 The authenticated `/control` endpoint accepts `alarm_stop <active_id>`, `alarm_snooze <active_id>` and `snooze_cancel <snooze_revision>` inside the existing credential/epoch/id/nonce envelope. Both values are nonzero uint32 numbers from `overview.alarm`. The main loop checks them against current state before calling the physical `alarm_stop`, `alarm_snooze_start` or `alarm_snooze_cancel_all` handler. These actions bypass the speech/menu/timer guards so a ringing alarm remains stoppable.
 
 `active_id` is newly allocated on each successful ringing start, including a repeated occurrence of the same slot; it is published as zero when not ringing. `snooze_revision` changes when the pending snooze set/deadlines or snoozed deferred occurrences change, including transition to audio waiting. Ordinary countdown ticks do not change it. Command retries retain their ID/nonce and cached result. A reboot changes the existing command epoch; no runtime alarm IDs are persisted.
 
 Results are `conflict` for changed state, `no_ringing` for no active alarm and `no_snooze` for no pending repeats. Cancellation affects sleeping and audio-waiting snoozed repeats only, leaves regular deferred occurrences and any currently ringing alarm alone, and does not disable saved schedules. Stop affects the current ringing occurrence only. No new Flash schema or write is introduced. Hardware acceptance is pending.
+
+## Countdown completion audio (fix; installation pending)
+
+Countdown timers and scheduled alarms are separate. Alarm Stop/Snooze actions do not apply to countdown completion. Cancel timer cancels a running countdown. The new **Stop timer sound** action stops only the currently owned completion announcement, without a cancellation phrase or changing saved schedules/levels. It is enabled while that announcement is active; no manual page refresh is required. The status shows **Finished - announcement playing**. Actual on-page punctuation may use a separator dot.
+
+The `/timer` action `stop_sound <timer_sound_id>` uses the existing credential/epoch/id/nonce envelope and a nonzero ID from `overview.timer_sound_id`. Ended or superseded events are refused; another alarm, player or later timer event cannot be stopped by an old ID. The owner is cleared when audio completes, is replaced/appended by another owner, or is interrupted by mute/priority. Bluetooth-to-LOCAL fallback retains the same event ID. No Flash-format change or save is introduced.
+
+The page requests status every 250 ms during the last five countdown seconds and while completion audio or a scheduled alarm is active, versus the usual 1 second (plus response time). This improves observation latency; it does not guarantee immediate response under radio/decoder load. Controls remain state-based. If completion has already ended, Stop timer sound is disabled. Hardware timing and the reported page jump remain unverified; the page contains no full-page reload operation.

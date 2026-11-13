@@ -290,6 +290,17 @@ int main(void) {
     assert(phone_access_control(&control,control_body,PHONE_SCOPE_HOME,false)==PHONE_DENIED);
     assert(phone_access_control(&control,control_body,PHONE_SCOPE_DIRECT,false)==PHONE_OK);
     assert(control.last.value==1);
+    phone_access_t finish={0}; phone_access_reset(&finish,88); finish.settings.home_trusted=1;
+    assert(phone_access_timer(&finish,"- 88 1 9 stop_sound 0",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_timer(&finish,"- 88 1 9 stop_sound 4294967296",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_control(&finish,"- 88 1 9 stop_sound 17",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_timer(&finish,"- 88 1 9 stop_sound 17",PHONE_SCOPE_HOME,false)==PHONE_DENIED);
+    assert(phone_access_timer(&finish,"- 88 1 9 stop_sound 17",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(finish.last.action==PHONE_TIMER_SOUND_STOP && finish.last.value==17);
+    finish.result=PHONE_COMMAND_APPLIED;
+    assert(phone_access_timer(&finish,"- 88 1 9 stop_sound 17",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(finish.result==PHONE_COMMAND_APPLIED);
+    assert(phone_access_timer(&finish,"- 88 1 9 stop_sound 18",PHONE_SCOPE_HOME,true)==PHONE_BUSY);
     const char *const live_actions[]={"alarm_stop","alarm_snooze","snooze_cancel"};
     for(unsigned i=0;i<3;++i) {
         phone_access_t live={0}; phone_access_reset(&live,77); live.settings.home_trusted=1;

@@ -204,7 +204,7 @@ static phone_reply_t accept_command(phone_access_t *access, const char *body,
         uint32_t minimum, maximum;
     } actions[] = {
         {"set ", 1, CLOCK_TIMER_MAX_SECONDS}, {"start ", 1, CLOCK_TIMER_MAX_SECONDS},
-        {"cancel ", 0, 0}, {"play ", 0, 0}, {"pause ", 0, 0}, {"resume ", 0, 0},
+        {"cancel ", 0, 0}, {"stop_sound ", 1, UINT32_MAX}, {"play ", 0, 0}, {"pause ", 0, 0}, {"resume ", 0, 0},
         {"stop ", 0, 0}, {"next ", 0, 0}, {"previous ", 0, 0},
         {"test_track ", 1, 255},
         {"test_stop ", 0, 0},

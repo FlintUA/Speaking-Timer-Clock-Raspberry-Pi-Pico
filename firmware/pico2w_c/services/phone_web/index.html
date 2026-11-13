@@ -111,6 +111,7 @@
       <button type="button" data-action="set">Set</button>
       <button type="button" data-action="start">Start</button>
       <button type="button" data-action="cancel">Cancel timer</button>
+      <button type="button" data-action="stop_sound" id="timer-sound-stop">Stop timer sound</button>
     </div>
   </form>
   <div id="player-controls" hidden>
@@ -284,7 +285,8 @@
   const soundToggle = document.getElementById("sound-toggle");
   const controlHint = document.getElementById("control-hint");
   const controlMessages = {
-    conflict: "Alarm state changed. Review the current status and try again.",
+    conflict: "State changed. Review the current status and try again.",
+    no_timer_sound: "Timer completion audio has already ended.",
     no_ringing: "No alarm is ringing now.", no_snooze: "No snoozed repeats remain.",
     muted: "Sound is off: speech and scheduled alarm sounds are suppressed.",
     rtc_unavailable: "Clock time/date is unavailable.", no_alarm: "No upcoming alarm to announce.",
@@ -447,8 +449,10 @@
     logout.hidden = !paired;
     logout.disabled = busy || Boolean(pending);
     for (const button of controls.querySelectorAll("button")) {
+      const action = button.dataset.action;
       button.disabled = busy || Boolean(pending) || !live ||
-        ((live.timer_running || live.player !== "Closed") && button.dataset.action !== "cancel");
+        (action === "stop_sound" ? !live?.overview?.timer_sound_id :
+          (live.timer_running || live.player !== "Closed") && action !== "cancel");
     }
     playerPlay.dataset.action = live?.player === "Playing" ? "pause" : live?.player === "Paused" ? "resume" : "play";
     playerPlay.textContent = live?.player === "Playing" ? "Pause" : "Play";
@@ -549,6 +553,11 @@
   controls.addEventListener("click", async event => {
     const action = event.target.dataset.action;
     if (!action) return;
+    if (action === "stop_sound") {
+      const id = live?.overview?.timer_sound_id;
+      if (id) await sendCommand("timer", action, id);
+      return;
+    }
     const durationSeconds = action === "cancel" ? 0 : Number(hours.value) * 3600 + Number(minutes.value) * 60 + Number(seconds.value);
     if (action !== "cancel" && (!controls.reportValidity() || durationSeconds < 1 || durationSeconds > 86399)) {
       feedback.textContent = "Enter a duration between 00:00:01 and 23:59:59.";
@@ -808,13 +817,13 @@
       }
       labels.connection.textContent = data.home_trusted ? "Trusted home network" : "Live status";
       labels.time.textContent = data.time || "RTC unavailable";
-      labels.timer.textContent = (data.timer_running ? "Running · " : "Set · ") + duration(data.timer_seconds);
+      labels.timer.textContent = data.overview?.timer_sound_id ? "Finished · announcement playing" : (data.timer_running ? "Running · " : "Set · ") + duration(data.timer_seconds);
       labels.player.textContent = data.player +
         (data.track ? " · Track " + data.track + "/" + data.track_count + " · " + data.player_mode : "");
       labels.output.textContent = data.output;
       if (pending && data.epoch === pending.epoch && data.command_id === pending.id &&
           data.command_nonce === pending.nonce && data.command_result !== "pending" &&
-          (pending.target !== "settings" && pending.target !== "control" && !pending.editor || data.command_result !== "applied" ||
+          (pending.target !== "settings" && pending.target !== "control" && pending.action !== "stop_sound" && !pending.editor || data.command_result !== "applied" ||
             data.settings?.snapshot_id >= pending.id)) {
         if (pending.editor) {
           const messages = {applied: "Record applied.", conflict: "Record changed elsewhere. Reload and review it.",
@@ -836,6 +845,9 @@
               pending.action === "alarm_snooze" ? "Alarm snoozed for 3 minutes." :
               pending.action === "snooze_cancel" ? "Snoozed repeats cancelled. Saved schedules unchanged." : "Announcement requested.") :
             controlMessages[data.command_result] || "Command not applied. Check the clock status.";
+        } else if (pending.action === "stop_sound") {
+          feedback.textContent = data.command_result === "applied" ? "Timer sound stopped." :
+            controlMessages[data.command_result] || "Timer sound not stopped. Review the current status.";
         } else if (pending.target === "player") {
           feedback.textContent = data.command_result === "applied" ?
             (pending.action === "test_track" ? "Track test started. Press Stop to end it." :
@@ -887,7 +899,9 @@
       updateControls();
       clearTimeout(deadline);
       statusRunning = false;
-      pollStatusSoon(pending || sliderNeedsStatus ? 100 : 1000);
+      pollStatusSoon(pending || sliderNeedsStatus ? 100 :
+        live?.overview?.timer_sound_id || live?.overview?.alarm?.active ||
+        live?.timer_running && live.timer_seconds <= 5 ? 250 : 1000);
       scheduleSliders();
     }
   }

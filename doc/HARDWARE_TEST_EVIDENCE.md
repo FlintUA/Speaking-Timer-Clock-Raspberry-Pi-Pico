@@ -198,3 +198,15 @@ No HTTP control actions or audible test commands were sent during post-install v
 ### Quick-control user acceptance and deferred wording
 
 After installation, the user reported that everything works. This is general acceptance of the tested quick controls, not individual evidence for every route, language, failure case or four-client load. The user specifically confirmed that Speak next alarm refers to the upcoming alarm, but reported a fired-alarm introduction before its date and time. The user deferred phrase replacement until functional development is complete and audio assets are refreshed. No firmware or audio change, rebuild or installation was performed for this feedback.
+
+## Live alarm controls: approved installation, November 13, 2026
+
+After explicit user approval, the integrated phone/BT/MP3/Wi-Fi UF2 from commit `97fd95185e3f26cb010e03e30336738b36456d24` was installed through COM8. Artifact: 1,774,592 bytes; SHA256 `40E22B5221059E507C6D4C49518C316537D8F7273C8072F57F47B13C79E60AE5`. The updater reported SUCCESS. USB and HTTP identify clean version `1.0.0+25.g97fd951`, build `97fd95185e3f-bt-mp3-wifi-phone`.
+
+Startup verified SD/FAT32, LCD, RTC and inputs. Flash guard was OK with image_end `0x100d883c`; settings slots remained valid at sequences 162/161, schema v12. Five alarms, fifteen birthdays and ten persistent preferences have identical pre/post checksum `E25CFB7A3D7C26410D9DD8FFD51DECD420D762A80F7E1602B8765D63001A75A0`. Home HTTP returned at `192.168.2.116`; NTP was synchronized for Europe/Berlin and the Bluetooth stream was ACTIVE at 44100 Hz after restart.
+
+Read-only HTTP confirmed the three new alarm actions and runtime IDs: no active alarm, active_id=0, no snoozes, snooze_revision=1. No control action or audible command was sent and no schedule was edited during verification. COM8 was closed/released. Physical stop, three-minute repeat and cancellation behavior remain for user acceptance; four-client/audio-load evidence remains separate. The final clean-identity serializer fixture used 3,644 bytes of its 4,096-byte HTTP buffer (452 bytes free).
+
+### Clarification after live alarm installation
+
+The user reported inactive alarm-action buttons while a short countdown completion announcement was playing, and an apparent page refresh/jump. On clarification, the tested event was a countdown timer, not a scheduled alarm. This does not validate or invalidate the separately installed scheduled-alarm Stop/Snooze actions, which remain pending physical acceptance. Inspection confirmed that the existing web Cancel timer did nothing after countdown.running became false. The page polls JSON and has no full-page reload operation; the cause of the apparent jump is not established. A separate completion-audio Stop fix is prepared but has not been installed. No device schedules were changed and no audible device commands were sent during this investigation.

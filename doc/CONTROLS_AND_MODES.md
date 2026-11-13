@@ -161,6 +161,14 @@ Use help for the complete USB command list. Important read-only commands: versio
 
 See [network setup](NETWORK_TIME.md), [roadmap](ROADMAP.md) and [hardware evidence](HARDWARE_TEST_EVIDENCE.md) for current implementation and validation boundaries.
 
-## Browser live alarm actions (installation pending)
+## Browser live alarm actions (user acceptance pending)
 
-The experimental page adds Stop alarm, Snooze 3 min and Cancel snoozed repeats. Stop/snooze act only on the displayed ringing occurrence. Cancel removes sleeping/audio-waiting snoozed repeats, preserves saved alarm schedules and leaves any ringing alarm running. Commands use current occurrence/set IDs so stale pages cannot silently affect a later occurrence. Physical buttons retain their existing behavior. See [live alarm actions](../experiments/phone_control_ap/README.md#live-alarm-actions-substage-3-installation-pending).
+The experimental page adds Stop alarm, Snooze 3 min and Cancel snoozed repeats. Stop/snooze act only on the displayed ringing occurrence. Cancel removes sleeping/audio-waiting snoozed repeats, preserves saved alarm schedules and leaves any ringing alarm running. Commands use current occurrence/set IDs so stale pages cannot silently affect a later occurrence. Physical buttons retain their existing behavior. See [live alarm actions](../experiments/phone_control_ap/README.md#live-alarm-actions-substage-3-user-acceptance-pending).
+
+## Countdown completion audio (fix; installation pending)
+
+Countdown timers and scheduled alarms are separate. Alarm Stop/Snooze actions do not apply to countdown completion. Cancel timer cancels a running countdown. The new **Stop timer sound** action stops only the currently owned completion announcement, without a cancellation phrase or changing saved schedules/levels. It is enabled while that announcement is active; no manual page refresh is required. The status shows **Finished - announcement playing**. Actual on-page punctuation may use a separator dot.
+
+The `/timer` action `stop_sound <timer_sound_id>` uses the existing credential/epoch/id/nonce envelope and a nonzero ID from `overview.timer_sound_id`. Ended or superseded events are refused; another alarm, player or later timer event cannot be stopped by an old ID. The owner is cleared when audio completes, is replaced/appended by another owner, or is interrupted by mute/priority. Bluetooth-to-LOCAL fallback retains the same event ID. No Flash-format change or save is introduced.
+
+The page requests status every 250 ms during the last five countdown seconds and while completion audio or a scheduled alarm is active, versus the usual 1 second (plus response time). This improves observation latency; it does not guarantee immediate response under radio/decoder load. Controls remain state-based. If completion has already ended, Stop timer sound is disabled. Hardware timing and the reported page jump remain unverified; the page contains no full-page reload operation.

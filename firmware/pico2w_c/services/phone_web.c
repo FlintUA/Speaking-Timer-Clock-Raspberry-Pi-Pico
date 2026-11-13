@@ -368,8 +368,8 @@ int fs_open_custom(struct fs_file *file, const char *name) {
     int body_length;
     if (snapshot) {
         static const char *const results[] = {"pending", "applied", "blocked", "conflict", "muted",
-            "rtc_unavailable", "no_alarm", "editing", "timer_busy", "alarm_busy", "player_busy", "audio_busy", "no_ringing", "no_snooze"};
-        _Static_assert(sizeof(results)/sizeof(results[0]) == PHONE_COMMAND_NO_SNOOZE + 1u, "Missing command result");
+            "rtc_unavailable", "no_alarm", "editing", "timer_busy", "alarm_busy", "player_busy", "audio_busy", "no_ringing", "no_snooze", "no_timer_sound"};
+        _Static_assert(sizeof(results)/sizeof(results[0]) == PHONE_COMMAND_NO_TIMER_SOUND + 1u, "Missing command result");
         body_length = snprintf(response + len, capacity - (size_t)len,
         "{\"firmware\":{\"name\":\"Speaking Clock\",\"version\":\"%s\",\"build\":\"%s\","
         "\"board\":\"pico2_w\",\"author\":\"FlintUA\"},"

@@ -52,7 +52,7 @@ int main(void) {
     memset(s.bt_name,0xff,1); s.bt_name[1]=0;
     assert(phone_overview_json(buffer,sizeof(buffer),&s)>0 && strstr(buffer,"\\ufffd"));
     memset(s.bt_name,1,sizeof(s.bt_name)-1); s.bt_name[24]=0;
-    s.active_id=s.snooze_revision=UINT32_MAX;
+    s.timer_sound_id=s.active_id=s.snooze_revision=UINT32_MAX;
     s.snooze_seconds=s.network.seconds=s.ntp.sample_age=s.ntp.sync_age=UINT32_MAX;
     length=phone_overview_json(buffer,sizeof(buffer),&s);
     assert(length>0 && length<1000);

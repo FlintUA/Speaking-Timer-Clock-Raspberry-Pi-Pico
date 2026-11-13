@@ -14,6 +14,7 @@ typedef struct {
     uint8_t weekday;
     uint8_t active_alarm, deferred_count;
     uint32_t active_id, snooze_revision;
+    uint32_t timer_sound_id; // Current completion audio only, zero when absent.
     uint8_t next_slot;
     char next_at[32];
     bool next_snoozed;

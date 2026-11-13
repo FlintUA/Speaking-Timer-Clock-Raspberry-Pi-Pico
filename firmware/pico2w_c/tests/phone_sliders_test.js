@@ -64,6 +64,11 @@ const quickButtons = ["sound", "say_time", "say_date", "next_alarm"].map((action
 getElementById("quick-controls").querySelectorAll=()=>quickButtons;
 const alarmLiveButtons=["alarm_stop","alarm_snooze","snooze_cancel"].map(action=>({dataset:{alarmLive:action}}));
 getElementById("alarm-live-controls").querySelectorAll=()=>alarmLiveButtons;
+const timerButtons=["set","start","cancel","stop_sound"].map(action=>action==="stop_sound"?
+  getElementById("timer-sound-stop"):{dataset:{action}});
+timerButtons[3].dataset.action="stop_sound";
+getElementById("controls").querySelectorAll=()=>timerButtons;
+getElementById("controls").reportValidity=()=>true;
 const document = {getElementById, activeElement: null, addEventListener() {}};
 const context = vm.createContext({
   Date, AbortController, document, setTimeout, clearTimeout,
@@ -73,7 +78,7 @@ const context = vm.createContext({
       if (failStatusReads) { --failStatusReads; throw new Error("Status temporarily unavailable"); }
       return {ok: true, json: async () => structuredClone(state)};
     }
-    assert(["/settings", "/player", "/control"].includes(url));
+    assert(["/settings", "/player", "/control", "/timer"].includes(url));
     posts.push(options.body);
     if (rejectOnce) {
       rejectOnce = false;
@@ -93,6 +98,11 @@ const context = vm.createContext({
         state.player_test = fields[4] === "test_track";
         state.player = state.player_test ? "Playing" : "Closed";
         preferences.idle = !state.player_test;
+      }
+      if(url === "/timer" && fields[4]==="stop_sound") {
+        if(nextControlResult) {state.command_result=nextControlResult;nextControlResult=null;}
+        else if(Number(fields[5])!==state.overview.timer_sound_id) state.command_result="conflict";
+        else state.overview.timer_sound_id=0;
       }
       if(url === "/control") {
         if(nextControlResult) {state.command_result=nextControlResult;nextControlResult=null;}
@@ -379,7 +389,7 @@ async function settled() {
   await clickAlarm(0);
   assert.equal(a.active,5);
   assert.equal(a.active_id,72);
-  assert(getElementById("feedback").textContent.includes("Alarm state changed"));
+  assert(getElementById("feedback").textContent.includes("State changed"));
   await clickAlarm(0);
   assert.equal(a.active,0);
   assert.equal(a.snoozes,1); // Stop does not cancel unrelated pending snoozes.
@@ -389,13 +399,40 @@ async function settled() {
   a.snooze_revision=84;
   await clickAlarm(2);
   assert.equal(a.snoozes,1);
-  assert(getElementById("feedback").textContent.includes("Alarm state changed"));
+  assert(getElementById("feedback").textContent.includes("State changed"));
   await clickAlarm(2);
   assert.equal(a.snoozes,0);
   failStatusReads=1;
   await update();
   assert.equal(alarmLive.hidden,true);
   assert(alarmLiveButtons.every(button=>button.disabled));
+  await update();
+  state.timer_running=false; preferences.editing=false; state.player="Closed";
+  state.overview.timer_sound_id=100;
+  await update();
+  assert.equal(timerButtons[3].disabled,false);
+  assert.equal(getElementById("timer").textContent,"Finished \u00b7 announcement playing");
+  assert(alarmLiveButtons[0].disabled); // Countdown completion is not an alarm.
+  const clickFinish=async()=>{await getElementById("controls").handlers.click({target:timerButtons[3]});await settled();};
+  state.overview.timer_sound_id=101; // New finish event before an old page's click.
+  await clickFinish();
+  assert.equal(state.overview.timer_sound_id,101);
+  assert(getElementById("feedback").textContent.includes("State changed"));
+  dropResponses=1;
+  await clickFinish();
+  assert(posts.at(-1).endsWith("stop_sound 101"));
+  assert.equal(posts.at(-1),posts.at(-2));
+  assert.equal(state.overview.timer_sound_id,0);
+  assert.equal(getElementById("feedback").textContent,"Timer sound stopped.");
+  assert.equal(timerButtons[3].disabled,true);
+  state.overview.timer_sound_id=102;
+  await update();
+  nextControlResult="no_timer_sound";
+  await clickFinish();
+  assert.equal(getElementById("feedback").textContent,"Timer completion audio has already ended.");
+  delete state.overview.timer_sound_id;
+  await update();
+  assert.equal(timerButtons[3].disabled,true); // Older firmware.
   console.log("phone_sliders_test: PASS");
 })().catch(error => {
   console.error(error);

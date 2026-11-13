@@ -147,6 +147,20 @@ static bool bootsel_armed;
 static uint64_t bootsel_armed_ms;
 static bool timer_screen;
 static audio_queue_t audio_queue;
+static uint32_t timer_finish_serial, timer_finish_id;
+static void clock_audio_clear(void) {
+    timer_finish_id = 0;
+    audio_queue_clear(&audio_queue, true);
+}
+static bool clock_audio_enqueue(uint8_t folder, uint8_t track) {
+    bool queued = audio_queue_enqueue(&audio_queue, folder, track);
+    if (queued) timer_finish_id = 0; // A different owner appended audio.
+    return queued;
+}
+static void timer_finish_arm(void) {
+    if (!++timer_finish_serial) ++timer_finish_serial;
+    timer_finish_id = timer_finish_serial;
+}
 static audio_router_t audio_router;
 #ifdef CLOCK_ENABLE_A2DP
 // Opt-in routing test only: normal time, alarm and timer queue stays LOCAL.
@@ -551,11 +565,11 @@ static void auto_service_rtc(const ds1302_datetime_t *dt) {
     }
     bool queued;
     if (d == AUTO_HALF) {
-        queued = audio_queue_enqueue(&audio_queue, 7u, 15u);
+        queued = clock_audio_enqueue( 7u, 15u);
     } else if (d == AUTO_CHIME) {
         uint8_t strikes = (uint8_t)(dt->hour % 12u);
         if (strikes == 0u) strikes = 12u;
-        queued = audio_queue_enqueue(&audio_queue, 18u, strikes);
+        queued = clock_audio_enqueue( 18u, strikes);
     } else {
 #ifdef CLOCK_ENABLE_A2DP
         // Only hourly VOICE announcements may use JBL, and only after
@@ -606,7 +620,7 @@ static void timer_audio_start(void) {
     }
 #endif
     // Timer owns the local sound queue even when its own output is JBL.
-    audio_queue_clear(&audio_queue, true);
+    clock_audio_clear();
     if (!sound_enabled) return;
 #ifdef CLOCK_ENABLE_A2DP
     audio_queue_t plan = {0};
@@ -620,7 +634,7 @@ static void timer_audio_cancel(void) {
 #ifdef CLOCK_ENABLE_A2DP
     bt_timer_cancel("TIMER_CANCEL");
 #endif
-    audio_queue_clear(&audio_queue, true);
+    clock_audio_clear();
     if (!sound_enabled) return;
 #ifdef CLOCK_ENABLE_A2DP
     audio_queue_t plan = {0};
@@ -634,14 +648,15 @@ static void timer_audio_finished(void) {
 #ifdef CLOCK_ENABLE_A2DP
     bt_timer_cancel("TIMER_FINISH_PRIORITY");
 #endif
-    audio_queue_clear(&audio_queue, true);
+    clock_audio_clear();
     if (!sound_enabled) return;
 #ifdef CLOCK_ENABLE_A2DP
     audio_queue_t plan = {0};
     speech_enqueue_timer_finish(&plan, language);
-    if (bt_timer_prepare(&plan, "FINISH")) return;
+    if (bt_timer_prepare(&plan, "FINISH")) { timer_finish_arm(); return; }
 #endif
     speech_enqueue_timer_finish(&audio_queue, language);
+    if (audio_queue.size) timer_finish_arm();
 }
 
 #ifdef CLOCK_ENABLE_A2DP
@@ -678,6 +693,7 @@ static bt_sequence_result_t bt_sequence_step(const audio_track_t *tracks,
     return BT_SEQUENCE_STARTED;
 }
 static void bt_timer_cancel(const char *reason) {
+    timer_finish_id = 0;
     if (!bt_timer_running) return;
     if (bt_timer_started && mp3_play_active()) mp3_play_stop();
     bt_timer_running = false;
@@ -748,6 +764,7 @@ static void bt_timer_service(void) {
                                                   "BT-TIMER");
     if (step == BT_SEQUENCE_COMPLETE) {
         bt_timer_running = false;
+        timer_finish_id = 0;
         puts("[BT-TIMER] COMPLETE");
     } else if (step == BT_SEQUENCE_FAILED) {
         bt_timer_fallback("MP3_OPEN_FAILED");
@@ -776,7 +793,7 @@ static void bt_speech_fallback(const char *reason) {
     }
     unsigned queued = 0u;
     for (unsigned i = bt_speech_index; i < bt_speech_count; ++i) {
-        if (!audio_queue_enqueue(&audio_queue, bt_speech_tracks[i].folder,
+        if (!clock_audio_enqueue( bt_speech_tracks[i].folder,
                                  bt_speech_tracks[i].track)) break;
         ++queued;
     }
@@ -875,14 +892,14 @@ static bool announce_time(uint8_t hour, uint8_t minute) {
             if (!bt_speech_start(hour, minute, false)) return false;
         } else {
             puts("[BT-SPEECH] BT not ready; announcing via LOCAL");
-            audio_queue_clear(&audio_queue, true);
+            clock_audio_clear();
             if (!speech_enqueue_time(&audio_queue, language, hour, minute,
                                      exact_hour_phrase)) return false;
         }
     } else
 #endif
     {
-        audio_queue_clear(&audio_queue, true);
+        clock_audio_clear();
         if (!speech_enqueue_time(&audio_queue, language, hour, minute, exact_hour_phrase)) {
             puts("[SPEECH] failed to queue time");
             return false;
@@ -923,7 +940,7 @@ static bool announce_info_plan(const audio_queue_t *plan) {
 #endif
     for (unsigned i=0;i<plan->size;++i) {
         audio_track_t t=plan->items[(plan->head+i)%AUDIO_QUEUE_CAPACITY];
-        audio_queue_enqueue(&audio_queue,t.folder,t.track);
+        clock_audio_enqueue(t.folder,t.track);
     }
     return true;
 }
@@ -1373,7 +1390,7 @@ static void set_sound(bool enabled) {
     if (!sound_enabled) {
         if (music_ui_open) music_ui_stop("SOUND_OFF");
         alarm_preview_stop("SOUND_OFF");
-        audio_queue_clear(&audio_queue, true);
+        clock_audio_clear();
     }
     printf("[AUDIO] sound=%s\n", sound_enabled ? "ON" : "OFF");
 }
@@ -1443,7 +1460,7 @@ static bool menu_write_rtc(bool date_only) {
 
 static void alarm_preview_stop(const char *reason) {
     if (!alarm_preview_active) return;
-    audio_queue_clear(&audio_queue, true);
+    clock_audio_clear();
     alarm_preview_active = false;
     printf("[ALARM-PREVIEW] stopped=%s\n", reason);
 }
@@ -1459,7 +1476,7 @@ static void alarm_preview_toggle(void) {
         puts("[ALARM-PREVIEW] blocked: audio busy, sound off or timer active");
         return;
     }
-    if (!audio_queue_enqueue(&audio_queue, 8u, alarm_ui_draft.track)) {
+    if (!clock_audio_enqueue( 8u, alarm_ui_draft.track)) {
         puts("[ALARM-PREVIEW] failed: audio queue full");
         return;
     }
@@ -1483,7 +1500,7 @@ static void music_ui_stop(const char *reason) {
 #ifdef CLOCK_ENABLE_A2DP
     if (music_ui_bluetooth && mp3_play_active()) mp3_play_stop();
 #endif
-    if (!music_ui_bluetooth) audio_queue_clear(&audio_queue, true);
+    if (!music_ui_bluetooth) clock_audio_clear();
     music_ui_bt_started = false;
     music_ui_playing = false;
     printf("[MUSIC-UI] stopped=%s\n", reason);
@@ -1524,7 +1541,7 @@ static bool music_play_track(uint8_t track) {
         music_ui_bluetooth = false;
     }
 #endif
-    if (!audio_queue_enqueue(&audio_queue, 8u, track)) {
+    if (!clock_audio_enqueue( 8u, track)) {
         puts("[MUSIC-UI] queue full");
         return false;
     }
@@ -2108,6 +2125,8 @@ static void menu_audio_apply(unsigned index, bool jbl) {
 }
 
 #ifdef CLOCK_ENABLE_PHONE_WEB
+static void timer_finish_refresh(void);
+
 static uint32_t phone_current_snooze_revision(void) {
     uint8_t waiting = 0;
     uint64_t queued[CLOCK_ALARM_COUNT] = {0};
@@ -2133,6 +2152,8 @@ static void phone_snapshot_overview(phone_overview_t *view,
     view->active_alarm = alarm_active_index >= 0 ? (uint8_t)(alarm_active_index + 1) : 0;
     view->active_id = alarm_active_index >= 0 ? phone_alarm_instance : 0;
     view->snooze_revision = phone_current_snooze_revision();
+    timer_finish_refresh();
+    view->timer_sound_id = timer_finish_id;
     view->sound_on = sound_enabled;
     view->direct = phone_web_direct();
     view->network = network_time_home_status(now);
@@ -2154,6 +2175,29 @@ static void phone_snapshot_overview(phone_overview_t *view,
         snprintf(view->bt_name, sizeof(view->bt_name), "%s", name);
     }
 #endif
+}
+
+static void timer_finish_refresh(void) {
+    if (!timer_finish_id) return;
+    bool active = !audio_queue_idle(&audio_queue) || dfplayer_busy();
+#ifdef CLOCK_ENABLE_A2DP
+    active = active || bt_timer_running;
+#endif
+    if (!active || timer.running || alarm_active_index >= 0 || music_ui_open || !sound_enabled)
+        timer_finish_id = 0;
+}
+
+static phone_command_result_t service_phone_timer_sound(uint32_t expected) {
+    timer_finish_refresh();
+    if (!timer_finish_id) return PHONE_COMMAND_NO_TIMER_SOUND;
+    if (expected != timer_finish_id) return PHONE_COMMAND_CONFLICT;
+#ifdef CLOCK_ENABLE_A2DP
+    bt_timer_cancel("WEB_FINISH_STOP");
+#endif
+    clock_audio_clear();
+    finished_screen_until_ms = 0;
+    puts("[TIMER] completion audio stopped=WEB");
+    return PHONE_COMMAND_APPLIED;
 }
 
 static bool phone_settings_idle(void) {
@@ -2276,6 +2320,10 @@ static void service_phone_command(uint64_t now) {
     }
     if (request.action >= PHONE_SOUND_SET) {
         phone_web_command_complete(request.id, service_phone_control(&request));
+        return;
+    }
+    if (request.action == PHONE_TIMER_SOUND_STOP) {
+        phone_web_command_complete(request.id, service_phone_timer_sound(request.value));
         return;
     }
     bool applied = false;
@@ -3073,7 +3121,7 @@ static void bt_alarm_fallback(const char *reason) {
     unsigned queued = 0u;
     for (unsigned i = bt_alarm_index; i < bt_alarm_count; ++i) {
         audio_track_t t = bt_alarm_tracks[i];
-        if (!audio_queue_enqueue(&audio_queue, t.folder, t.track)) break;
+        if (!clock_audio_enqueue( t.folder, t.track)) break;
         ++queued;
     }
     bt_alarm_running = false;
@@ -3119,7 +3167,7 @@ static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
     }
     if (mp3_play_active()) mp3_play_stop();
 #endif
-    audio_queue_clear(&audio_queue, true);
+    clock_audio_clear();
     audio_queue_t plan = {0};
     bool queued = true;
     if (language == SPEECH_RU)
@@ -3158,7 +3206,7 @@ static void alarm_start_audio(unsigned index, uint8_t hour, uint8_t minute,
     {
         for (unsigned i = 0; i < plan.size; ++i) {
             audio_track_t t = plan.items[(plan.head + i) % AUDIO_QUEUE_CAPACITY];
-            if (!audio_queue_enqueue(&audio_queue, t.folder, t.track))
+            if (!clock_audio_enqueue( t.folder, t.track))
                 puts("[ALARM] CRITICAL: local enqueue failed");
         }
         printf("[ALARM-AUDIO] output=LOCAL%s\n", test ? " TEST" : "");
@@ -3178,7 +3226,7 @@ static void alarm_stop(const char *reason) {
 #ifdef CLOCK_ENABLE_A2DP
     bt_alarm_stop(reason);
 #endif
-    audio_queue_clear(&audio_queue, true);
+    clock_audio_clear();
     alarm_active_index = -1;
     alarm_audio_armed = false;
     alarm_deadline_ms = 0u;
@@ -3910,13 +3958,13 @@ static void handle_command(char *line) {
                            mp3_path);
                 } else {
                     puts("[AUDIO-ROUTE] Bluetooth source failed; replaying test track on LOCAL");
-                    if (!audio_queue_enqueue(&audio_queue, (uint8_t)folder, (uint8_t)track))
+                    if (!clock_audio_enqueue( (uint8_t)folder, (uint8_t)track))
                         puts("[AUDIO-ROUTE] LOCAL enqueue failed");
                 }
             } else
 #endif
             {
-                if (audio_queue_enqueue(&audio_queue, (uint8_t)folder, (uint8_t)track))
+                if (clock_audio_enqueue( (uint8_t)folder, (uint8_t)track))
                     printf("[AUDIO-ROUTE] TEST LOCAL %02u/%03u (BT unavailable or not selected)\n",
                            folder, track);
                 else puts("[AUDIO-ROUTE] LOCAL enqueue failed");
@@ -4298,7 +4346,7 @@ static void handle_command(char *line) {
         } else if (alarm_active_index >= 0) {
             puts("[AUDIO] pause blocked: use alarm-stop");
         } else {
-            audio_queue_clear(&audio_queue, true);
+            clock_audio_clear();
             puts("[AUDIO] Pause requested");
         }
     } else if (strncmp(line, "play", 4) == 0 && isspace((unsigned char)line[4])) {
@@ -4312,7 +4360,7 @@ static void handle_command(char *line) {
         } else if (alarm_active_index >= 0 || music_ui_open ||
                    alarm_ui_state != ALARM_UI_CLOSED) {
             puts("[AUDIO] play blocked: alarm/editor/music active");
-        } else if (audio_queue_enqueue(&audio_queue, (uint8_t)folder, (uint8_t)track)) {
+        } else if (clock_audio_enqueue( (uint8_t)folder, (uint8_t)track)) {
             printf("[AUDIO] Queued folder=%u track=%u\n", folder, track);
         } else {
             puts("[AUDIO] Queue full");
@@ -4679,6 +4727,9 @@ int main(void) {
             puts("[BOOTSEL] confirmation window expired");
         }
         audio_queue_service(&audio_queue, to_ms_since_boot(get_absolute_time()));
+#ifdef CLOCK_ENABLE_PHONE_WEB
+        timer_finish_refresh();
+#endif
         controls_poll(to_ms_since_boot(get_absolute_time()), on_control_event, NULL);
         uint64_t now = to_ms_since_boot(get_absolute_time());
 #ifdef CLOCK_ENABLE_PHONE_WEB
@@ -4737,7 +4788,7 @@ int main(void) {
             uint8_t folder = routed_test_folder, track = routed_test_track;
             mp3_play_stop();
             routed_test_pending = false;
-            if (audio_queue_enqueue(&audio_queue, folder, track))
+            if (clock_audio_enqueue( folder, track))
                 printf("[AUDIO-ROUTE] BT lost; LOCAL replay folder=%02u track=%03u\n",
                        folder, track);
             else puts("[AUDIO-ROUTE] FAIL: local fallback queue full");
