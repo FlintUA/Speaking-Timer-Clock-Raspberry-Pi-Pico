@@ -2,10 +2,19 @@
 
 static const unsigned presets[] = {0, 15, 30, 60, 90};
 
+bool music_sleep_set(music_sleep_t *sleep, unsigned minutes, uint64_t now_ms) {
+    for (unsigned i=0; i<5u; ++i) {
+        if (presets[i] != minutes) continue;
+        sleep->preset=i;
+        sleep->deadline_ms=minutes ? now_ms+(uint64_t)minutes*60000u : 0;
+        return true;
+    }
+    return false;
+}
+
 unsigned music_sleep_cycle(music_sleep_t *sleep, uint64_t now_ms) {
-    sleep->preset = (sleep->preset + 1u) % 5u;
-    unsigned minutes = presets[sleep->preset];
-    sleep->deadline_ms = minutes ? now_ms + (uint64_t)minutes * 60000u : 0;
+    unsigned minutes = presets[(sleep->preset + 1u) % 5u];
+    (void)music_sleep_set(sleep,minutes,now_ms);
     return minutes;
 }
 

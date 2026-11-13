@@ -377,6 +377,7 @@ int fs_open_custom(struct fs_file *file, const char *name) {
         ",\"player\":\"%s\",\"track\":%u,\"output\":\"%s\",\"timer_request\":%" PRIu32
         ",\"timer_result\":\"%s\",\"timer_nonce\":%" PRIu32 ",\"epoch\":%" PRIu32
         ",\"home_trusted\":%s,\"track_count\":%u,\"player_mode\":\"%s\",\"player_test\":%s"
+        ",\"player_sleep_preset\":%u,\"player_sleep_seconds\":%" PRIu32
         ",\"command_id\":%" PRIu32 ",\"command_nonce\":%" PRIu32 ",\"command_result\":\"%s\""
         ",\"settings\":{\"snapshot_id\":%" PRIu32 ",\"volume_local\":%u,\"volume_bt\":%u,\"language\":%u"
         ",\"audio_manual\":%u,\"audio_hourly\":%u,\"audio_timer\":%u,\"audio_alarm\":%u"
@@ -389,6 +390,7 @@ int fs_open_custom(struct fs_file *file, const char *name) {
         access.last.id ? results[access.result] : "none", access.last.nonce, access.epoch,
         trusted_home_peer() ? "true" : "false", (unsigned)published.track_count, published.player_mode,
         published.player_test ? "true" : "false",
+        (unsigned)published.player_sleep_preset, published.player_sleep_seconds,
         access.last.id, access.last.nonce, access.last.id ? results[access.result] : "none",
         published_command_id,
         (unsigned)published.preferences.volume_local, (unsigned)published.preferences.volume_bt,

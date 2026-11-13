@@ -14,6 +14,7 @@ typedef struct {
 
 void music_playlist_init(music_playlist_t *p, uint8_t count, uint32_t seed);
 void music_playlist_cycle_mode(music_playlist_t *p);
+bool music_playlist_set_mode(music_playlist_t *p, music_mode_t mode);
 uint8_t music_playlist_next(music_playlist_t *p, bool automatic);
 uint8_t music_playlist_previous(music_playlist_t *p);
 const char *music_playlist_mode_name(music_mode_t mode);

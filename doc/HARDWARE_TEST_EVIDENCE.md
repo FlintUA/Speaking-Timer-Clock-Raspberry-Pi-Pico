@@ -258,3 +258,9 @@ Read-only HTTP confirmed timer_warning=0 and its checkbox. Existing timer_voice=
 ### Pre-warning feedback: mobile checkbox and quiet LOCAL beep
 
 After installation of 1.0.0+29.g90b047a, the user reported that physical warning selection works but the beep is very quiet relative to completion speech. The supplied phone screenshot shows the warning checkbox collapsed to a dot and excessive per-field Apply buttons. This is partial physical acceptance, not confirmation of cadence or audibility. Read-only HTTP showed warning=1, Bluetooth OFF and Bluetooth-preferred timer routing (LOCAL fallback), idle audio, LOCAL volume 16 and BT volume 23. No settings/playback command was sent. The layout and LOCAL startup-bound fixes are prepared; installation and a fresh phone/audio test are pending.
+
+## Scalar settings: approved installation and short-beep investigation, November 13
+
+With explicit approval, commit `31ba195b16b8d1de58be7ed1eab391e72b307138` was installed as `1.0.0+30.g31ba195`, build `31ba195b16b8-bt-mp3-wifi-phone`. Reviewed UF2 was 1,804,800 bytes, SHA256 `67F08965860ACF6FCAB96A8ABAB11AD0F1AC161597010FCE213B31B2CC94AB30`. Startup, Flash guard (actual image_end `0x100dc3a4`), HOME HTTP and Europe/Berlin NTP passed. Five alarms, fifteen birthdays and fifteen scalar preferences matched pre/post checksum `37E40F639C5AC7038A94D24D851BD189E7A9D4FBAFD433939FC5740FB7736504`. Both Flash slots remained v17. COM8 was released. This establishes installation/preservation, not phone acceptance or improved sound.
+
+The user reported very quiet partial clicks after installation. User-started timer capture and separate ordinary beep playback do not establish a software cutoff; see [measurements and pending audio test](WEB_SCALAR_SETTINGS.md#subsequent-device-evidence). Audio investigation is deferred at the user request. Browser player mode/sleep follows as a separately reviewed, uninstalled stage.

@@ -246,3 +246,7 @@ All 22 tests pass after clean host rebuild. See [TIMER_PREWARNING.md](TIMER_PREW
 ## Scalar autosave, mobile checkbox and LOCAL warning fix (installation pending)
 
 See [WEB_SCALAR_SETTINGS.md](WEB_SCALAR_SETTINGS.md) for the control audit and pending phone/audio checks. Expanded production-JS tests exercise select/checkbox/number auto-commit, rapid replacements, lost responses, refusal rollback without later replay and timer Start guards. Real Chrome fixtures at 360/412/960 pixels with default and enlarged text verify native toggling/saving, no overflow, a stable 20px box and retained record confirmation; the old enlarged-text fixture shrinks to zero at 360. Actual warning-owner code passes simulated delayed BUSY onset/completion and prior cadence/zero/cancellation checks. All 22 registered checks and both builds pass. Actual phone operation and acoustic improvement remain unconfirmed.
+
+## Browser player mode and sleep
+
+See [player options](WEB_PLAYER_OPTIONS.md) for immediate mode selection, sleep semantics and focused acceptance. Validate both LOCAL and BT, physical/browser reflection, paused expiry, command retries and audition/closed-player guards. Installation and hardware acceptance are pending.

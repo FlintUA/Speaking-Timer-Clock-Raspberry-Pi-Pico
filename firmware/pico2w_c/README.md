@@ -96,3 +96,5 @@ A separate saved checkbox enables single beeps at 5, 4, 3, 2 and 1 seconds. Defa
 ## Automatic settings and mobile checkbox fix (installation pending)
 
 Simple Settings controls now apply automatically; Apply remains for complete alarm/birthday records. Nonshrinking checkboxes and wrapping labels fix the narrow-screen/larger-text issue. LOCAL timer-warning playback waits for natural BUSY completion with a longer bounded startup allowance, without changing audio files or saved volumes. See [behavior, evidence and pending device checks](../../doc/WEB_SCALAR_SETTINGS.md).
+
+Browser playback mode and sleep presets are implemented in the next development candidate; installation and hardware acceptance are pending. See [player options](../../doc/WEB_PLAYER_OPTIONS.md).

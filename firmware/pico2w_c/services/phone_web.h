@@ -21,6 +21,8 @@ typedef struct {
     uint32_t timer_seconds;
     uint8_t track;
     uint8_t track_count;
+    uint8_t player_sleep_preset;
+    uint32_t player_sleep_seconds;
     bool timer_running;
     bool player_test;
     bool bluetooth;

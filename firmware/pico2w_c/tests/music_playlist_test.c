@@ -51,5 +51,16 @@ int main(void) {
     music_playlist_init(&p,0,0);
     for(unsigned i=0;i<10;i++) assert(music_playlist_next(&p,true)==1);
     assert(!strcmp(music_playlist_mode_name(MUSIC_REPEAT_ONE),"REP1"));
+    music_playlist_init(&p,78,42);
+    first=p.current;
+    assert(music_playlist_set_mode(&p,MUSIC_REPEAT_ONE));
+    assert(p.current==first && music_playlist_next(&p,true)==first);
+    assert(music_playlist_set_mode(&p,MUSIC_NORMAL) && p.current==first);
+    assert(music_playlist_next(&p,false)==(first==78?1:first+1));
+    assert(music_playlist_set_mode(&p,MUSIC_SHUFFLE));
+    music_playlist_t saved=p;
+    assert(music_playlist_set_mode(&p,MUSIC_SHUFFLE) && !memcmp(&saved,&p,sizeof(p)));
+    assert(!music_playlist_set_mode(&p,(music_mode_t)3) && !memcmp(&saved,&p,sizeof(p)));
+    assert(!music_playlist_set_mode(&p,(music_mode_t)-1) && !memcmp(&saved,&p,sizeof(p)));
     return 0;
 }

@@ -101,6 +101,12 @@ const context = vm.createContext({
         state.player = state.player_test ? "Playing" : "Closed";
         preferences.idle = !state.player_test;
       }
+      if(url === "/player" && ["mode","sleep"].includes(fields[4])) {
+        if(state.player==="Closed" || state.player_test || state.timer_running || preferences.editing || state.overview.alarm.active)
+          state.command_result="blocked";
+        else if(fields[4]==="mode") state.player_mode=["NORM","SHUF","REP1"][Number(fields[5])];
+        else {state.player_sleep_preset=Number(fields[5]);state.player_sleep_seconds=Number(fields[5])*60;}
+      }
       if(url === "/timer" && fields[4]==="stop_sound") {
         if(nextControlResult) {state.command_result=nextControlResult;nextControlResult=null;}
         else if(Number(fields[5])!==state.overview.timer_sound_id) state.command_result="conflict";
@@ -504,6 +510,32 @@ async function settled() {
   trackField.reportValidity=()=>true;trackField.value="3";
   form.handlers.change({target:trackField,type:"change"});document.activeElement=null;
   await settled();assert.equal(preferences.timer_track,3);assert(!timerButtons[1].disabled);
+  const modeField=getElementById("player-mode"),sleepField=getElementById("player-sleep");
+  modeField.dataset.playerOption="mode";sleepField.dataset.playerOption="sleep";
+  const playerChange=getElementById("player-controls").handlers.change;
+  state.player="Closed";await update();assert(modeField.disabled && sleepField.disabled);
+  state.player="Playing";state.player_mode="SHUF";state.player_sleep_preset=0;state.player_sleep_seconds=0;
+  await update();assert(!modeField.disabled && modeField.value==="1" && sleepField.value==="0");
+  modeField.value="2";await playerChange({target:modeField});await settled();await update();
+  assert.equal(state.player_mode,"REP1");assert.equal(modeField.value,"2");
+  dropResponses=2;sleepField.value="15";await playerChange({target:sleepField});await settled();await update();
+  assert.equal(state.player_sleep_preset,15);assert.equal(state.player_sleep_seconds,900);
+  assert.equal(writes.filter(w=>w.field==="sleep").length,1);
+  assert(getElementById("player-sleep-status").textContent.includes("15:00"));
+  state.player="Paused";state.player_sleep_seconds=840;await update();
+  assert(!sleepField.disabled && sleepField.value==="15");
+  assert(getElementById("player-sleep-status").textContent.includes("14:00"));
+  state.player_mode="NORM";state.player_sleep_preset=60;await update();
+  assert.equal(modeField.value,"0");assert.equal(sleepField.value,"60"); // Physical changes.
+  state.player_test=true;await update();assert(modeField.disabled && sleepField.disabled);
+  state.player_test=false;state.player="Muted";await update();assert(!modeField.disabled && !sleepField.disabled);
+  sleepField.value="0";await playerChange({target:sleepField});await settled();await update();
+  assert.equal(state.player_sleep_seconds,0);
+  assert.equal(getElementById("player-sleep-status").textContent,"Sleep timer off.");
+  preferences.editing=true;await update();assert(modeField.disabled && sleepField.disabled);
+  preferences.editing=false;state.player="Playing";await update();
+  state.player="Closed";modeField.value="1";await playerChange({target:modeField});await settled();await update();
+  assert.equal(state.player_mode,"NORM");assert(modeField.disabled && sleepField.disabled);
   console.log("phone_sliders_test: PASS");
 })().catch(error => {
   console.error(error);

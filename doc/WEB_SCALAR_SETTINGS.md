@@ -1,6 +1,6 @@
 # Automatic scalar settings and reliable mobile checkboxes
 
-Status: implemented and software-tested; installation/user acceptance pending.
+Status: installed with approval as `1.0.0+30.g31ba195` on November 13; startup/settings checks passed. User acceptance of the mobile fix remains unconfirmed, and LOCAL beep audibility remains unresolved.
 
 ## Where confirmation is needed
 
@@ -29,3 +29,7 @@ The actual-handler host harness verifies a simulated 600 ms LOCAL startup / 800 
 ## Acceptance
 
 After separately approved installation, refresh the page and toggle the long warning checkbox on/off without Apply. Verify language/output/light/timer choices save automatically, and that alarm/birthday records still require their own confirmation. Test a 15-20 second timer on LOCAL and compare full beep audibility with the previous firmware; collect the new timing logs if it remains quiet. Verify cancellation, Sound OFF and normal zero completion, then Bluetooth when available. Wait for Settings saved before restart and check persistence. Flash format is unchanged from v17.
+
+## Subsequent device evidence
+
+On November 13 the user reported that pre-warning sounded like very quiet partial clicks after installation. A read-only COM8 capture during a user-started countdown measured five LOCAL BUSY onsets at 489/372/377/373/378 ms and completions at 674/546/552/548/553 ms after the play requests. All ended naturally before the cutoff; this run does not support software truncation as the cause. Separate ordinary playback of 19/001 and 19/002 also failed to produce normal-volume beeps according to the user. No volume or audio-card changes were made. A separate diagnostic 19/001 variant with 300 ms leading silence was prepared outside the repository; it has not been installed or tested. The cause remains unknown; the user deferred sound testing until the next day.

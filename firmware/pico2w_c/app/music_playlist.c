@@ -46,10 +46,16 @@ void music_playlist_init(music_playlist_t *p, uint8_t count, uint32_t seed) {
     refill(p); p->current=p->bag[p->bag_next++]; append_history(p);
 }
 void music_playlist_cycle_mode(music_playlist_t *p) {
-    p->mode=(music_mode_t)((p->mode+1)%3);
+    (void)music_playlist_set_mode(p,(music_mode_t)((p->mode+1)%3));
+}
+bool music_playlist_set_mode(music_playlist_t *p, music_mode_t mode) {
+    if ((unsigned)mode > MUSIC_REPEAT_ONE) return false;
+    if (p->mode==mode) return true;
+    p->mode=mode;
     // A new mode starts a new future while preserving Previous history.
     p->history_size=p->history_position+1;
     if(p->mode==MUSIC_SHUFFLE) { remember(p); refill(p); }
+    return true;
 }
 uint8_t music_playlist_next(music_playlist_t *p, bool automatic) {
     if(automatic && p->mode==MUSIC_REPEAT_ONE) return p->current;

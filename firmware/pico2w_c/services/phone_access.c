@@ -208,6 +208,7 @@ static phone_reply_t accept_command(phone_access_t *access, const char *body,
         {"stop ", 0, 0}, {"next ", 0, 0}, {"previous ", 0, 0},
         {"test_track ", 1, 255},
         {"test_stop ", 0, 0},
+        {"mode ", 0, 2}, {"sleep ", 0, 90},
         {"volume_local ", 0, 30}, {"volume_bt ", 0, 30}, {"language ", 0, 1},
         {"audio_manual ", 0, 1}, {"audio_hourly ", 0, 1},
         {"audio_timer ", 0, 1}, {"audio_alarm ", 0, 1},
@@ -235,6 +236,9 @@ static phone_reply_t accept_command(phone_access_t *access, const char *body,
         request.value < actions[i].minimum || request.value > actions[i].maximum)
         return PHONE_INVALID;
 
+    if (request.action == PHONE_PLAYER_SLEEP && request.value != 0u &&
+        request.value != 15u && request.value != 30u && request.value != 60u && request.value != 90u)
+        return PHONE_INVALID;
     if (epoch != access->epoch) return PHONE_BUSY;
     if (request.id == access->last.id)
         return request.nonce == access->last.nonce && request.action == access->last.action &&

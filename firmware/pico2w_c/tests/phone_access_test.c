@@ -128,6 +128,25 @@ int main(void) {
     player.result = PHONE_COMMAND_APPLIED;
     assert(phone_access_player(&player, "- 21 2 12 test_stop 0", PHONE_SCOPE_HOME, true) == PHONE_OK);
 
+    phone_access_reset(&player,22);
+    assert(phone_access_player(&player,"- 22 1 31 mode 3",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_player(&player,"- 22 1 31 sleep 1",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_player(&player,"- 22 1 31 sleep 91",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_settings(&player,"- 22 1 31 mode 1",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_player(&player,"- 22 1 31 mode 2",PHONE_SCOPE_DIRECT,true)==PHONE_DENIED);
+    assert(phone_access_player(&player,"- 22 1 31 mode 2",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(player.last.action==PHONE_PLAYER_MODE && player.last.value==2);
+    player.result=PHONE_COMMAND_APPLIED;
+    const unsigned sleeps[]={0,15,30,60,90};
+    for(unsigned i=0;i<5;++i) {
+        char body[80];snprintf(body,sizeof(body),"- 22 %u %u sleep %u",i+2,i+32,sleeps[i]);
+        assert(phone_access_player(&player,body,PHONE_SCOPE_HOME,true)==PHONE_OK);
+        assert(player.last.action==PHONE_PLAYER_SLEEP && player.last.value==sleeps[i]);
+        player.result=PHONE_COMMAND_APPLIED;
+        assert(phone_access_player(&player,body,PHONE_SCOPE_HOME,true)==PHONE_OK);
+        assert(player.result==PHONE_COMMAND_APPLIED); // Lost response must not restart sleep.
+    }
+
     phone_access_t settings = {0};
     phone_access_reset(&settings, 30);
     assert(phone_access_settings(&settings, "- 30 1 40 volume_local 15", PHONE_SCOPE_HOME, true) == PHONE_DENIED);

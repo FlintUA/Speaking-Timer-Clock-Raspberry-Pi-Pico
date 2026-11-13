@@ -123,6 +123,15 @@
       <button type="button" data-action="next">Next</button>
       <button type="button" data-action="stop">Stop</button>
     </div>
+    <label>Playback mode <select id="player-mode" data-player-option="mode">
+      <option value="0">Normal</option><option value="1">Shuffle</option><option value="2">Repeat one track</option>
+    </select></label>
+    <label>Sleep timer <select id="player-sleep" data-player-option="sleep">
+      <option value="0">Off</option><option value="15">15 minutes</option><option value="30">30 minutes</option>
+      <option value="60">60 minutes</option><option value="90">90 minutes</option>
+    </select></label>
+    <p id="player-sleep-status" role="status">Sleep timer off.</p>
+    <p>Start music to change these options. Changes apply immediately. Sleep counts down during pause and mute; selecting a duration starts it again. Stop closes the player and clears sleep. Options are not saved after closing or restarting.</p>
   </div>
   <form id="settings-controls" hidden>
     <h2>Settings</h2>
@@ -290,6 +299,9 @@
   const controls = document.getElementById("controls");
   const playerControls = document.getElementById("player-controls");
   const playerPlay = document.getElementById("player-play");
+  const playerMode = document.getElementById("player-mode");
+  const playerSleep = document.getElementById("player-sleep");
+  const playerSleepStatus = document.getElementById("player-sleep-status");
   const quickControls = document.getElementById("quick-controls");
   const alarmLiveControls = document.getElementById("alarm-live-controls");
   const alarmLiveHint = document.getElementById("alarm-live-hint");
@@ -485,6 +497,16 @@
         !playerActions[button.dataset.action];
     }
     const preferences = live?.settings;
+    const canChangePlayer = playerOpen && !live?.player_test && !live?.timer_running &&
+      !live?.overview?.alarm?.active && !preferences?.editing;
+    playerMode.disabled = playerSleep.disabled = busy || Boolean(pending) || !canChangePlayer;
+    if (!busy && !pending) {
+      const mode = ["NORM", "SHUF", "REP1"].indexOf(live?.player_mode);
+      playerMode.value = mode < 0 ? "1" : String(mode);
+      playerSleep.value = String(live?.player_sleep_preset || 0);
+    }
+    playerSleepStatus.textContent = live?.player_sleep_seconds ?
+      "Stops in " + duration(live.player_sleep_seconds) + " (including pause)." : "Sleep timer off.";
     for (const field of Object.values(settingFields)) {
       const needsIdle = field.name === "language" || field.name.startsWith("audio_") || field.name.startsWith("timer_");
       field.disabled = !preferences || preferences.editing ||
@@ -582,6 +604,14 @@
   playerControls.addEventListener("click", async event => {
     const action = event.target.dataset.action;
     if (action) await sendCommand("player", action, 0);
+  });
+  playerControls.addEventListener("change", async event => {
+    const field = event.target;
+    if (field.disabled || ![playerMode, playerSleep].includes(field)) return;
+    const value = Number(field.value);
+    const action = field.dataset.playerOption;
+    if (!(action === "mode" ? [0,1,2] : [0,15,30,60,90]).includes(value)) return;
+    await sendCommand("player", action, value);
   });
   settingsControls.addEventListener("submit", event => event.preventDefault());
   quickControls.addEventListener("submit", event => event.preventDefault());
@@ -840,6 +870,8 @@
       labels.output.textContent = data.output;
       if (pending && data.epoch === pending.epoch && data.command_id === pending.id &&
           data.command_nonce === pending.nonce && data.command_result !== "pending" &&
+          (pending.target !== "player" || !["mode","sleep"].includes(pending.action) ||
+            data.command_result !== "applied" || data.settings?.snapshot_id >= pending.id) &&
           (pending.target !== "settings" && pending.target !== "control" && pending.action !== "stop_sound" && !pending.editor || data.command_result !== "applied" ||
             data.settings?.snapshot_id >= pending.id)) {
         if (pending.editor) {
@@ -873,7 +905,9 @@
         } else if (pending.target === "player") {
           feedback.textContent = data.command_result === "applied" ?
             (pending.action === "test_track" ? "Track test started. Press Stop to end it." :
-              pending.action === "test_stop" ? "Track test stopped." : "Player command accepted.") :
+              pending.action === "test_stop" ? "Track test stopped." :
+              pending.action === "mode" ? "Playback mode changed; current track continues." :
+              pending.action === "sleep" ? pending.value ? "Sleep timer started." : "Sleep timer off." : "Player command accepted.") :
             "Player busy or sound off. Close settings and check the timer or alarm.";
         } else {
           feedback.textContent = data.command_result === "applied" ? "Timer updated." :

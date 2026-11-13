@@ -1816,6 +1816,19 @@ static bool service_phone_player(phone_action_t action, uint32_t value) {
         music_ui_close("PHONE_STOP");
         return true;
     }
+    if (action == PHONE_PLAYER_MODE || action == PHONE_PLAYER_SLEEP) {
+        if (!music_ui_open || music_ui_audition || timer.running || alarm_active_index>=0 ||
+            menu_state!=MENU_CLOSED || alarm_ui_state!=ALARM_UI_CLOSED) return false;
+        if (action == PHONE_PLAYER_MODE) {
+            bool ok=music_playlist_set_mode(&music_playlist,(music_mode_t)value);
+            if(ok) printf("[MUSIC-UI] mode=%s (current track continues)\n",
+                music_playlist_mode_name(music_playlist.mode));
+            return ok;
+        }
+        bool ok=music_sleep_set(&music_sleep,value,to_ms_since_boot(get_absolute_time()));
+        if(ok) printf("[MUSIC-UI] sleep=%lumin (0=OFF; wall duration includes pause)\n",(unsigned long)value);
+        return ok;
+    }
     if (timer.running || alarm_active_index >= 0 || menu_state != MENU_CLOSED ||
         alarm_ui_state != ALARM_UI_CLOSED || !sound_enabled) return false;
     if (action == PHONE_PLAYER_TEST_TRACK) {
@@ -5126,6 +5139,9 @@ int main(void) {
                 .track_count = music_ui_open ? music_track_count : 0,
                 .player_mode = music_ui_open ? music_playlist_mode_name(music_playlist.mode) : "",
                 .player_test = music_ui_open && music_ui_audition,
+                .player_sleep_preset = music_ui_open ? (uint8_t[]){0,15,30,60,90}[music_sleep.preset] : 0,
+                .player_sleep_seconds = music_ui_open && music_sleep.deadline_ms>now ?
+                    (uint32_t)((music_sleep.deadline_ms-now+999u)/1000u) : 0,
                 .preferences = {
                     .volume_local = volume, .volume_bt = bt_volume, .language = (uint8_t)language,
                     .timer_sound = timer_sound, .timer_track = timer_track, .timer_voice = timer_voice, .timer_random = timer_random, .timer_warning = timer_warning_enabled,
