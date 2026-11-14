@@ -147,6 +147,24 @@ int main(void) {
         assert(player.result==PHONE_COMMAND_APPLIED); // Lost response must not restart sleep.
     }
 
+    phone_access_t announcements={0};
+    phone_access_reset(&announcements,23);announcements.settings.home_trusted=1;
+    const char *const announcement_names[]={"auto_enabled","clock_mode","half_hour","exact_hour","quiet_enabled","quiet_start","quiet_end"};
+    for(unsigned i=0;i<7;++i) {
+        char body[100];unsigned maximum=i<5 ? 1u : 23u;
+        snprintf(body,sizeof(body),"- 23 %u %u %s %u",i+1,i+40,announcement_names[i],maximum+1);
+        assert(phone_access_settings(&announcements,body,PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+        snprintf(body,sizeof(body),"- 23 %u %u %s %u",i+1,i+40,announcement_names[i],maximum);
+        assert(phone_access_player(&announcements,body,PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+        assert(phone_access_settings(&announcements,body,PHONE_SCOPE_DIRECT,true)==PHONE_DENIED);
+        assert(phone_access_settings(&announcements,body,PHONE_SCOPE_HOME,true)==PHONE_OK);
+        assert(announcements.last.action==(phone_action_t)(PHONE_SET_AUTO_ENABLED+i));
+        assert(announcements.last.value==maximum);
+        announcements.result=PHONE_COMMAND_APPLIED;
+        assert(phone_access_settings(&announcements,body,PHONE_SCOPE_HOME,true)==PHONE_OK);
+        assert(announcements.result==PHONE_COMMAND_APPLIED);
+    }
+
     phone_access_t settings = {0};
     phone_access_reset(&settings, 30);
     assert(phone_access_settings(&settings, "- 30 1 40 volume_local 15", PHONE_SCOPE_HOME, true) == PHONE_DENIED);

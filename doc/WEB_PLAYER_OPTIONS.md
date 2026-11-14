@@ -1,6 +1,6 @@
 # Browser player modes and sleep
 
-Status: implemented and software-tested on the development branch; installation and user acceptance pending.
+Status: installed with separate approval as `1.0.0+31.g798da44` on November 13. Startup/settings/HTTP checks passed. The user reported everything working on November 14; record this as general acceptance, not separately measured full sleep expiry or four-client coverage.
 
 ## Controls and behavior
 

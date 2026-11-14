@@ -11,6 +11,7 @@
 typedef struct {
     uint8_t volume_local, volume_bt, language;
     uint8_t timer_sound, timer_track, timer_voice, timer_random, timer_warning;
+    uint8_t auto_enabled, clock_mode, half_hour, exact_hour, quiet_enabled, quiet_start, quiet_end;
     uint8_t audio[4];
     display_light_t light;
     bool editing, idle, bt_supported, pending, retry;

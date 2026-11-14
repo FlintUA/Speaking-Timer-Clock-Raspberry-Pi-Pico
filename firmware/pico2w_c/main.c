@@ -2364,6 +2364,30 @@ static bool service_phone_settings(const phone_command_t *request) {
         return true;
     }
     if (!phone_settings_idle()) return false;
+    if (request->action >= PHONE_SET_AUTO_ENABLED && request->action <= PHONE_SET_QUIET_END) {
+        if (request->value > (request->action >= PHONE_SET_QUIET_START ? 23u : 1u)) return false;
+        if (request->action == PHONE_SET_AUTO_ENABLED) {
+            auto_enabled=value!=0; // Existing USB auto on/off is deliberately RAM-only.
+            auto_status();
+            return true;
+        }
+        if (request->action == PHONE_SET_CLOCK_MODE) {
+            set_clock_mode(value,to_ms_since_boot(get_absolute_time()));
+            return true;
+        }
+        bool changed=false;
+        switch(request->action) {
+            case PHONE_SET_HALF_HOUR: changed=half_hour_enabled!=(value!=0);half_hour_enabled=value!=0;break;
+            case PHONE_SET_EXACT_HOUR: changed=exact_hour_phrase!=(value!=0);exact_hour_phrase=value!=0;break;
+            case PHONE_SET_QUIET_ENABLED: changed=quiet_enabled!=(value!=0);quiet_enabled=value!=0;break;
+            case PHONE_SET_QUIET_START: changed=quiet_start!=value;quiet_start=value;break;
+            case PHONE_SET_QUIET_END: changed=quiet_end!=value;quiet_end=value;break;
+            default: return false;
+        }
+        if(changed) settings_mark_changed();
+        auto_status();
+        return true;
+    }
     if (request->action >= PHONE_SET_TIMER_SOUND && request->action <= PHONE_SET_TIMER_WARNING)
         return timer_sound_apply(request->action == PHONE_SET_TIMER_SOUND ? value : timer_sound,
             request->action == PHONE_SET_TIMER_TRACK ? value : timer_track,
@@ -5145,6 +5169,9 @@ int main(void) {
                 .preferences = {
                     .volume_local = volume, .volume_bt = bt_volume, .language = (uint8_t)language,
                     .timer_sound = timer_sound, .timer_track = timer_track, .timer_voice = timer_voice, .timer_random = timer_random, .timer_warning = timer_warning_enabled,
+                    .auto_enabled=auto_enabled, .clock_mode=clock_mode, .half_hour=half_hour_enabled,
+                    .exact_hour=exact_hour_phrase, .quiet_enabled=quiet_enabled,
+                    .quiet_start=quiet_start, .quiet_end=quiet_end,
                     .audio = {menu_audio_selected_jbl(0), menu_audio_selected_jbl(1),
                               menu_audio_selected_jbl(2), menu_audio_selected_jbl(3)},
                     .light = display_light,

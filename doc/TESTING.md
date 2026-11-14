@@ -250,3 +250,7 @@ See [WEB_SCALAR_SETTINGS.md](WEB_SCALAR_SETTINGS.md) for the control audit and p
 ## Browser player mode and sleep
 
 See [player options](WEB_PLAYER_OPTIONS.md) for immediate mode selection, sleep semantics and focused acceptance. Validate both LOCAL and BT, physical/browser reflection, paused expiry, command retries and audition/closed-player guards. Installation and hardware acceptance are pending.
+
+## Browser automatic announcements and quiet hours
+
+Follow [announcement acceptance](WEB_ANNOUNCEMENTS.md). Check runtime automatic OFF versus reboot ON, saved mode/half-hour/exact/quiet preferences, daytime/overnight/equal-hour ranges, physical-to-browser reflection and normal timer/alarm availability. Do not infer beep acoustic acceptance from status or software tests. Installation and user acceptance pending.

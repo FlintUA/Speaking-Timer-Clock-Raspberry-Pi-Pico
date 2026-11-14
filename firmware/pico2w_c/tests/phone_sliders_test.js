@@ -12,7 +12,7 @@ function createForm(id) {
   const markup = html.split('id="' + id + '"')[1].split("</form>")[0];
   const inputs = Array.from(markup.matchAll(/<(?:input|select)\b[^>]*\bname="([^"]+)"/g), match => ({
     name: match[1], value: match[1] === "slot" ? "1" : "", dataset: {}, checked: false,
-    type: sliderNames.includes(match[1]) ? "range" : ["timer_voice","timer_random","timer_warning"].includes(match[1]) ? "checkbox" : "text",
+    type: sliderNames.includes(match[1]) ? "range" : ["timer_voice","timer_random","timer_warning","auto_enabled","half_hour","exact_hour","quiet_enabled"].includes(match[1]) ? "checkbox" : "text",
     max: match[1].startsWith("volume_") ? "30" : "100", reportValidity: () => true
   }));
   const fields = Object.fromEntries(inputs.filter(field => field.name !== "days").map(field => [field.name, field]));
@@ -42,6 +42,7 @@ const preferences = {
   audio_timer: 1, audio_alarm: 1, light_mode: 1, light_day: 70, light_night: 20,
   editing: false, idle: true, bt_supported: true, saving: "saved", snapshot_id: 0
 };
+Object.assign(preferences,{auto_enabled:1,clock_mode:0,half_hour:0,exact_hour:0,quiet_enabled:1,quiet_start:22,quiet_end:7});
 const alarm = {enabled: true, hour: 7, minute: 0, days: 31, sound: 0, track: 1, revision: 1};
 const birthday = {enabled: true, month: 12, day: 10, hour: 7, minute: 0, birth_year: 0, revision: 1};
 const state = {
@@ -536,6 +537,29 @@ async function settled() {
   preferences.editing=false;state.player="Playing";await update();
   state.player="Closed";modeField.value="1";await playerChange({target:modeField});await settled();await update();
   assert.equal(state.player_mode,"NORM");assert(modeField.disabled && sleepField.disabled);
+  state.player="Closed";preferences.idle=true;await update();
+  const announcements=["auto_enabled","clock_mode","half_hour","exact_hour","quiet_enabled","quiet_start","quiet_end"];
+  for(const [index,name] of announcements.entries()) {
+    const field=form.elements[name];assert(!field.disabled);
+    const value=index<5 ? 1 : index===5 ? 23 : 6;
+    if(field.type==="checkbox")field.checked=Boolean(value);
+    field.value=String(value);form.handlers.change({target:field,type:"change"});
+    assert(timerButtons[1].disabled);
+    await settled();await update();assert.equal(preferences[name],value);
+  }
+  assert(getElementById("quiet-status").textContent.includes("23:00 to 06:00 (overnight)"));
+  preferences.quiet_end=23;await update();assert(getElementById("quiet-status").textContent.includes("Quiet all day"));
+  preferences.quiet_enabled=0;await update();assert.equal(getElementById("quiet-status").textContent,"Quiet hours off.");
+  preferences.quiet_enabled=1;preferences.quiet_start=8;preferences.quiet_end=12;await update();
+  assert.equal(getElementById("quiet-status").textContent,"Quiet 08:00 to 12:00.");
+  nextSettingsResult="blocked";
+  const halfField=form.elements.half_hour;halfField.checked=false;
+  form.handlers.change({target:halfField,type:"change"});await settled();await update();
+  assert.equal(preferences.half_hour,1);assert(halfField.checked);
+  preferences.idle=false;await update();for(const name of announcements)assert(form.elements[name].disabled);
+  preferences.idle=true;preferences.editing=true;await update();for(const name of announcements)assert(form.elements[name].disabled);
+  preferences.editing=false;for(const name of announcements)delete preferences[name];await update();
+  for(const name of announcements)assert(form.elements[name].disabled); // Older firmware metadata absent.
   console.log("phone_sliders_test: PASS");
 })().catch(error => {
   console.error(error);

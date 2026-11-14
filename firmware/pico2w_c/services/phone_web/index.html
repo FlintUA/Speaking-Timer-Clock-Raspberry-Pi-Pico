@@ -187,7 +187,20 @@
     </div>
     <p>Choose the message independently from None, Signal or one music file in folder 08. Message only, sound only and silent completion are supported. Finish changing your choices before starting the timer. Random mode chooses one existing SPI-card folder-08 file per event. Mirror those files on the DFPlayer card. Snoozed alarms reuse their chosen track. The optional last-five-second warning uses single beeps, follows timer output and respects Sound off. Busy or late ticks are skipped; completion is never held behind them. The German completion message is not yet available. Timer output uses its separate audio preference.</p>
     <p>Bluetooth preferences fall back to LOCAL when the speaker is unavailable. Auto light uses night brightness from 22:00 to 07:00.</p>
-    <p>Close settings on the clock to change these options. Stop playback or the timer before changing language, audio outputs or timer options.</p>
+    <h2>Automatic announcements</h2>
+    <div><label class="toggle"><input name="auto_enabled" type="checkbox" value="1">Automatic announcements (until restart)</label></div>
+    <p>This switch temporarily pauses hourly and half-hour announcements; they are enabled again after restart. It does not mute manual speech, timers or alarms.</p>
+    <div><label>On the hour <select name="clock_mode"><option value="0">Speak the time</option><option value="1">Clock chime</option></select></label></div>
+    <div><label class="toggle"><input name="half_hour" type="checkbox" value="1">Double beep on the half-hour</label></div>
+    <div><label class="toggle"><input name="exact_hour" type="checkbox" value="1">Include the exact-hour word in spoken time</label></div>
+    <p>Hourly speech uses its audio output preference. Clock chimes and half-hour beeps use LOCAL. The exact-hour word also affects manually requested spoken time.</p>
+    <h2>Quiet hours</h2>
+    <div><label class="toggle"><input name="quiet_enabled" type="checkbox" value="1">Enable quiet hours</label></div>
+    <div><label>Quiet from <select name="quiet_start"><option value="0">00:00</option><option value="1">01:00</option><option value="2">02:00</option><option value="3">03:00</option><option value="4">04:00</option><option value="5">05:00</option><option value="6">06:00</option><option value="7">07:00</option><option value="8">08:00</option><option value="9">09:00</option><option value="10">10:00</option><option value="11">11:00</option><option value="12">12:00</option><option value="13">13:00</option><option value="14">14:00</option><option value="15">15:00</option><option value="16">16:00</option><option value="17">17:00</option><option value="18">18:00</option><option value="19">19:00</option><option value="20">20:00</option><option value="21">21:00</option><option value="22">22:00</option><option value="23">23:00</option></select></label></div>
+    <div><label>Quiet until <select name="quiet_end"><option value="0">00:00</option><option value="1">01:00</option><option value="2">02:00</option><option value="3">03:00</option><option value="4">04:00</option><option value="5">05:00</option><option value="6">06:00</option><option value="7">07:00</option><option value="8">08:00</option><option value="9">09:00</option><option value="10">10:00</option><option value="11">11:00</option><option value="12">12:00</option><option value="13">13:00</option><option value="14">14:00</option><option value="15">15:00</option><option value="16">16:00</option><option value="17">17:00</option><option value="18">18:00</option><option value="19">19:00</option><option value="20">20:00</option><option value="21">21:00</option><option value="22">22:00</option><option value="23">23:00</option></select></label></div>
+    <p id="quiet-status" role="status"></p>
+    <p>Times use Europe/Berlin, including daylight-saving changes. Quiet hours suppress automatic announcements and postpone birthday melodies for up to 30 minutes. Manual speech, music, timers and alarms remain available. Display-light Auto has its own fixed night schedule.</p>
+    <p>Close settings on the clock to change these options. Stop playback or the timer before changing language, audio outputs, timer or announcement options.</p>
     <p id="save-status" role="status"></p>
   </form>
   <form id="alarm-controls" hidden>
@@ -336,6 +349,11 @@
   const settingFields = Object.fromEntries(
     Array.from(settingsControls.querySelectorAll("input, select"), field => [field.name, field])
   );
+  const announcementNames = new Set(["auto_enabled","clock_mode","half_hour","exact_hour","quiet_enabled","quiet_start","quiet_end"]);
+  function settingNeedsIdle(name) {
+    return name === "language" || name.startsWith("audio_") || name.startsWith("timer_") || announcementNames.has(name);
+  }
+  const quietStatus = document.getElementById("quiet-status");
   const dirtySettings = new Set();
   const settingChanges = new Map();
   const activeSliders = new Set();
@@ -471,7 +489,7 @@
     logout.hidden = !paired;
     logout.disabled = busy || Boolean(pending);
     const idleChanges = Array.from(new Set([...settingChanges.keys(), ...dirtySettings])).some(name =>
-      name === "language" || name.startsWith("audio_") || name.startsWith("timer_"));
+      settingNeedsIdle(name));
     for (const button of controls.querySelectorAll("button")) {
       const action = button.dataset.action;
       button.disabled = busy || Boolean(pending) || !live ||
@@ -508,11 +526,17 @@
     playerSleepStatus.textContent = live?.player_sleep_seconds ?
       "Stops in " + duration(live.player_sleep_seconds) + " (including pause)." : "Sleep timer off.";
     for (const field of Object.values(settingFields)) {
-      const needsIdle = field.name === "language" || field.name.startsWith("audio_") || field.name.startsWith("timer_");
+      const needsIdle = settingNeedsIdle(field.name);
       field.disabled = !preferences || preferences.editing ||
         (needsIdle && !preferences.idle) || (field.name === "volume_bt" && !preferences.bt_supported) ||
-        (field.name.startsWith("timer_") && preferences?.[field.name] == null);
+        ((field.name.startsWith("timer_") || announcementNames.has(field.name)) && preferences?.[field.name] == null);
     }
+    quietStatus.textContent = preferences?.quiet_enabled == null ? "Quiet-hours status unavailable." :
+      !preferences.quiet_enabled ? "Quiet hours off." : preferences.quiet_start === preferences.quiet_end ?
+      "Quiet all day: start and end are equal." :
+      "Quiet " + String(preferences.quiet_start).padStart(2,"0") + ":00 to " +
+      String(preferences.quiet_end).padStart(2,"0") + ":00" +
+      (preferences.quiet_start > preferences.quiet_end ? " (overnight)." : ".");
     if (settingFields.timer_track && preferences?.timer_random) settingFields.timer_track.disabled = true;
     for (const editor of scheduleEditors) {
       editor.form.hidden = !allowed;
@@ -662,7 +686,7 @@
     const credential = live.home_trusted || (token && checkedEpoch === live.epoch);
     if (!credential) return;
     for (const [name, value] of settingChanges) {
-      const requiresIdle = name === "language" || name.startsWith("audio_") || name.startsWith("timer_");
+      const requiresIdle = settingNeedsIdle(name);
       if ((requiresIdle && !live.settings.idle) ||
           name === "volume_bt" && !live.settings.bt_supported) {
         settingChanges.delete(name); dirtySettings.delete(name);
