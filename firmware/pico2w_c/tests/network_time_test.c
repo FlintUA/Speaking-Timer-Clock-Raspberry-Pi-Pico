@@ -103,6 +103,23 @@ int main(void) {
     assert(!service(39250, false, true) && connect_calls == 4);
     assert(network_time_home_status(39250).seconds == 60);
     assert(network_time_reference_status(UINT64_MAX).sync_age==UINT32_MAX);
+    test_now=50000;test_link=CYW43_LINK_UP;
+    waiting=true;dns_pending=true;received=true;anchor_valid=true;apply_pending=true;
+    request_now=true;request_failed=true;applied_offset=3600;next_apply=90000;
+    network_time_manual_adjusted();
+    reference=network_time_reference_status(test_now);
+    assert(!reference.synced && !reference.sampled && !reference.pending && !reference.retry && !reference.failed);
+    assert(!waiting && !received && !request_now && !applied_offset && next_ntp==3650000);
+    assert(dns_pending);dns_found("old",NULL,NULL);assert(!dns_pending && !waiting);
+    unsigned requests=dns_calls;assert(!service(51000,true,true) && dns_calls==requests);
+    network_time_request();assert(network_time_reference_status(51000).requesting);
+    assert(!service(51250,true,true) && dns_calls==requests+1);
+    assert(network_time_reference_status(51250).failed);
+    network_time_request();assert(!network_time_reference_status(51250).failed);
+    waiting=true;request_now=false;deadline=52000;next_ntp=100000;
+    assert(!service(52000,true,true));assert(network_time_reference_status(52000).failed);
+    received=true;sample_epoch=1794384000;sample_ms=52000;
+    assert(service(52250,true,true));assert(!network_time_reference_status(52250).failed);
     puts("network_time_test: PASS");
     return 0;
 }

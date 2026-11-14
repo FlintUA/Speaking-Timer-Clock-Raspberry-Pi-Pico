@@ -1,6 +1,6 @@
 # Browser automatic announcements and quiet hours
 
-Status: implemented and software-tested; installation and user acceptance pending.
+Status: installed with separate approval as `1.0.0+32.g08b93c5` on November 14. Startup/settings/HTTP checks passed; the user subsequently reported the options present and working. This is general acceptance, not individual scheduled-boundary or restart evidence.
 
 ## Controls
 

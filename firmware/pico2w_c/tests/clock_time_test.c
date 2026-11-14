@@ -52,5 +52,14 @@ int main(void) {
     packet[0]=0x24; packet[1]=0; assert(!clock_ntp_decode(packet,48,nonce,&epoch));
     packet[1]=16; assert(!clock_ntp_decode(packet,48,nonce,&epoch));
     packet[1]=2; packet[0]=0x23; assert(!clock_ntp_decode(packet,48,nonce,&epoch));
+    ds1302_datetime_t civil={.year=2026,.month=3,.day=29,.hour=1,.minute=59,.second=59};
+    assert(clock_berlin_local_valid(&civil));civil.hour=2;assert(!clock_berlin_local_valid(&civil));
+    civil.hour=3;assert(clock_berlin_local_valid(&civil));
+    civil.month=10;civil.day=25;civil.hour=2;assert(clock_berlin_local_valid(&civil));
+    civil=(ds1302_datetime_t){.year=2028,.month=2,.day=29,.hour=12};assert(clock_berlin_local_valid(&civil));
+    civil.year=2027;assert(!clock_berlin_local_valid(&civil));
+    civil=(ds1302_datetime_t){.year=2000,.month=1,.day=1};assert(clock_berlin_local_valid(&civil));
+    civil=(ds1302_datetime_t){.year=2099,.month=12,.day=31,.hour=23,.minute=59,.second=59};assert(clock_berlin_local_valid(&civil));
+    civil.year=2100;assert(!clock_berlin_local_valid(&civil));
     puts("clock_time_test: PASS");
 }

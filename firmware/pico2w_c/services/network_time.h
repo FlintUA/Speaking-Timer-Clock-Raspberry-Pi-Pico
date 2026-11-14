@@ -13,7 +13,7 @@ typedef struct {
 } network_home_status_t;
 network_home_status_t network_time_home_status(uint64_t now_ms);
 typedef struct {
-    bool available, configured, sampled, synced, pending, requesting, retry;
+    bool available, configured, sampled, synced, pending, requesting, retry, failed;
     uint32_t sample_age, sync_age;
     int offset;
 } network_reference_status_t;
@@ -21,6 +21,8 @@ network_reference_status_t network_time_reference_status(uint64_t now_ms);
 void network_time_init(bool radio_ready);
 void network_time_configure(const char *ssid, const char *password);
 void network_time_request(void);
+// Drop stale pending reference data after an explicit RTC edit; hourly sync remains enabled.
+void network_time_manual_adjusted(void);
 void network_time_status(void);
 #ifdef CLOCK_ENABLE_PHONE_WEB
 void network_time_suspend_home(bool suspended);

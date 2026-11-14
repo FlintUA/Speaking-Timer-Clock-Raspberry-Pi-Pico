@@ -187,3 +187,7 @@ Timer sound -> MUSIC now has FIXED/RANDOM selection; only FIXED asks for a track
 ## Timer warning (user acceptance pending)
 
 Timer sound now starts with an optional five-second warning ON/OFF page, followed by message/sound/music settings. The browser checkbox Beep during the last 5 seconds and USB timer-warning on|off use the same saved value, default OFF. The single 19/001.mp3 plays through timer routing at most once at each remaining second 5..1. Busy/late ticks are skipped, not replayed; start speech remains higher priority than an optional tick and zero always wins. Global mute suppresses the warning. See [TIMER_PREWARNING.md](TIMER_PREWARNING.md) for controls, v17 compatibility and device tests.
+
+## Explicit date/time adjustment
+
+Physical date/time confirmation and the development browser clock panel share RTC write/readback, scheduler replay guards and stale-NTP invalidation. Europe/Berlin spring-gap times are rejected; an equal autumn civil time remains representable without a fold flag. NTP stays enabled and may correct a manual choice later. See [browser clock behavior and acceptance](WEB_CLOCK.md); this follow-up is implemented but not installed.

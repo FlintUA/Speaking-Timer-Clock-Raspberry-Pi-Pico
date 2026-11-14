@@ -9,6 +9,7 @@
 
 static bool ready, configured, joining, waiting, dns_pending, request_now, home_suspended;
 static bool received, anchor_valid, apply_pending;
+static bool request_failed;
 static char ssid_value[33], password_value[65];
 static uint64_t join_started, next_join, deadline, next_ntp;
 static uint64_t sample_epoch, sample_ms, anchor_epoch, anchor_ms;
@@ -27,19 +28,19 @@ static uint64_t now_ms(void) { return to_ms_since_boot(get_absolute_time()); }
 static void send_request(void) {
     if (!waiting || !pcb) return;
     struct pbuf *p=pbuf_alloc(PBUF_TRANSPORT,48,PBUF_RAM);
-    if (!p) { waiting=false; return; }
+    if (!p) { waiting=false; request_failed=true; return; }
     uint8_t data[48]={0}; data[0]=0x23; // NTPv4 client.
     uint64_t value=time_us_64() ^ ((uint64_t)to_us_since_boot(get_absolute_time())<<17);
     for (unsigned i=0;i<8;i++) nonce[i]=(uint8_t)(value>>(i*8));
     memcpy(data+40,nonce,8);
     if (pbuf_take(p,data,sizeof(data)) != ERR_OK ||
-        udp_sendto(pcb,p,&server,123) != ERR_OK) waiting=false;
+        udp_sendto(pcb,p,&server,123) != ERR_OK) {waiting=false;request_failed=true;}
     pbuf_free(p);
 }
 static void dns_found(const char *host, const ip_addr_t *addr, void *arg) {
     (void)host; (void)arg; dns_pending=false;
     if (!waiting) return;
-    if (!addr) { waiting=false; return; }
+    if (!addr) { waiting=false; request_failed=true; return; }
     server=*addr; send_request();
 }
 static void receive(void *arg, struct udp_pcb *udp, struct pbuf *p,
@@ -74,12 +75,21 @@ void network_time_configure(const char *ssid, const char *password) {
         waiting=false; received=false;
         cyw43_arch_lwip_end();
     }
-    next_ntp=0; request_now=true;
+    next_ntp=0; request_now=true; request_failed=false;
     if (ready && !home_suspended) cyw43_wifi_leave(&cyw43_state,CYW43_ITF_STA);
     puts(configured ? "[WIFI] Configuration accepted (password hidden)" :
                       "[WIFI] Disabled; RTC continues offline");
 }
-void network_time_request(void) { request_now=true; }
+void network_time_request(void) { request_now=true; request_failed=false; }
+void network_time_manual_adjusted(void) {
+    if (ready) cyw43_arch_lwip_begin();
+    waiting=false; received=false; anchor_valid=false; apply_pending=false;
+    applied_offset=0; next_apply=0; request_now=false; request_failed=false;
+    next_ntp=now_ms()+3600000u;
+    // Leave dns_pending for its callback; waiting=false makes it harmless.
+    if (ready) cyw43_arch_lwip_end();
+    puts("[NTP] Manual RTC edit; old reference discarded, next periodic sync in 1h");
+}
 #ifdef CLOCK_ENABLE_PHONE_WEB
 void network_time_suspend_home(bool suspended) {
     home_suspended = suspended;
@@ -130,8 +140,8 @@ network_reference_status_t network_time_reference_status(uint64_t now) {
         .pending = anchor_valid && (apply_pending ||
             applied_offset != clock_berlin_offset(anchor_epoch +
                 (now >= anchor_ms ? (now - anchor_ms) / 1000u : 0))),
-        .requesting = waiting || dns_pending || received,
-        .retry = anchor_valid && next_apply > now,
+          .requesting = request_now || waiting || dns_pending || received,
+          .retry = anchor_valid && next_apply > now, .failed=request_failed,
         .sample_age = anchor_valid ? age_seconds(now, last_sync_ms) : 0,
         .sync_age = applied_offset ? age_seconds(now, last_applied_ms) : 0
     };
@@ -145,9 +155,9 @@ bool network_time_service(uint64_t now, bool idle, bool join_allowed, ds1302_dat
     if (received) {
         anchor_epoch=sample_epoch; anchor_ms=sample_ms; received=false;
         anchor_valid=true; apply_pending=true; last_sync_ms=now;
-        next_ntp=now+3600000; fresh=true;
+          next_ntp=now+3600000; fresh=true; request_failed=false;
     }
-    if (waiting && now>=deadline) { waiting=false; timed_out=true; }
+      if (waiting && now>=deadline) { waiting=false; timed_out=true; request_failed=true; }
     cyw43_arch_lwip_end();
     if (fresh) puts("[NTP] Validated UTC sample received");
     if (timed_out) puts("[NTP] Request timed out; RTC remains active");
@@ -179,11 +189,11 @@ bool network_time_service(uint64_t now, bool idle, bool join_allowed, ds1302_dat
             }
             cyw43_arch_lwip_begin();
             if (!waiting && !dns_pending && idle && (request_now || now>=next_ntp)) {
-                request_now=false; waiting=true; deadline=now+10000; next_ntp=now+60000;
+                request_now=false; request_failed=false; waiting=true; deadline=now+10000; next_ntp=now+60000;
                 err_t rc=dns_gethostbyname("pool.ntp.org",&server,dns_found,NULL);
                 if (rc==ERR_OK) send_request();
                 else if (rc==ERR_INPROGRESS) dns_pending=true;
-                else waiting=false;
+                else {waiting=false;request_failed=true;}
             }
             cyw43_arch_lwip_end();
         }

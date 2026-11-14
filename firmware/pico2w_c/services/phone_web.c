@@ -25,7 +25,7 @@ static uint32_t published_command_id;
 static phone_access_t access;
 
 typedef enum {
-    POST_PAIR, POST_TIMER, POST_PLAYER, POST_SETTINGS, POST_ALARM, POST_BIRTHDAY, POST_ACCESS, POST_LOGOUT, POST_CONTROL
+    POST_PAIR, POST_TIMER, POST_PLAYER, POST_SETTINGS, POST_ALARM, POST_BIRTHDAY, POST_ACCESS, POST_LOGOUT, POST_CONTROL, POST_CLOCK
 } phone_post_action_t;
 
 typedef struct {
@@ -255,6 +255,7 @@ err_t httpd_post_begin(void *connection, const char *uri, const char *header,
     else if (strcmp(uri, "/player") == 0) action = POST_PLAYER;
     else if (strcmp(uri, "/settings") == 0) action = POST_SETTINGS;
     else if (strcmp(uri, "/control") == 0) action = POST_CONTROL;
+    else if (strcmp(uri, "/clock") == 0) action = POST_CLOCK;
     else if (strcmp(uri, "/alarm") == 0) action = POST_ALARM;
     else if (strcmp(uri, "/birthday") == 0) action = POST_BIRTHDAY;
     else if (strcmp(uri, "/access") == 0) action = POST_ACCESS;
@@ -310,6 +311,7 @@ void httpd_post_finished(void *connection, char *response_uri, u16_t response_le
             case POST_PLAYER: reply = phone_access_player(&access, post->body, scope, post->home_peer); break;
             case POST_SETTINGS: reply = phone_access_settings(&access, post->body, scope, post->home_peer); break;
             case POST_CONTROL: reply = phone_access_control(&access, post->body, scope, post->home_peer); break;
+            case POST_CLOCK: reply = phone_access_clock(&access, post->body, scope, post->home_peer); break;
             case POST_ALARM: reply = phone_access_alarm(&access, post->body, scope, post->home_peer); break;
             case POST_BIRTHDAY: reply = phone_access_birthday(&access, post->body, scope, post->home_peer); break;
             case POST_ACCESS: reply = phone_access_check(&access, post->body, scope); break;
@@ -368,11 +370,12 @@ int fs_open_custom(struct fs_file *file, const char *name) {
     int body_length;
     if (snapshot) {
         static const char *const results[] = {"pending", "applied", "blocked", "conflict", "muted",
-            "rtc_unavailable", "no_alarm", "editing", "timer_busy", "alarm_busy", "player_busy", "audio_busy", "no_ringing", "no_snooze", "no_timer_sound"};
-        _Static_assert(sizeof(results)/sizeof(results[0]) == PHONE_COMMAND_NO_TIMER_SOUND + 1u, "Missing command result");
+            "rtc_unavailable", "no_alarm", "editing", "timer_busy", "alarm_busy", "player_busy", "audio_busy", "no_ringing", "no_snooze", "no_timer_sound",
+            "network_unavailable", "rtc_write_failed", "invalid_time"};
+        _Static_assert(sizeof(results)/sizeof(results[0]) == PHONE_COMMAND_INVALID_TIME + 1u, "Missing command result");
         body_length = snprintf(response + len, capacity - (size_t)len,
         "{\"firmware\":{\"name\":\"Speaking Clock\",\"version\":\"%s\",\"build\":\"%s\","
-        "\"board\":\"pico2_w\",\"author\":\"FlintUA\"},"
+        "\"board\":\"pico2_w\",\"author\":\"FlintUA\"},\"clock_control\":true,"
         "\"time\":\"%s\",\"timer_running\":%s,\"timer_seconds\":%" PRIu32
         ",\"player\":\"%s\",\"track\":%u,\"output\":\"%s\",\"timer_request\":%" PRIu32
         ",\"timer_result\":\"%s\",\"timer_nonce\":%" PRIu32 ",\"epoch\":%" PRIu32

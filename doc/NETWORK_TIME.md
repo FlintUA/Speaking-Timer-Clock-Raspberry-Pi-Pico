@@ -91,3 +91,7 @@ Stable v1.0.0 cannot read v12-v14. Earlier `codex/phone-control` builds cannot r
 ## Hardware acceptance status
 
 On November 8, build 7964939 reported configured=YES, synced=YES and Europe/Berlin UTC+1 after local provisioning. Portable stayed A2DP ACTIVE at 44100 Hz, and the user confirmed Bluetooth playback with Wi-Fi enabled. Settings were saved in valid v10 A/B records. See [hardware evidence](HARDWARE_TEST_EVIDENCE.md#november-8-wi-fintp-and-bluetooth-coexistence). Hourly refresh, prolonged playback, access-point outage/recovery, provisioning after reboot and actual DST transitions remain acceptance checks. No offline drift rate has been measured or enabled.
+
+## Explicit clock changes in the web development profile
+
+The browser now has deliberate full date/time setting and a separate NTP request; see [clock controls and safeguards](WEB_CLOCK.md). Physical manual RTC edits share scheduler correction protection and stale-reference invalidation with web edits. After successful manual write, the previous NTP reference is discarded and the next hourly request is due one hour later; reconnection or an explicit request may synchronize sooner. Manual local times in the missing spring hour are rejected. Latest request failure is reported independently of prior synchronization and RTC-write retry. Installation and acceptance of this development stage are pending.

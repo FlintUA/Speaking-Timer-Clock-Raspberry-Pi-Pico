@@ -92,7 +92,7 @@ int phone_overview_json(char *buffer, size_t capacity, const phone_overview_t *s
         "\"snoozes\":%u,\"snooze_slot\":%u,\"snooze_seconds\":%" PRIu32 ",\"snooze_waiting\":%s},"
         "\"bluetooth\":{\"state\":\"%s\",\"name\":\"%s\"},"
         "\"network\":{\"mode\":\"%s\",\"state\":\"%s\",\"seconds\":%" PRIu32 "},"
-        "\"ntp\":{\"available\":%s,\"configured\":%s,\"sampled\":%s,\"synced\":%s,\"pending\":%s,\"requesting\":%s,\"retry\":%s,"
+        "\"ntp\":{\"available\":%s,\"configured\":%s,\"sampled\":%s,\"synced\":%s,\"pending\":%s,\"requesting\":%s,\"retry\":%s,\"failed\":%s,"
         "\"sample_age\":%" PRIu32 ",\"sync_age\":%" PRIu32 ",\"offset\":%d}}",
         s->rtc_valid ? "true" : "false", s->date, (unsigned)s->weekday, s->sound_on ? "true" : "false", s->timer_sound_id,
         (unsigned)s->active_alarm, s->active_id, s->snooze_revision, (unsigned)s->deferred_count, (unsigned)s->next_slot, s->next_at,
@@ -102,6 +102,7 @@ int phone_overview_json(char *buffer, size_t capacity, const phone_overview_t *s
         s->direct ? "direct" : "home", (unsigned)s->network.state < sizeof(network)/sizeof(network[0]) ? network[s->network.state] : network[0], s->network.seconds,
         s->ntp.available ? "true" : "false", s->ntp.configured ? "true" : "false", s->ntp.sampled ? "true" : "false",
         s->ntp.synced ? "true" : "false", s->ntp.pending ? "true" : "false", s->ntp.requesting ? "true" : "false", s->ntp.retry ? "true" : "false",
+        s->ntp.failed ? "true" : "false",
         s->ntp.sample_age, s->ntp.sync_age, s->ntp.offset);
     return length < 0 || (size_t)length >= capacity ? -1 : length;
 }

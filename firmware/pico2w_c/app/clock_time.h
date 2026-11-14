@@ -6,6 +6,8 @@ bool clock_utc_to_datetime(uint64_t epoch, ds1302_datetime_t *out);
 bool clock_datetime_to_utc(const ds1302_datetime_t *value, uint64_t *epoch);
 int clock_berlin_offset(uint64_t epoch);
 bool clock_berlin_datetime(uint64_t epoch, ds1302_datetime_t *out);
+// Civil RTC time: reject the missing spring hour; repeated autumn times are valid.
+bool clock_berlin_local_valid(const ds1302_datetime_t *local);
 typedef struct {
     bool allow_boundary;
     uint64_t suppress_before;

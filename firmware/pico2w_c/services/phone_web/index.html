@@ -30,7 +30,7 @@
   .weekdays { display: grid; grid-template-columns: repeat(auto-fit, minmax(4.5rem, 1fr)); gap: .75rem; padding: .4rem 0; }
   #settings-controls > div { display: grid; align-items: end; gap: .7rem; }
   #settings-controls > div { grid-template-columns: minmax(0, 1fr); }
-  #controls > div { display: flex; flex-wrap: wrap; gap: .5rem; }
+  #controls > div, #clock-controls > div { display: flex; flex-wrap: wrap; gap: .5rem; }
   #controls .timer-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; width: 100%; max-width: 25rem; margin: .5rem auto; }
   .timer-column { min-width: 0; text-align: center; }
   .timer-column > span { display: block; color: var(--muted); font-size: .85rem; margin-bottom: .5rem; }
@@ -203,6 +203,20 @@
     <p>Close settings on the clock to change these options. Stop playback or the timer before changing language, audio outputs, timer or announcement options.</p>
     <p id="save-status" role="status"></p>
   </form>
+  <form id="clock-controls" hidden>
+    <h2>Date and time</h2>
+    <p>Local time uses Europe/Berlin. Stop audio and the timer, and close physical editors before setting the clock.</p>
+    <label>Date <input name="date" type="date" min="2000-01-01" max="2099-12-31" required></label>
+    <label>Time <input name="time" type="time" step="1" required></label>
+    <div>
+      <button type="button" data-clock-action="reload">Use clock time</button>
+      <button type="button" data-clock-action="phone">Use phone time (Berlin)</button>
+      <button type="button" data-clock-action="set">Set date and time</button>
+    </div>
+    <p>Edited fields stay unchanged while live time continues above. Review and confirm both together. NTP remains enabled and may correct a manual setting at its next hourly update or after reconnection.</p>
+    <div><button type="button" data-clock-action="sync">Synchronize now (NTP)</button></div>
+    <p id="clock-status" role="status"></p>
+  </form>
   <form id="alarm-controls" hidden>
     <h2>Alarms</h2>
     <p>Stop playback or the timer and close editors on the clock before applying records. Times use Europe/Berlin. Music - random track chooses once per occurrence; Test previews specific tracks only.</p>
@@ -286,7 +300,7 @@
       (["connecting", "address", "retry"].includes(network.state) ? ` ${network.seconds}s` : ""));
     const ntp = overview.ntp || {};
     let sync = !ntp.available ? "Unavailable" : !ntp.configured ? "Not configured" :
-      ntp.retry ? "Clock update failed; retry pending" : ntp.pending ? "Clock update waiting for idle" : ntp.requesting ? "Requesting time reference" :
+      ntp.failed ? "Latest NTP request failed; retry pending" : ntp.retry ? "Clock update failed; retry pending" : ntp.pending ? "Clock update waiting for idle" : ntp.requesting ? "Requesting time reference" :
       ntp.synced ? "Synchronized" : ntp.sampled ? "Time reference received" : "Waiting for time reference";
     if (ntp.synced && Number.isFinite(ntp.sync_age)) sync += ` · last synchronized ${duration(ntp.sync_age)} ago`;
     if (network.mode === "direct") sync = "Direct mode · " + (ntp.synced ? sync : "RTC only");
@@ -320,6 +334,9 @@
   const alarmLiveHint = document.getElementById("alarm-live-hint");
   const soundToggle = document.getElementById("sound-toggle");
   const controlHint = document.getElementById("control-hint");
+  const clockControls = document.getElementById("clock-controls");
+  const clockStatus = document.getElementById("clock-status");
+  let clockDirty = false;
   const controlMessages = {
     conflict: "State changed. Review the current status and try again.",
     no_timer_sound: "Timer completion audio has already ended.",
@@ -328,7 +345,10 @@
     rtc_unavailable: "Clock time/date is unavailable.", no_alarm: "No upcoming alarm to announce.",
     editing: "Close settings or the alarm editor on the clock.", timer_busy: "Wait for the timer or cancel it first.",
     alarm_busy: "A ringing alarm has priority.", player_busy: "Stop and close the music player first.",
-    audio_busy: "Wait for the current audio to finish.", unavailable: "Current device status is unavailable."
+    audio_busy: "Wait for the current audio to finish.", unavailable: "Current device status is unavailable.",
+    network_unavailable: "NTP needs a configured, connected home Wi-Fi network.",
+    rtc_write_failed: "RTC write/readback failed. The clock setting was not confirmed.",
+    invalid_time: "Invalid date/time or a missing Europe/Berlin hour at the spring clock change."
   };
   function controlReason(action) {
     const overview = live?.overview;
@@ -463,6 +483,29 @@
     }
     playerControls.hidden = !allowed;
     settingsControls.hidden = !allowed;
+    clockControls.hidden = !allowed;
+    const clockIdle = Boolean(live?.clock_control && live?.settings?.idle && !live?.settings?.editing);
+    for (const field of clockControls.querySelectorAll("input, button")) {
+      field.disabled = busy || Boolean(pending) || !clockIdle || settingChanges.size>0 || dirtySettings.size>0 ||
+        (field.dataset.clockAction === "reload" && !live?.overview?.rtc_valid) ||
+        (field.dataset.clockAction === "sync" && (!live?.overview?.ntp?.available ||
+          !live?.overview?.ntp?.configured || live?.overview?.network?.mode!=="home" ||
+          live?.overview?.network?.state!=="ready" || live?.overview?.ntp?.requesting || live?.overview?.ntp?.pending));
+    }
+    if(!clockDirty && live?.overview?.rtc_valid && !busy && !pending) {
+      clockControls.elements.date.value=live.overview.date;
+      clockControls.elements.time.value=live.time;
+    }
+    clockStatus.textContent = !live?.clock_control ? "Clock controls unavailable in this firmware." :
+      !clockIdle ? "Wait for idle audio and close physical editors." :
+      live?.overview?.network?.mode!=="home" ? "Direct mode: manual setting available; NTP needs home Wi-Fi." :
+      !live?.overview?.ntp?.configured || !live?.overview?.ntp?.available ? "NTP is unavailable or not configured." :
+      live?.overview?.ntp?.failed ? "Latest NTP request failed. RTC continues; retry now or wait for automatic retry." :
+      live?.overview?.ntp?.retry ? "RTC update failed; an automatic retry is pending." :
+      live?.overview?.ntp?.pending ? "Time reference received; waiting to update RTC." :
+      live?.overview?.ntp?.requesting ? "Requesting an NTP time reference..." :
+      live?.overview?.ntp?.synced ? "NTP synchronized; see live status for last update." :
+      "NTP has not yet confirmed synchronization; see live status.";
     quickControls.hidden = !allowed || !live?.overview;
     soundToggle.textContent = live?.overview?.sound_on ? "Turn sound off" : "Turn sound on";
     for (const button of quickControls.querySelectorAll("button")) {
@@ -636,6 +679,38 @@
     const action = field.dataset.playerOption;
     if (!(action === "mode" ? [0,1,2] : [0,15,30,60,90]).includes(value)) return;
     await sendCommand("player", action, value);
+  });
+  clockControls.addEventListener("submit", event => event.preventDefault());
+  clockControls.addEventListener("input", () => {clockDirty=true;});
+  function clockDraftSeconds() {
+    const date=clockControls.elements.date.value, time=clockControls.elements.time.value;
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}(:\d{2})?$/.test(time)) return null;
+    const [year,month,day]=date.split("-").map(Number), [hour,minute,second=0]=time.split(":").map(Number);
+    const epoch=Date.UTC(year,month-1,day,hour,minute,second), d=new Date(epoch);
+    if(year<2000 || year>2099 || d.getUTCFullYear()!==year || d.getUTCMonth()!==month-1 ||
+      d.getUTCDate()!==day || d.getUTCHours()!==hour || d.getUTCMinutes()!==minute || d.getUTCSeconds()!==second) return null;
+    return epoch/1000; // Packed civil time, independent of this browser's time zone.
+  }
+  clockControls.addEventListener("click", async event => {
+    const button=event.target, action=button.dataset.clockAction;
+    if(!action || button.disabled) return;
+    if(action==="reload") {clockDirty=false;updateControls();return;}
+    if(action==="phone") {
+      try {
+        const parts=new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Berlin",year:"numeric",month:"2-digit",day:"2-digit",
+          hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).formatToParts(new Date());
+        const v=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+        clockControls.elements.date.value=`${v.year}-${v.month}-${v.day}`;
+        clockControls.elements.time.value=`${v.hour}:${v.minute}:${v.second}`;
+        clockDirty=true;feedback.textContent="Phone time copied in Europe/Berlin. Review and press Set date and time.";
+      } catch {feedback.textContent="This browser cannot convert phone time to Europe/Berlin. Enter the date/time manually.";}
+      return;
+    }
+    if(action==="sync") {await sendCommand("clock","sync",0);return;}
+    if(action!=="set" || !clockControls.reportValidity()) return;
+    const value=clockDraftSeconds();
+    if(value==null) {feedback.textContent="Enter a valid date/time from 2000 through 2099.";return;}
+    await sendCommand("clock","set",value);
   });
   settingsControls.addEventListener("submit", event => event.preventDefault());
   quickControls.addEventListener("submit", event => event.preventDefault());
@@ -894,11 +969,17 @@
       labels.output.textContent = data.output;
       if (pending && data.epoch === pending.epoch && data.command_id === pending.id &&
           data.command_nonce === pending.nonce && data.command_result !== "pending" &&
+          (pending.target !== "clock" || data.command_result !== "applied" || data.settings?.snapshot_id >= pending.id) &&
           (pending.target !== "player" || !["mode","sleep"].includes(pending.action) ||
             data.command_result !== "applied" || data.settings?.snapshot_id >= pending.id) &&
           (pending.target !== "settings" && pending.target !== "control" && pending.action !== "stop_sound" && !pending.editor || data.command_result !== "applied" ||
             data.settings?.snapshot_id >= pending.id)) {
-        if (pending.editor) {
+        if (pending.target === "clock") {
+          feedback.textContent = data.command_result === "applied" ?
+            pending.action === "sync" ? "NTP request queued. Watch synchronization status for completion." : "Date and time set." :
+            controlMessages[data.command_result] || "Clock change refused. Stop audio/timers and close physical editors.";
+          if(data.command_result === "applied" && pending.action === "set") clockDirty=false;
+        } else if (pending.editor) {
           const messages = {applied: "Record applied.", conflict: "Record changed elsewhere. Reload and review it.",
             blocked: "Record not applied. Close the clock editors and stop audio or the timer."};
           feedback.textContent = messages[data.command_result] || "Check the record on the clock.";

@@ -1541,6 +1541,31 @@ static bool menu_is_date_edit(void) {
     return menu_state >= MENU_EDIT_DATE_D && menu_state <= MENU_EDIT_DATE_Y;
 }
 
+static bool rtc_refresh_requested;
+static bool rtc_apply_local(const ds1302_datetime_t *local, bool manual, bool dst_change) {
+    uint64_t previous=0, corrected=0;
+    ds1302_datetime_t old;
+    if (!clock_datetime_to_utc(local,&corrected) ||
+        (manual && !clock_berlin_local_valid(local))) return false;
+    bool have_old=ds1302_read_datetime(&old) && clock_datetime_to_utc(&old,&previous);
+    uint64_t difference=have_old ? (previous>corrected?previous-corrected:corrected-previous) : UINT64_MAX;
+    if ((manual || difference>1) && !ds1302_write_datetime(local)) return false;
+    if (manual || difference>5) {
+        clock_adjustment_t adjustment=clock_adjustment_plan(have_old,previous,corrected,dst_change);
+        rtc_replay_guard_until=adjustment.suppress_before;
+        auto_boot_seeded=adjustment.allow_boundary;
+        auto_seen_key_valid=false;
+        alarm_boot_seeded=adjustment.allow_boundary;
+        alarm_scheduler_init(&alarm_scheduler);
+        if(manual) birthday_rtc_primed=false;
+    }
+#ifdef CLOCK_ENABLE_WIFI
+    if(manual) network_time_manual_adjusted();
+#endif
+    rtc_refresh_requested=true;
+    return true;
+}
+
 static bool menu_write_rtc(bool date_only) {
     ds1302_datetime_t fresh = {0};
     if (!ds1302_read_datetime(&fresh)) {
@@ -1561,7 +1586,11 @@ static bool menu_write_rtc(bool date_only) {
         puts("[RTC] Save refused: invalid datetime");
         return false;
     }
-    if (!ds1302_write_datetime(&fresh)) {
+    if (!clock_berlin_local_valid(&fresh)) {
+        puts("[RTC] Save refused: nonexistent Europe/Berlin local time");
+        return false;
+    }
+    if (!rtc_apply_local(&fresh,true,false)) {
         puts("[RTC] RTC write/readback failed; inspect rtc-debug");
         return false;
     }
@@ -2467,11 +2496,39 @@ static phone_command_result_t service_phone_control(const phone_command_t *reque
     return PHONE_COMMAND_AUDIO_BUSY;
 }
 
+static phone_command_result_t service_phone_clock(const phone_command_t *request) {
+    if (!phone_settings_idle()) return PHONE_COMMAND_BLOCKED;
+    if(request->action==PHONE_CLOCK_SYNC) {
+#ifdef CLOCK_ENABLE_WIFI
+        network_reference_status_t reference=network_time_reference_status(to_ms_since_boot(get_absolute_time()));
+        if(!reference.available || !reference.configured || phone_web_direct() ||
+            network_time_home_status(to_ms_since_boot(get_absolute_time())).state!=NETWORK_HOME_READY)
+            return PHONE_COMMAND_NETWORK_UNAVAILABLE;
+        network_time_request();
+        return PHONE_COMMAND_APPLIED; // Request queued, not proof of successful synchronization.
+#else
+        return PHONE_COMMAND_NETWORK_UNAVAILABLE;
+#endif
+    }
+    ds1302_datetime_t local;
+    if(request->action!=PHONE_CLOCK_SET || !clock_utc_to_datetime(request->value,&local) ||
+        !clock_berlin_local_valid(&local)) return PHONE_COMMAND_INVALID_TIME;
+    if(!rtc_apply_local(&local,true,false)) return PHONE_COMMAND_RTC_WRITE_FAILED;
+    printf("[RTC] Web set %02u.%02u.%04u %02u:%02u:%02u Europe/Berlin\n",
+        (unsigned)local.day,(unsigned)local.month,(unsigned)local.year,
+        (unsigned)local.hour,(unsigned)local.minute,(unsigned)local.second);
+    return PHONE_COMMAND_APPLIED;
+}
+
 static void service_phone_command(uint64_t now) {
     phone_command_t request;
     if (!phone_web_command_pending(&request)) return;
     if (request.action >= PHONE_SET_ALARM) {
         phone_web_command_complete(request.id, service_phone_schedule(&request));
+        return;
+    }
+    if (request.action >= PHONE_CLOCK_SET) {
+        phone_web_command_complete(request.id, service_phone_clock(&request));
         return;
     }
     if (request.action >= PHONE_SOUND_SET) {
@@ -5100,27 +5157,15 @@ int main(void) {
             join_allowed = network_idle && (menu_state == MENU_CLOSED || menu_state == MENU_PHONE_WEB ||
                 menu_state == MENU_PHONE_PAIR_CODE || menu_state == MENU_PHONE_CONFIRM);
 #endif
-            ds1302_datetime_t local, old;
+            ds1302_datetime_t local;
             if (network_time_service(now,idle,join_allowed,&local)) {
-                uint64_t previous=0, corrected=0;
-                bool have_old=ds1302_read_datetime(&old) && clock_datetime_to_utc(&old,&previous);
-                clock_datetime_to_utc(&local,&corrected);
-                uint64_t difference=have_old ? (previous>corrected?previous-corrected:corrected-previous) : UINT64_MAX;
-                bool ok=difference<=1 || ds1302_write_datetime(&local);
-                if (ok && difference>5) {
-                    clock_adjustment_t adjustment=clock_adjustment_plan(
-                        have_old,previous,corrected,network_time_is_dst_change());
-                    rtc_replay_guard_until=adjustment.suppress_before;
-                    auto_boot_seeded=adjustment.allow_boundary;
-                    auto_seen_key_valid=false;
-                    alarm_boot_seeded=adjustment.allow_boundary;
-                    alarm_scheduler_init(&alarm_scheduler);
-                }
+                bool ok=rtc_apply_local(&local,false,network_time_is_dst_change());
                 network_time_applied(ok);
                 next_rtc_ms=0;
             }
         }
 #endif
+        if (rtc_refresh_requested) {next_rtc_ms=0;rtc_refresh_requested=false;}
         if (now >= next_rtc_ms) {
             next_rtc_ms = now + 1000u;
             ds1302_datetime_t dt = {0};

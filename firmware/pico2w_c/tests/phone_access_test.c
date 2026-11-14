@@ -165,6 +165,26 @@ int main(void) {
         assert(announcements.result==PHONE_COMMAND_APPLIED);
     }
 
+    phone_access_t clock={0};phone_access_reset(&clock,24);clock.settings.home_trusted=1;
+    assert(phone_access_clock(&clock,"- 24 1 51 set 946684799",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_clock(&clock,"- 24 1 51 set 4102444800",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_clock(&clock,"- 24 1 51 sync 1",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_clock(&clock,"- 24 1 51 set 946684800",PHONE_SCOPE_DIRECT,true)==PHONE_DENIED);
+    assert(phone_access_control(&clock,"- 24 1 51 set 946684800",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_settings(&clock,"- 24 1 51 sync 0",PHONE_SCOPE_HOME,true)==PHONE_INVALID);
+    assert(phone_access_clock(&clock,"- 24 1 51 set 946684800",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(clock.last.action==PHONE_CLOCK_SET && clock.last.value==946684800);
+    clock.result=PHONE_COMMAND_APPLIED;
+    assert(phone_access_clock(&clock,"- 24 1 51 set 946684800",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(clock.result==PHONE_COMMAND_APPLIED);
+    assert(phone_access_clock(&clock,"- 24 2 52 set 4102444799",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    clock.result=PHONE_COMMAND_APPLIED;
+    assert(phone_access_clock(&clock,"- 24 3 53 sync 0",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(clock.last.action==PHONE_CLOCK_SYNC);
+    clock.result=PHONE_COMMAND_APPLIED;
+    assert(phone_access_clock(&clock,"- 24 3 53 sync 0",PHONE_SCOPE_HOME,true)==PHONE_OK);
+    assert(clock.result==PHONE_COMMAND_APPLIED);
+
     phone_access_t settings = {0};
     phone_access_reset(&settings, 30);
     assert(phone_access_settings(&settings, "- 30 1 40 volume_local 15", PHONE_SCOPE_HOME, true) == PHONE_DENIED);

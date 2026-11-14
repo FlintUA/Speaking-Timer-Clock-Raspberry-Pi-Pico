@@ -45,6 +45,17 @@ int clock_berlin_offset(uint64_t epoch) {
 bool clock_berlin_datetime(uint64_t epoch, ds1302_datetime_t *out) {
     return clock_utc_to_datetime(epoch+(unsigned)clock_berlin_offset(epoch),out);
 }
+bool clock_berlin_local_valid(const ds1302_datetime_t *local) {
+    uint64_t wall;
+    if (!clock_datetime_to_utc(local,&wall)) return false;
+    for (unsigned offset=3600; offset<=7200; offset+=3600) {
+        ds1302_datetime_t candidate;
+        uint64_t roundtrip;
+        if (clock_berlin_datetime(wall-offset,&candidate) &&
+            clock_datetime_to_utc(&candidate,&roundtrip) && roundtrip==wall) return true;
+    }
+    return false;
+}
 clock_adjustment_t clock_adjustment_plan(bool have_previous, uint64_t previous,
                                          uint64_t corrected, bool dst_change) {
     if (!have_previous) return (clock_adjustment_t){false,0};

@@ -28,7 +28,7 @@ function createForm(id) {
     }
   };
 }
-for (const id of ["settings-controls", "alarm-controls", "birthday-controls"]) elements.set(id, createForm(id));
+for (const id of ["settings-controls", "alarm-controls", "birthday-controls", "clock-controls"]) elements.set(id, createForm(id));
 function getElementById(id) {
   if (!elements.has(id)) elements.set(id, {
     value: "0", dataset: {}, handlers: {}, querySelectorAll: () => [],
@@ -49,12 +49,13 @@ const state = {
   firmware: {name: "Speaking Clock", board: "pico2_w", version: "1.2.3+4.gabcdef0", build: "abcdef012345-bt-mp3-wifi-phone", author: "FlintUA"},
   epoch: 123, command_id: 0, command_nonce: 0, command_result: "none", home_trusted: true,
   timer_running: false, timer_seconds: 60, player: "Closed", output: "LOCAL", settings: preferences,
+  clock_control:true,
   alarms: Array(5).fill(alarm), birthdays: Array(15).fill(birthday)
 };
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const posts = [], writes = [];
 const controlCalls = [];
-let nextControlResult = null, nextSettingsResult = null;
+let nextControlResult = null, nextSettingsResult = null, nextClockResult=null;
 let lastBody = "", dropResponses = 0, rejectOnce = false, failStatusReads = 0;
 const quickButtons = ["sound", "say_time", "say_date", "next_alarm"].map((action,index) => {
   const button=getElementById(["sound-toggle","say-time","say-date","say-next-alarm"][index]);
@@ -69,6 +70,9 @@ const timerButtons=["set","start","cancel","stop_sound"].map(action=>action==="s
 timerButtons[3].dataset.action="stop_sound";
 getElementById("controls").querySelectorAll=()=>timerButtons;
 getElementById("controls").reportValidity=()=>true;
+const clockForm=getElementById("clock-controls");
+const clockButtons=["reload","phone","set","sync"].map(clockAction=>({dataset:{clockAction}}));
+clockForm.querySelectorAll=()=>[...Object.values(clockForm.elements),...clockButtons];
 const document = {getElementById, activeElement: null, addEventListener() {}};
 const context = vm.createContext({
   Date, AbortController, document, setTimeout, clearTimeout,
@@ -78,7 +82,7 @@ const context = vm.createContext({
       if (failStatusReads) { --failStatusReads; throw new Error("Status temporarily unavailable"); }
       return {ok: true, json: async () => structuredClone(state)};
     }
-    assert(["/settings", "/player", "/control", "/timer"].includes(url));
+    assert(["/settings", "/player", "/control", "/timer", "/clock"].includes(url));
     posts.push(options.body);
     if (rejectOnce) {
       rejectOnce = false;
@@ -93,6 +97,13 @@ const context = vm.createContext({
       state.command_id = Number(fields[2]);
       state.command_nonce = Number(fields[3]);
       state.command_result = "applied";
+      if(url==="/clock") {
+        if(nextClockResult){state.command_result=nextClockResult;nextClockResult=null;}
+        else if(fields[4]==="set") {
+          const iso=new Date(Number(fields[5])*1000).toISOString();state.overview.date=iso.slice(0,10);state.time=iso.slice(11,19);
+          state.overview.rtc_valid=true;state.overview.ntp.synced=false;
+        } else {state.overview.ntp.requesting=true;}
+      }
       if (url === "/settings") {
         if(nextSettingsResult) {state.command_result=nextSettingsResult;nextSettingsResult=null;}
         else preferences[fields[4]] = Number(fields[5]);
@@ -560,6 +571,33 @@ async function settled() {
   preferences.idle=true;preferences.editing=true;await update();for(const name of announcements)assert(form.elements[name].disabled);
   preferences.editing=false;for(const name of announcements)delete preferences[name];await update();
   for(const name of announcements)assert(form.elements[name].disabled); // Older firmware metadata absent.
+  preferences.idle=true;state.player="Closed";state.clock_control=true;
+  state.overview.rtc_valid=true;state.overview.date="2026-11-14";state.time="08:20:30";
+  state.overview.network={mode:"home",state:"ready"};
+  state.overview.ntp={available:true,configured:true,synced:true};
+  await update();assert(!clockButtons[2].disabled && !clockButtons[3].disabled);
+  assert.equal(clockForm.elements.date.value,"2026-11-14");
+  clockForm.elements.date.value="2028-02-29";clockForm.elements.time.value="12:34:56";
+  clockForm.handlers.input();await update();assert.equal(clockForm.elements.date.value,"2028-02-29");
+  await clockForm.handlers.click({target:clockButtons[2]});await settled();await update();
+  assert.equal(state.overview.date,"2028-02-29");assert.equal(state.time,"12:34:56");
+  const clockWrites=writes.filter(w=>w.field==="set").length;
+  clockForm.elements.date.value="2027-02-29";clockForm.handlers.input();
+  await clockForm.handlers.click({target:clockButtons[2]});assert.equal(writes.filter(w=>w.field==="set").length,clockWrites);
+  clockForm.elements.date.value="2028-03-26";clockForm.elements.time.value="02:30:00";
+  nextClockResult="invalid_time";await clockForm.handlers.click({target:clockButtons[2]});await settled();await update();
+  assert(getElementById("feedback").textContent.includes("spring clock change"));
+  assert.equal(clockForm.elements.time.value,"02:30:00");
+  await clockForm.handlers.click({target:clockButtons[0]});assert.equal(clockForm.elements.time.value,"12:34:56");
+  await clockForm.handlers.click({target:clockButtons[1]});assert(/^\d{4}-\d{2}-\d{2}$/.test(clockForm.elements.date.value));
+  assert(getElementById("feedback").textContent.includes("Review"));
+  await clockForm.handlers.click({target:clockButtons[3]});await settled();await update();
+  assert(clockButtons[3].disabled);assert(getElementById("clock-status").textContent.includes("Requesting"));
+  state.overview.ntp.requesting=false;state.overview.ntp.failed=true;await update();
+  assert(!clockButtons[3].disabled && getElementById("clock-status").textContent.includes("failed"));
+  state.overview.network.mode="direct";await update();assert(clockButtons[3].disabled && !clockButtons[2].disabled);
+  preferences.idle=false;await update();assert(clockButtons[2].disabled);
+  preferences.idle=true;state.clock_control=false;await update();assert(clockButtons[2].disabled && clockButtons[3].disabled);
   console.log("phone_sliders_test: PASS");
 })().catch(error => {
   console.error(error);

@@ -165,4 +165,6 @@ Simple Settings controls now apply automatically; Apply remains for complete ala
 
 Browser playback mode and sleep presets are installed and generally user-accepted as of November 14. See [player options](doc/WEB_PLAYER_OPTIONS.md).
 
-Automatic-announcement and quiet-hour browser controls are implemented in the next candidate; installation and user acceptance pending. See [announcement options](doc/WEB_ANNOUNCEMENTS.md).
+Automatic-announcement and quiet-hour browser controls are installed and generally user-accepted as of November 14. See [announcement options](doc/WEB_ANNOUNCEMENTS.md).
+
+Date/time setting and explicit NTP requests are implemented in the next candidate; installation and user acceptance pending. See [clock controls](doc/WEB_CLOCK.md).

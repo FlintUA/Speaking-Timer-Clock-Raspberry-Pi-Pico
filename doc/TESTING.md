@@ -254,3 +254,7 @@ See [player options](WEB_PLAYER_OPTIONS.md) for immediate mode selection, sleep 
 ## Browser automatic announcements and quiet hours
 
 Follow [announcement acceptance](WEB_ANNOUNCEMENTS.md). Check runtime automatic OFF versus reboot ON, saved mode/half-hour/exact/quiet preferences, daytime/overnight/equal-hour ranges, physical-to-browser reflection and normal timer/alarm availability. Do not infer beep acoustic acceptance from status or software tests. Installation and user acceptance pending.
+
+## Browser clock setting and NTP
+
+Follow [clock-control acceptance](WEB_CLOCK.md). Confirm deliberate whole-date/time apply, preserved drafts, HOME sync versus direct mode, manual stale-reference invalidation and scheduler replay guards. Installation verification is read-only and must not change RTC for a test. Real time-jump/hardware/network-failure scenarios remain separate acceptance.
